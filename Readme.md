@@ -289,6 +289,12 @@ erDiagram
         boolean is_active
     }
 
+    user_branches {
+        serial id PK
+        integer user_id FK
+        varchar branches_code FK
+    }
+
     tenants {
         serial id PK
         varchar branch_code FK, UK
