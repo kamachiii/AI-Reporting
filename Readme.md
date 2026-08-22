@@ -291,7 +291,7 @@ erDiagram
 
     tenants {
         serial id PK
-        varchar branch_code FK_UK
+        varchar branch_code FK, UK
         varchar db_host
         integer db_port
         varchar db_name
