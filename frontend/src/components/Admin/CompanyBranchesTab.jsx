@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { createPortal } from 'react-dom'; 
-import { motion, AnimatePresence } from 'framer-motion';
+import { createPortal } from 'react-dom';
+import { motion } from 'framer-motion';
 import { api } from '../../services/api';
 import {
   Plus, CheckCircle, XCircle, X, Search,
@@ -166,8 +166,6 @@ export default function CompanyBranchesTab() {
     companies.forEach(c => map[c.code] = c);
     return map;
   }, [companies]);
-
-  const activeCompanies = useMemo(() => companies.filter(c => c.is_active), [companies]);
 
   const handleTabChange = (tab) => {
     setActiveTab(tab);
@@ -364,25 +362,6 @@ export default function CompanyBranchesTab() {
       notify.error(e.response?.data?.detail || 'Gagal menyimpan cabang');
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleToggleBranch = async (branch) => {
-    setProcessingCode(branch.code);
-    try {
-      const newStatus = !branch.is_active;
-      await api.updateBranch(branch.code, {
-        name: branch.name,
-        company_code: branch.company_code,
-        address: branch.address || '',
-        is_active: newStatus,
-      });
-      notify.success(`Cabang berhasil ${newStatus ? 'diaktifkan' : 'dinonaktifkan'}`);
-      await fetchData();
-    } catch (e) {
-      notify.error('Gagal mengubah status cabang');
-    } finally {
-      setProcessingCode(null);
     }
   };
 

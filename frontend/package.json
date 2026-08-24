@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "lint": "eslint .",
+    "lint": "eslint src --max-warnings 99",
+    "lint:strict": "eslint src --max-warnings 0",
     "preview": "vite preview"
   },
   "dependencies": {

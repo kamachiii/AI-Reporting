@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  frontend-lint-build:
+    name: Frontend lint + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      # ERROR-level issues (no-undef penyebab white screen, unused vars, dll)
+      # menggagalkan CI. Warning pedantic diizinkan.
+      - name: Lint (errors block, warnings allowed)
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Production build
+        working-directory: frontend
+        run: npm run build
+
+  backend-syntax-check:
+    name: Backend syntax + import check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Create placeholder .env (config validation expects real values)
+        run: |
+          echo "CORE_DB_HOST=localhost" >> .env
+          echo "CORE_DB_PORT=5433" >> .env
+          echo "CORE_DB_NAME=ci-placeholder" >> .env
+          echo "CORE_DB_USER=postgres" >> .env
+          echo "CORE_DB_PASSWORD=postgres" >> .env
+          echo "JWT_SECRET_KEY=ci_placeholder_secret_key_0123456789abcdef" >> .env
+          python -c "from cryptography.fernet import Fernet; print('FERNET_KEY='+Fernet.generate_key().decode())" >> .env
+
+      - name: Compile all Python files
+        run: python -m compileall -q app init_db.py
+
+      - name: Import app (catches undefined refs & bad config)
+        run: python -c "from app.main import app; print('routes:', len(app.routes))"

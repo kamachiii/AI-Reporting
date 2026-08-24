@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../../services/api';
 import {
   Plus, CheckCircle, XCircle, Search,
-  Loader2, AlertTriangle, Trash2, Wifi, RefreshCw, X
+  Loader2, AlertTriangle, Trash2, Wifi, X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import PaginationBar from './common/PaginationBar';
@@ -20,7 +20,6 @@ export default function TenantsTab() {
   const [page, setPage] = useState(1);
   const [connectionStatus, setConnectionStatus] = useState({});
   const [showAddModal, setShowAddModal] = useState(false);
-  const [isTesting, setIsTesting] = useState(false);
   const [processingCode, setProcessingCode] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
   const debouncedSearch = useDebounce(searchTerm, 300);

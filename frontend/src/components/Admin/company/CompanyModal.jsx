@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Loader2 } from 'lucide-react';
-import { notify } from '../../../utils/notification';
 
 export default function CompanyModal({ isOpen, onClose, onSave, company, isSaving }) {
   const [form, setForm] = useState(
