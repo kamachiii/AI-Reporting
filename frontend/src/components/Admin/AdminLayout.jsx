@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Users, Database, Bot, FileText, LogOut, Building2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 

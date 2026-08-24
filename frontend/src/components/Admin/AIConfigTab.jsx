@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import ModelPickerModal from './ModelPickerModal';
 import { api } from '../../services/api';
 import {
-  Plus, X, CheckCircle, Eye, EyeOff,
+  Plus, X, CheckCircle, XCircle, Eye, EyeOff,
   RefreshCw, Trash2, Pencil, Info, Search, AlertTriangle, Loader2,
   Zap, Cpu, Wifi
 } from 'lucide-react';
