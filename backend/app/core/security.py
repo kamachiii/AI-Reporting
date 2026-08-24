@@ -53,11 +53,11 @@ async def require_admin_role(credentials: HTTPAuthorizationCredentials = Depends
     try:
         from app.core.database import get_core_pool
         pool = await get_core_pool()
-        row = await pool.fetchrow("SELECT role FROM users WHERE id = $1", user_id)
+        row = await pool.fetchrow("SELECT role, is_active FROM users WHERE id = $1", user_id)
     except Exception:
         # DB bermasalah: jangan biarkan request lewat hanya berdasarkan klaim token
         raise HTTPException(status_code=503, detail="Layanan verifikasi sedang tidak tersedia.")
-    if not row or row["role"] != "admin":
+    if not row or not row["is_active"] or row["role"] != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Akses ditolak: Memerlukan role 'admin'."

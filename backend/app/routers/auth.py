@@ -55,12 +55,17 @@ async def login(req: LoginRequest, request: Request):
         raise HTTPException(status_code=500, detail="Database connection error")
 
     user = await pool.fetchrow(
-        "SELECT id, username, password_hash, role FROM users WHERE username = $1",
+        "SELECT id, username, password_hash, role, is_active FROM users WHERE username = $1",
         req.username
     )
     if not user:
         attempts.append(now)
         raise HTTPException(status_code=401, detail="Username atau password salah")
+
+    if not user["is_active"]:
+        # Akun dinonaktifkan admin — pesan spesifik agar tidak membingungkan
+        attempts.append(now)
+        raise HTTPException(status_code=403, detail="Akun Anda dinonaktifkan. Hubungi administrator.")
 
     if not verify_password(req.password, user["password_hash"]):
         attempts.append(now)

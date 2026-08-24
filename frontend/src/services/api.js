@@ -107,6 +107,30 @@ export const api = {
   },
 
   // ==========================================
+  // 5. ADMIN: USERS
+  // ==========================================
+  getUsers: async () => {
+    const response = await apiClient.get('/admin/users');
+    return response.data;
+  },
+  createUser: async (data) => {
+    const response = await apiClient.post('/admin/users', data);
+    return response.data;
+  },
+  updateUser: async (id, data) => {
+    const response = await apiClient.put(`/admin/users/${id}`, data);
+    return response.data;
+  },
+  setUserStatus: async (id, is_active) => {
+    const response = await apiClient.put(`/admin/users/${id}/status`, { is_active });
+    return response.data;
+  },
+  deleteUser: async (id) => {
+    const response = await apiClient.delete(`/admin/users/${id}`);
+    return response.data;
+  },
+
+  // ==========================================
   // 4. ADMIN: AI CONFIGS & MODELS
   // ==========================================
   getAIConfigs: async () => {

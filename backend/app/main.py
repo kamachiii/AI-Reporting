@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 import logging
 
 from app.core.database import get_core_pool, close_core_pool, get_redis
-from app.routers import auth, admin
+from app.routers import auth, admin, users
 
 logging.basicConfig(level=logging.INFO)
 
@@ -37,6 +37,7 @@ app.add_middleware(
 # Register Routers
 app.include_router(auth.router)
 app.include_router(admin.router)
+app.include_router(users.router)
 
 @app.get("/")
 async def root():
