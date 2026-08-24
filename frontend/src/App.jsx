@@ -33,6 +33,11 @@ function App() {
         localStorage.removeItem('user_data');
       }
     }
+    // Notifikasi sesi kadaluarsa (di-set oleh interceptor api.js)
+    if (sessionStorage.getItem('session_expired')) {
+      sessionStorage.removeItem('session_expired');
+      toast('Sesi kamu sudah berakhir. Silakan login kembali.', { icon: '⏳' });
+    }
     setLoading(false);
   }, []);
 

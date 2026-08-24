@@ -79,7 +79,7 @@ export default function AdminLayout({ user, onLogout }) {
             </div>
             <div className="flex items-center gap-2">
               <span className="px-3 py-1 bg-primary/10 text-primary text-xs font-medium rounded-full">
-                Administrator
+                Administrator{user?.username ? ` · ${user.username}` : ''}
               </span>
             </div>
           </header>

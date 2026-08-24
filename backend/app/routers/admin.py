@@ -290,14 +290,22 @@ async def get_tenant_by_branch(branch_code: str, user: dict = Depends(require_ad
 async def create_tenant(payload: TenantCreate, user: dict = Depends(require_admin_role)):
     try:
         pool = await get_core_pool()
+        # Validasi cabang benar-benar ada (hindari FK violation 500 mentah)
+        branch_exists = await pool.fetchval("SELECT 1 FROM branches WHERE code = $1", payload.branch_code)
+        if not branch_exists:
+            raise HTTPException(status_code=404, detail=f"Cabang '{payload.branch_code}' tidak ditemukan. Buat cabang terlebih dahulu.")
         encrypted_pass = encrypt_credential(payload.db_password)
         await pool.execute("""
             INSERT INTO tenants (branch_code, db_host, db_port, db_name, db_username, db_password)
             VALUES ($1, $2, $3, $4, $5, $6)
         """, payload.branch_code, payload.db_host, payload.db_port, payload.db_name, payload.db_username, encrypted_pass)
         return {"message": "Tenant berhasil ditambahkan"}
+    except HTTPException:
+        raise
     except asyncpg.exceptions.UniqueViolationError:
         raise HTTPException(status_code=400, detail="Kode cabang ini sudah memiliki konfigurasi tenant")
+    except asyncpg.exceptions.ForeignKeyViolationError:
+        raise HTTPException(status_code=400, detail="Cabang tidak valid atau sudah terhapus")
     except Exception as e:
         logger.error(f"Error creating tenant: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -436,6 +444,9 @@ async def get_ai_configs(user: dict = Depends(require_admin_role)):
 @router.post("/ai-configs")
 async def create_ai_config(payload: AIConfigCreate, user: dict = Depends(require_admin_role)):
     try:
+        # Validasi: scope selain global wajib punya target_id
+        if payload.scope != "global" and not (payload.target_id and payload.target_id.strip()):
+            raise HTTPException(status_code=400, detail="Target ID wajib diisi untuk scope tenant/user")
         pool = await get_core_pool()
         encrypted_key = encrypt_credential(payload.api_key)
         target_id_val = payload.target_id if payload.target_id else None
@@ -444,6 +455,10 @@ async def create_ai_config(payload: AIConfigCreate, user: dict = Depends(require
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         """, payload.scope, target_id_val, payload.provider, payload.model, encrypted_key, payload.temperature, payload.api_type, payload.base_url)
         return {"message": "Konfigurasi AI berhasil disimpan"}
+    except HTTPException:
+        raise
+    except asyncpg.exceptions.UniqueViolationError:
+        raise HTTPException(status_code=400, detail="Konfigurasi dengan scope & target ini sudah ada")
     except Exception as e:
         logger.error(f"Error creating AI config: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -451,6 +466,9 @@ async def create_ai_config(payload: AIConfigCreate, user: dict = Depends(require
 @router.put("/ai-configs/{config_id}")
 async def update_ai_config(config_id: int, payload: AIConfigUpdate, user: dict = Depends(require_admin_role)):
     try:
+        # Validasi: scope selain global wajib punya target_id
+        if payload.scope != "global" and not (payload.target_id and payload.target_id.strip()):
+            raise HTTPException(status_code=400, detail="Target ID wajib diisi untuk scope tenant/user")
         pool = await get_core_pool()
         target_id_val = payload.target_id if payload.target_id else None
         

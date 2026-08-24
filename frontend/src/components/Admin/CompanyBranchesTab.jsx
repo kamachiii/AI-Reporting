@@ -131,6 +131,17 @@ export default function CompanyBranchesTab() {
       setBranches(formattedBranches);
       setTenantData(tenantDetails);
       setConnectionStatus(statuses);
+
+      // Status koneksi NYATA: tes tiap tenant yang terkonfigurasi
+      // (sebelumnya cuma asal db_host ada -> langsung diklaim 'Connected')
+      Object.keys(tenantDetails).forEach(async (code) => {
+        try {
+          const result = await api.testTenantConnection(code);
+          setConnectionStatus(prev => ({ ...prev, [code]: result.status }));
+        } catch {
+          setConnectionStatus(prev => ({ ...prev, [code]: 'disconnected' }));
+        }
+      });
     } catch (e) {
       notify.error('Gagal memuat data perusahaan & cabang');
     } finally {

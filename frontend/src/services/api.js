@@ -18,6 +18,22 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+// Interceptor response: sesi kadaluarsa / tidak valid -> auto logout.
+// Pengecualian: 401 dari endpoint login sendiri (salah password) TIDAK memicu logout.
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const isLoginCall = error.config?.url?.includes('/auth/login');
+    if (error.response?.status === 401 && !isLoginCall) {
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('user_data');
+      sessionStorage.setItem('session_expired', '1');
+      window.location.reload();
+    }
+    return Promise.reject(error);
+  }
+);
+
 export const api = {
   // ==========================================
   // 1. AUTH
