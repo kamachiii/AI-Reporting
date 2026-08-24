@@ -8,8 +8,20 @@ import AIConfigTab from './AIConfigTab';
 import UsersTab from './UsersTab';
 import AuditLogTab from './AuditLogTab';
 
+const TAB_IDS = ['company', 'tenants', 'ai', 'users', 'audit'];
+
 export default function AdminLayout({ user, onLogout }) {
   const [activeTab, setActiveTab] = useState('company');
+
+  // Navigasi antar-tab dari mana saja (mis. tombol di dalam toast):
+  // window.dispatchEvent(new CustomEvent('dms-navigate', { detail: 'tenants' }))
+  useEffect(() => {
+    const onNavigate = (e) => {
+      if (TAB_IDS.includes(e.detail)) setActiveTab(e.detail);
+    };
+    window.addEventListener('dms-navigate', onNavigate);
+    return () => window.removeEventListener('dms-navigate', onNavigate);
+  }, []);
 
   const tabs = [
     { id: 'company', label: 'Perusahaan & Cabang', icon: Building2 },

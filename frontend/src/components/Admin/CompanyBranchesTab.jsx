@@ -2,20 +2,23 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom'; 
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../../services/api';
-import { 
-  Plus, CheckCircle, XCircle, Box, X, Search, 
-  Loader2, Trash2, Wifi, Pencil, ToggleRight, ToggleLeft, 
+import {
+  Plus, CheckCircle, XCircle, X, Search,
+  Loader2, Trash2, Wifi, Pencil, ToggleRight, ToggleLeft,
   Link, Unlink, MoreVertical, Database,
-  ArrowUp, ArrowDown, ChevronsUpDown
+  ArrowUp, ArrowDown, ChevronsUpDown, AlertTriangle
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { notify } from '../../utils/notification';
 
 // Common & Modal Components
 import ConfirmationDialog from './common/ConfirmationDialog';
 import PaginationBar from './common/PaginationBar';
+import EmptyState from './common/EmptyState';
 import CompanyModal from './company/CompanyModal';
 import BranchModal from './branch/BranchModal';
 import TenantModal from './branch/TenantModal';
+import useDebounce from '../../hooks/useDebounce';
 
 const PAGE_SIZE = 15;
 
@@ -67,6 +70,7 @@ export default function CompanyBranchesTab() {
 
   // ---- TABLE CONTAINER REF ----
   const tableContainerRef = useRef(null);
+  const debouncedSearch = useDebounce(searchTerm, 300);
 
   // ---- SORTING STATE (BRANCH) ----
   const [sortConfig, setSortConfig] = useState({ key: 'code', direction: 'asc' });
@@ -180,20 +184,20 @@ export default function CompanyBranchesTab() {
   useEffect(() => {
     setCompanyPage(1);
     setBranchPage(1);
-  }, [searchTerm]);
+  }, [debouncedSearch]);
 
   const filteredCompanies = useMemo(() => {
-    if (!searchTerm) return companies;
-    const lower = searchTerm.toLowerCase();
-    return companies.filter(c => 
-      (c.code || '').toLowerCase().includes(lower) || 
+    if (!debouncedSearch) return companies;
+    const lower = debouncedSearch.toLowerCase();
+    return companies.filter(c =>
+      (c.code || '').toLowerCase().includes(lower) ||
       (c.name || '').toLowerCase().includes(lower)
     );
-  }, [companies, searchTerm]);
+  }, [companies, debouncedSearch]);
 
   const filteredBranches = useMemo(() => {
-    if (!searchTerm) return branches;
-    const lower = searchTerm.toLowerCase();
+    if (!debouncedSearch) return branches;
+    const lower = debouncedSearch.toLowerCase();
     return branches.filter(b => {
       const companyName = companiesByCode[b.company_code]?.name || '';
       return (
@@ -204,7 +208,7 @@ export default function CompanyBranchesTab() {
         (tenantData[b.code]?.db_host || '').toLowerCase().includes(lower)
       );
     });
-  }, [branches, searchTerm, companiesByCode, tenantData]);
+  }, [branches, debouncedSearch, companiesByCode, tenantData]);
 
   const companyTotalPages = Math.max(1, Math.ceil(filteredCompanies.length / PAGE_SIZE));
   const branchTotalPages = Math.max(1, Math.ceil(filteredBranches.length / PAGE_SIZE));
@@ -314,7 +318,24 @@ export default function CompanyBranchesTab() {
           notify.success('Perusahaan berhasil dihapus');
           await fetchData();
         } catch (e) {
-          notify.error(e.response?.data?.detail || 'Gagal menghapus perusahaan');
+          const detail = e.response?.data?.detail || 'Gagal menghapus perusahaan';
+          // Kalau ditolak karena masih ada tenant, tawarkan jalan pintas ke tab tenant
+          if (String(detail).toLowerCase().includes('tenant')) {
+            toast.custom((t) => (
+              <div className="bg-white border border-hairline shadow-lg rounded-lg p-4 flex items-start gap-3 max-w-md">
+                <span className="text-error mt-0.5"><AlertTriangle size={18} /></span>
+                <div className="flex-1 text-sm text-body">{detail}</div>
+                <button
+                  onClick={() => { toast.dismiss(t.id); window.dispatchEvent(new CustomEvent('dms-navigate', { detail: 'tenants' })); }}
+                  className="px-3 py-1.5 bg-primary text-white rounded-md text-xs font-medium hover:bg-primary-active whitespace-nowrap"
+                >
+                  Ke menu Tenant
+                </button>
+              </div>
+            ), { duration: 8000 });
+          } else {
+            notify.error(detail);
+          }
         } finally {
           setProcessingCode(null);
           setConfirmState(null);
@@ -508,10 +529,15 @@ export default function CompanyBranchesTab() {
           </div>
 
           {filteredCompanies.length === 0 ? (
-            <div className="bg-white rounded-xl border border-hairline p-10 flex flex-col items-center justify-center text-center text-muted">
-              <Box className="w-12 h-12 mb-3 text-hairline" />
-              <p className="font-medium text-ink">{companies.length === 0 ? 'Belum ada perusahaan' : 'Tidak ada hasil'}</p>
-            </div>
+            <EmptyState
+              variant="box"
+              title={companies.length === 0 ? 'Belum ada perusahaan' : 'Tidak ada hasil'}
+              description={
+                companies.length === 0
+                  ? 'Klik "Tambah Perusahaan" untuk mendaftarkan perusahaan pertama.'
+                  : 'Coba kata kunci lain.'
+              }
+            />
           ) : (
             <div className="bg-white rounded-xl border border-hairline overflow-hidden shadow-sm">
               <div ref={tableContainerRef}  className="overflow-x-auto">
@@ -568,10 +594,15 @@ export default function CompanyBranchesTab() {
           </div>
 
           {filteredBranches.length === 0 ? (
-            <div className="bg-white rounded-xl border border-hairline p-10 flex flex-col items-center justify-center text-center text-muted">
-              <Box className="w-12 h-12 mb-3 text-hairline" />
-              <p className="font-medium text-ink">{branches.length === 0 ? 'Belum ada cabang' : 'Tidak ada hasil'}</p>
-            </div>
+            <EmptyState
+              variant="plug"
+              title={branches.length === 0 ? 'Belum ada cabang' : 'Tidak ada hasil'}
+              description={
+                branches.length === 0
+                  ? 'Klik "Tambah Cabang" untuk mendaftarkan cabang pertama.'
+                  : 'Coba kata kunci lain.'
+              }
+            />
           ) : (
             <div className="bg-white rounded-xl border border-hairline overflow-hidden shadow-sm">
               <div ref={tableContainerRef}  className="overflow-x-auto">

@@ -1,13 +1,15 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import ModelPickerModal from './ModelPickerModal'; 
+import ModelPickerModal from './ModelPickerModal';
 import { api } from '../../services/api';
-import { 
-  Plus, Bot, X, CheckCircle, Eye, EyeOff, 
+import {
+  Plus, X, CheckCircle, Eye, EyeOff,
   RefreshCw, Trash2, Pencil, Info, Search, AlertTriangle, Loader2,
   Zap, Cpu, Wifi
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import EmptyState from './common/EmptyState';
+import useDebounce from '../../hooks/useDebounce';
 
 export default function AIConfigTab() {
   const [configs, setConfigs] = useState([]);
@@ -23,6 +25,7 @@ export default function AIConfigTab() {
   const [isTesting, setIsTesting] = useState(false);
   const [configToDelete, setConfigToDelete] = useState(null);
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
+  const debouncedSearch = useDebounce(searchTerm, 300);
 
   const [form, setForm] = useState({
     scope: 'global',
@@ -203,13 +206,26 @@ export default function AIConfigTab() {
   };
 
   const filteredConfigs = useMemo(() => {
-    if (!searchTerm) return configs;
-    const lower = searchTerm.toLowerCase();
-    return configs.filter(c => 
+    if (!debouncedSearch) return configs;
+    const lower = debouncedSearch.toLowerCase();
+    return configs.filter(c =>
       (c.provider || '').toLowerCase().includes(lower) ||
       (c.model || '').toLowerCase().includes(lower)
     );
-  }, [configs, searchTerm]);
+  }, [configs, debouncedSearch]);
+
+  // Keyboard: Esc menutup modal paling atas
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      if (isTesting || fetchingModels) return; // jangan tutup saat proses berjalan
+      if (configToDelete) setConfigToDelete(null);
+      else if (isModelPickerOpen) setIsModelPickerOpen(false);
+      else if (showModal) setShowModal(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [configToDelete, isModelPickerOpen, showModal, isTesting, fetchingModels]);
 
   // --- Skeleton Loader ---
   const SkeletonLoader = () => (
@@ -253,15 +269,15 @@ export default function AIConfigTab() {
       {loading ? (
         <SkeletonLoader />
       ) : filteredConfigs.length === 0 ? (
-        <div className="bg-white rounded-xl border border-hairline p-10 flex flex-col items-center justify-center text-center text-muted">
-          <Bot className="w-12 h-12 mb-3 text-hairline" />
-          <p className="font-medium text-ink">
-            {configs.length === 0 ? 'Belum ada konfigurasi AI' : 'Tidak ada hasil pencarian'}
-          </p>
-          <p className="text-sm mt-1">
-            {configs.length === 0 ? 'Klik tombol "Tambah Config AI" untuk menghubungkan provider AI.' : 'Coba gunakan kata kunci lain.'}
-          </p>
-        </div>
+        <EmptyState
+          variant="bot"
+          title={configs.length === 0 ? 'Belum ada konfigurasi AI' : 'Tidak ada hasil pencarian'}
+          description={
+            configs.length === 0
+              ? 'Klik "Tambah Config AI" untuk menghubungkan provider AI.'
+              : 'Coba gunakan kata kunci lain.'
+          }
+        />
       ) : (
         <div className="bg-white rounded-xl border border-hairline overflow-hidden shadow-sm">
           <div className="max-h-96 overflow-y-auto">

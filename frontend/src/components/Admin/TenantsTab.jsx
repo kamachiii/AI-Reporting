@@ -2,11 +2,13 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../../services/api';
 import {
-  Plus, CheckCircle, XCircle, Box, X, Search,
-  Loader2, AlertTriangle, Trash2, Wifi, RefreshCw
+  Plus, CheckCircle, XCircle, Search,
+  Loader2, AlertTriangle, Trash2, Wifi, RefreshCw, X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import PaginationBar from './common/PaginationBar';
+import EmptyState from './common/EmptyState';
+import useDebounce from '../../hooks/useDebounce';
 
 const PAGE_SIZE = 10;
 
@@ -21,6 +23,7 @@ export default function TenantsTab() {
   const [isTesting, setIsTesting] = useState(false);
   const [processingCode, setProcessingCode] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
+  const debouncedSearch = useDebounce(searchTerm, 300);
 
   // Form state for Add Tenant
   const [form, setForm] = useState({
@@ -52,14 +55,16 @@ export default function TenantsTab() {
   const testAllConnections = async (tenantList) => {
     const statuses = {};
     await Promise.all(tenantList.map(async (t) => {
+      // Tampilkan status 'checking' per baris selama tes berjalan (paralel)
+      setConnectionStatus(prev => ({ ...prev, [t.branch_code]: 'checking' }));
       try {
         const result = await api.testTenantConnection(t.branch_code);
         statuses[t.branch_code] = result.status;
       } catch (e) {
         statuses[t.branch_code] = 'disconnected';
       }
+      setConnectionStatus(prev => ({ ...prev, [t.branch_code]: statuses[t.branch_code] }));
     }));
-    setConnectionStatus(statuses);
   };
 
   const handleTestSingle = async (branch_code) => {
@@ -114,9 +119,9 @@ export default function TenantsTab() {
   // --- FILTER & PAGINATION ---
   const filteredTenants = useMemo(() => {
     let data = tenants;
-    if (searchTerm) {
-      const lower = searchTerm.toLowerCase();
-      data = data.filter(t => 
+    if (debouncedSearch) {
+      const lower = debouncedSearch.toLowerCase();
+      data = data.filter(t =>
         (t.branch_code || '').toLowerCase().includes(lower) ||
         (t.db_host || '').toLowerCase().includes(lower) ||
         (t.db_name || '').toLowerCase().includes(lower)
@@ -126,7 +131,7 @@ export default function TenantsTab() {
       data = data.filter(t => connectionStatus[t.branch_code] === statusFilter.toLowerCase());
     }
     return data;
-  }, [tenants, searchTerm, statusFilter, connectionStatus]);
+  }, [tenants, debouncedSearch, statusFilter, connectionStatus]);
 
   const totalPages = Math.max(1, Math.ceil(filteredTenants.length / PAGE_SIZE));
   const paginatedTenants = useMemo(() => {
@@ -135,11 +140,27 @@ export default function TenantsTab() {
   }, [filteredTenants, page]);
 
   // Reset page ketika search/filter berubah
-  useEffect(() => setPage(1), [searchTerm, statusFilter]);
+  useEffect(() => setPage(1), [debouncedSearch, statusFilter]);
   // Clamp page jika halaman saat ini melebihi total
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
+
+  // Keyboard: Esc menutup modal/dialog paling atas; "/" fokus ke pencarian
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        if (processingCode) return; // jangan tutup saat proses berjalan
+        if (confirmState) setConfirmState(null);
+        else if (showAddModal) setShowAddModal(false);
+      } else if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
+        e.preventDefault();
+        document.getElementById('tenant-search')?.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [confirmState, showAddModal, processingCode]);
 
   // --- Skeleton Loader ---
   const SkeletonLoader = () => (
@@ -165,8 +186,9 @@ export default function TenantsTab() {
         <div className="relative flex-1 max-w-sm w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
           <input
+            id="tenant-search"
             type="text"
-            placeholder="Cari kode cabang atau host..."
+            placeholder="Cari kode cabang atau host...  ( / )"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-9 pr-8 py-2 border border-hairline rounded-md bg-canvas text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -211,15 +233,15 @@ export default function TenantsTab() {
 
       {/* Table */}
       {filteredTenants.length === 0 ? (
-        <div className="bg-white rounded-xl border border-hairline p-10 flex flex-col items-center justify-center text-center text-muted">
-          <Box className="w-12 h-12 mb-3 text-hairline" />
-          <p className="font-medium text-ink">
-            {tenants.length === 0 ? 'Belum ada tenant terdaftar' : 'Tidak ada hasil pencarian'}
-          </p>
-          <p className="text-sm mt-1">
-            {tenants.length === 0 ? 'Klik tombol "Tambah Tenant" untuk mengkonfigurasi database cabang.' : 'Coba gunakan kata kunci lain.'}
-          </p>
-        </div>
+        <EmptyState
+          variant="plug"
+          title={tenants.length === 0 ? 'Belum ada tenant terdaftar' : 'Tidak ada hasil pencarian'}
+          description={
+            tenants.length === 0
+              ? 'Klik tombol "Tambah Tenant" untuk menghubungkan database cabang.'
+              : 'Coba gunakan kata kunci lain.'
+          }
+        />
       ) : (
         <div className="bg-white rounded-xl border border-hairline overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
@@ -246,8 +268,10 @@ export default function TenantsTab() {
                     >
                       <td className="p-3 font-medium text-sm">{t.branch_code}</td>
                       <td className="p-3">
-                        {status === 'loading' ? (
-                          <span className="text-muted text-xs animate-pulse">Loading...</span>
+                        {status === 'checking' || status === 'loading' ? (
+                          <span className="inline-flex items-center text-muted text-xs">
+                            <Loader2 size={13} className="mr-1.5 animate-spin" /> Menguji…
+                          </span>
                         ) : status === 'connected' ? (
                           <span className="inline-flex items-center text-success text-xs">
                             <CheckCircle size={14} className="mr-1" /> Connected
@@ -262,7 +286,7 @@ export default function TenantsTab() {
                       <td className="p-3 flex gap-2">
                         <button
                           onClick={() => handleTestSingle(t.branch_code)}
-                          disabled={status === 'loading'}
+                          disabled={status === 'loading' || status === 'checking'}
                           className="text-muted hover:text-primary transition-colors disabled:opacity-50"
                           title="Test Koneksi"
                         >
