@@ -32,12 +32,6 @@ async def require_admin_role(credentials: HTTPAuthorizationCredentials = Depends
     token = credentials.credentials
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-        if payload.get("role") != "admin":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Akses ditolak: Memerlukan role 'admin'."
-            )
-        return payload
     except ExpiredSignatureError:
         # Token sudah kadaluarsa
         raise HTTPException(
@@ -50,3 +44,22 @@ async def require_admin_role(credentials: HTTPAuthorizationCredentials = Depends
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token tidak valid. Silakan login ulang."
         )
+
+    # Validasi user masih ada di DB dan role-nya masih admin.
+    # Tanpa ini, token lama tetap berlaku 24 jam setelah user dihapus/di-demote.
+    user_id = payload.get("user_id")
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token tidak valid.")
+    try:
+        from app.core.database import get_core_pool
+        pool = await get_core_pool()
+        row = await pool.fetchrow("SELECT role FROM users WHERE id = $1", user_id)
+    except Exception:
+        # DB bermasalah: jangan biarkan request lewat hanya berdasarkan klaim token
+        raise HTTPException(status_code=503, detail="Layanan verifikasi sedang tidak tersedia.")
+    if not row or row["role"] != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Akses ditolak: Memerlukan role 'admin'."
+        )
+    return payload

@@ -1,4 +1,5 @@
 import httpx
+import json
 from fastapi import HTTPException
 import logging
 
@@ -67,7 +68,7 @@ async def generate_json_filter(user_prompt: str, schema: dict, ai_config: dict):
             if resp.status_code != 200:
                 logger.error(f"AI API Error: {resp.text}")
                 raise HTTPException(status_code=503, detail="Layanan AI sedang tidak tersedia atau quota habis. Silakan hubungi admin.")
-            
+
             data = resp.json()
             # Ekstrak konten dari response (OpenAI vs Anthropic)
             content = ""
@@ -75,12 +76,19 @@ async def generate_json_filter(user_prompt: str, schema: dict, ai_config: dict):
                 content = data["choices"][0]["message"]["content"]
             elif api_type == "anthropic":
                 content = data["content"][0]["text"]
-            
+
             # Parse JSON yang dikembalikan AI
-            import json
             return json.loads(content)
+    except HTTPException:
+        # Jangan telan error yang sengaja kita raise di atas
+        # (detail asli seperti "quota habis" harus sampai ke client)
+        raise
     except json.JSONDecodeError:
+        logger.error(f"AI returned invalid JSON: {content[:500]}")
         raise HTTPException(status_code=500, detail="AI mengembalikan format JSON yang tidak valid.")
+    except (httpx.TimeoutException, httpx.ConnectError) as e:
+        logger.error(f"AI gateway unreachable: {e}")
+        raise HTTPException(status_code=503, detail="Layanan AI tidak dapat dihubungi (timeout/koneksi).")
     except Exception as e:
         logger.error(f"AI Orchestrator Error: {e}")
         raise HTTPException(status_code=503, detail="Layanan AI sedang tidak tersedia.")

@@ -303,7 +303,7 @@ export default function CompanyBranchesTab() {
           notify.success('Perusahaan berhasil dihapus');
           await fetchData();
         } catch (e) {
-          notify.error('Gagal menghapus perusahaan');
+          notify.error(e.response?.data?.detail || 'Gagal menghapus perusahaan');
         } finally {
           setProcessingCode(null);
           setConfirmState(null);
@@ -365,7 +365,7 @@ export default function CompanyBranchesTab() {
           notify.success('Cabang berhasil dihapus');
           await fetchData();
         } catch (e) {
-          notify.error('Gagal menghapus cabang');
+          notify.error(e.response?.data?.detail || 'Gagal menghapus cabang');
         } finally {
           setProcessingCode(null);
           setConfirmState(null);

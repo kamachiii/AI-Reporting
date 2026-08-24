@@ -75,7 +75,9 @@ CREATE TABLE tenants (
 
 CREATE TABLE audit_logs (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL,
+    -- Nullable: audit log harus tetap tersimpan meski user-nya dihapus
+    -- (FK pakai ON DELETE SET NULL, jadi kolom TIDAK boleh NOT NULL)
+    user_id INTEGER,
     branch_code VARCHAR(50) NOT NULL,
     prompt_text TEXT,
     ai_json_filter JSONB,
@@ -123,6 +125,3 @@ CREATE TABLE ai_configs (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT unique_scope_target UNIQUE (scope, target_id)
 );
-
--- 3. KELUAR DARI PSQL
-\q

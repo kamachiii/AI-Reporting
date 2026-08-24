@@ -99,22 +99,69 @@ async def create_company(payload: CompanyCreate, user: dict = Depends(require_ad
 
 @router.put("/companies/{code}")
 async def update_company(code: str, payload: CompanyUpdate, user: dict = Depends(require_admin_role)):
+    """
+    Update perusahaan (transaksional).
+    - Nonaktifkan  -> semua cabang ikut nonaktif.
+    - Aktifkan     -> cabang diaktifkan kembali (simetris), sehingga status
+      cabang tidak tertinggal 'mati' permanen seperti bug sebelumnya.
+    """
     try:
         pool = await get_core_pool()
-        await pool.execute("UPDATE companies SET name=$1, address=$2, is_active=$3 WHERE code=$4", payload.name, payload.address, payload.is_active, code)
-        if not payload.is_active:
-            await pool.execute("UPDATE branches SET is_active=false WHERE company_code=$1", code)
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                exists = await conn.fetchval("SELECT 1 FROM companies WHERE code=$1", code)
+                if not exists:
+                    raise HTTPException(status_code=404, detail="Perusahaan tidak ditemukan")
+                await conn.execute(
+                    "UPDATE companies SET name=$1, address=$2, is_active=$3 WHERE code=$4",
+                    payload.name, payload.address, payload.is_active, code
+                )
+                if not payload.is_active:
+                    await conn.execute("UPDATE branches SET is_active=false WHERE company_code=$1", code)
+                else:
+                    await conn.execute("UPDATE branches SET is_active=true WHERE company_code=$1", code)
         return {"message": "Perusahaan berhasil diperbarui"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating company: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/companies/{code}")
 async def delete_company(code: str, user: dict = Depends(require_admin_role)):
+    """
+    Hapus perusahaan + seluruh cabangnya secara transaksional.
+    Menolak penghapusan jika masih ada tenant (koneksi database) yang
+    terpasang pada cabang manapun, agar tidak crash dengan FK RESTRICT.
+    """
     try:
         pool = await get_core_pool()
-        await pool.execute("DELETE FROM companies WHERE code=$1", code)
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                exists = await conn.fetchval("SELECT 1 FROM companies WHERE code=$1", code)
+                if not exists:
+                    raise HTTPException(status_code=404, detail="Perusahaan tidak ditemukan")
+                tenant_count = await conn.fetchval("""
+                    SELECT COUNT(*) FROM tenants t
+                    JOIN branches b ON t.branch_code = b.code
+                    WHERE b.company_code = $1
+                """, code)
+                if tenant_count and int(tenant_count) > 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Tidak dapat menghapus: {tenant_count} konfigurasi database (tenant) masih terhubung. Hapus tenant pada menu Database & Tenant terlebih dahulu."
+                    )
+                # Bersihkan assignment user->cabang dulu (sudah CASCADE, tapi eksplisit lebih aman)
+                await conn.execute("""
+                    DELETE FROM user_branches WHERE branches_code IN (
+                        SELECT code FROM branches WHERE company_code = $1
+                    )
+                """, code)
+                await conn.execute("DELETE FROM branches WHERE company_code = $1", code)
+                await conn.execute("DELETE FROM companies WHERE code = $1", code)
         return {"message": "Perusahaan berhasil dihapus"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error deleting company: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -155,8 +202,16 @@ async def update_branch(code: str, payload: BranchUpdate, user: dict = Depends(r
 async def delete_branch(code: str, user: dict = Depends(require_admin_role)):
     try:
         pool = await get_core_pool()
+        tenant_exists = await pool.fetchval("SELECT 1 FROM tenants WHERE branch_code = $1", code)
+        if tenant_exists:
+            raise HTTPException(
+                status_code=400,
+                detail="Tidak dapat menghapus: cabang ini masih memiliki konfigurasi database (tenant). Hapus tenant terlebih dahulu."
+            )
         await pool.execute("DELETE FROM branches WHERE code=$1", code)
         return {"message": "Cabang berhasil dihapus"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error deleting branch: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -180,6 +235,33 @@ async def get_branches_with_tenants(user: dict = Depends(require_admin_role)):
 # ==========================================
 # 2. TENANTS (DATABASE) ENDPOINTS
 # ==========================================
+@router.get("/tenants")
+async def get_tenants(user: dict = Depends(require_admin_role)):
+    """
+    Daftar semua tenant. Dipakai frontend via api.getTenants().
+    Password TIDAK dikirim balik (hanya metadata koneksi).
+    """
+    try:
+        pool = await get_core_pool()
+        rows = await pool.fetch("""
+            SELECT branch_code, db_host, db_port, db_name, db_username, is_active
+            FROM tenants
+            ORDER BY branch_code
+        """)
+        return [
+            {
+                "branch_code": r["branch_code"],
+                "db_host": r["db_host"],
+                "db_port": r["db_port"],
+                "db_name": r["db_name"],
+                "db_username": r["db_username"],
+                "is_active": r["is_active"],
+            } for r in rows
+        ]
+    except Exception as e:
+        logger.error(f"Error fetching tenants: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 @router.get("/tenants/{branch_code}")
 async def get_tenant_by_branch(branch_code: str, user: dict = Depends(require_admin_role)):
     """
@@ -288,6 +370,8 @@ async def update_tenant(branch_code: str, payload: TenantCreate, user: dict = De
                 WHERE branch_code = $5
             """, payload.db_host, payload.db_port, payload.db_name, payload.db_username, branch_code)
         return {"message": "Tenant berhasil diperbarui"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating tenant for branch {branch_code}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -389,9 +473,13 @@ async def update_ai_config(config_id: int, payload: AIConfigUpdate, user: dict =
             """, payload.scope, target_id_val, payload.provider, payload.model, 
                 payload.temperature, payload.api_type, payload.base_url, config_id)
         return {"message": "Konfigurasi berhasil diperbarui"}
+    except HTTPException:
+        raise
+    except asyncpg.exceptions.UniqueViolationError:
+        raise HTTPException(status_code=400, detail="Konfigurasi dengan scope & target ini sudah ada")
     except Exception as e:
         logger.error(f"Error updating AI config {config_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/ai-configs/{config_id}")
 async def delete_ai_config(config_id: int, user: dict = Depends(require_admin_role)):
