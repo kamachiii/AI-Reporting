@@ -1,54 +1,40 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
-import { createPortal } from 'react-dom';
-import { motion } from 'framer-motion';
-import { api } from '../../services/api';
-import {
-  Plus, CheckCircle, XCircle, X, Search,
-  Loader2, Trash2, Wifi, Pencil, ToggleRight, ToggleLeft,
-  Link, Unlink, MoreVertical, Database,
-  ArrowUp, ArrowDown, ChevronsUpDown, AlertTriangle
-} from 'lucide-react';
+import { useState } from 'react';
+import { X, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { api } from '../../services/api';
 import { notify } from '../../utils/notification';
 
-// Common & Modal Components
 import ConfirmationDialog from './common/ConfirmationDialog';
-import PaginationBar from './common/PaginationBar';
-import EmptyState from './common/EmptyState';
 import SkeletonTable from './common/SkeletonTable';
 import CompanyModal from './company/CompanyModal';
+import CompaniesTable from './company/CompaniesTable';
 import BranchModal from './branch/BranchModal';
+import BranchesTable from './branch/BranchesTable';
 import TenantModal from './tenants/TenantModal';
-import useDebounce from '../../hooks/useDebounce';
+import useAdminShortcuts from '../../hooks/useAdminShortcuts';
+import useCompanyBranchData from '../../hooks/useCompanyBranchData';
 
-const PAGE_SIZE = 15;
-
-function SortIcon({ columnKey, sortConfig }) {
-  if (sortConfig.key !== columnKey) {
-    return <ChevronsUpDown size={14} className="inline ml-1 text-muted" />;
-  }
-  if (sortConfig.direction === 'asc') {
-    return <ArrowUp size={14} className="inline ml-1 text-primary" />;
-  }
-  return <ArrowDown size={14} className="inline ml-1 text-primary" />;
-}
-
+/**
+ * Orkestrator tipis: state data & tabel ada di useCompanyBranchData +
+ * sub-komponen company/CompaniesTable & branch/BranchesTable.
+ * File ini hanya menampung handler aksi (CRUD, tenant, confirm) dan layout.
+ */
 export default function CompanyBranchesTab() {
-  // ---- DATA STATES ----
-  const [companies, setCompanies] = useState([]);
-  const [branches, setBranches] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('companies');
-  const [searchTerm, setSearchTerm] = useState('');
-  
-  // ---- PAGINATION ----
-  const [companyPage, setCompanyPage] = useState(1);
-  const [branchPage, setBranchPage] = useState(1);
+  const data = useCompanyBranchData();
+  const {
+    companies, loading, fetchData,
+    tenantData, connectionStatus, companiesByCode, tableContainerRef,
+    searchTerm, setSearchTerm,
+    paginatedCompanies, companyPage, setCompanyPage, companyTotalPages, filteredCompanies,
+    companySortConfig, handleCompanySort,
+    paginatedBranches, branchPage, setBranchPage, branchTotalPages, filteredBranches,
+    branchSortConfig, handleBranchSort,
+    PAGE_SIZE,
+  } = data;
 
-  // ---- CONNECTION STATUS ----
-  const [connectionStatus, setConnectionStatus] = useState({}); 
-  const [tenantData, setTenantData] = useState({});
-  
+  // ---- SUB-TAB ----
+  const [activeTab, setActiveTab] = useState('companies');
+
   // ---- MODAL STATES ----
   const [showCompanyModal, setShowCompanyModal] = useState(false);
   const [showBranchModal, setShowBranchModal] = useState(false);
@@ -56,209 +42,32 @@ export default function CompanyBranchesTab() {
   const [editingCompany, setEditingCompany] = useState(null);
   const [editingBranch, setEditingBranch] = useState(null);
   const [editingTenantBranch, setEditingTenantBranch] = useState(null);
-  
-  // ---- LOADING / PROCESSING ----
+
+  // ---- PROCESSING / CONFIRM ----
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [processingCode, setProcessingCode] = useState(null);
-
-  // ---- CONFIRM DIALOG ----
   const [confirmState, setConfirmState] = useState(null);
 
-  // ---- DROPDOWN STATE ----
+  // ---- DROPDOWN ----
   const [dropdownOpen, setDropdownOpen] = useState(null);
   const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
 
-  // ---- TABLE CONTAINER REF ----
-  const tableContainerRef = useRef(null);
-  const debouncedSearch = useDebounce(searchTerm, 300);
-
-  // ---- SORTING STATE (BRANCH) ----
-  const [sortConfig, setSortConfig] = useState({ key: 'code', direction: 'asc' });
-
-  // ---- SORTING STATE (COMPANY) ----
-  const [companySortConfig, setCompanySortConfig] = useState({ key: 'code', direction: 'asc' });
-
-  // ==========================================
-  // 1. DATA FETCHING
-  // ==========================================
-  useEffect(() => {
-    fetchData();
-  }, []);
-  
-  useEffect(() => {
-      const handleClickOutside = (event) => {
-        if (dropdownOpen && !event.target.closest('.dropdown-trigger')) {
-          setDropdownOpen(null);
-        }
-      };
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [dropdownOpen]);
-
-  const fetchData = async () => {
-    const scrollTop = tableContainerRef.current?.scrollTop || 0;
-
-    setLoading(true);
-    try {
-      const [companiesData, branchesWithTenantsData] = await Promise.all([
-        api.getCompanies(),
-        api.getBranchesWithTenants(),
-      ]);
-      setCompanies(companiesData || []);
-
-      const statuses = {};
-      const tenantDetails = {};
-      const formattedBranches = [];
-
-      (branchesWithTenantsData || []).forEach(item => {
-        formattedBranches.push({
-          code: item.code,
-          name: item.name,
-          company_code: item.company_code,
-          address: item.address,
-          is_active: item.is_active
-        });
-
-        if (item.db_host) {
-          tenantDetails[item.code] = {
-            db_host: item.db_host,
-            db_port: item.db_port,
-            db_name: item.db_name,
-            db_username: item.db_username
-          };
-          statuses[item.code] = 'connected';
-        } else {
-          statuses[item.code] = 'disconnected';
-        }
-      });
-
-      setBranches(formattedBranches);
-      setTenantData(tenantDetails);
-      setConnectionStatus(statuses);
-
-      // Status koneksi NYATA: tes tiap tenant yang terkonfigurasi
-      // (sebelumnya cuma asal db_host ada -> langsung diklaim 'Connected')
-      Object.keys(tenantDetails).forEach(async (code) => {
-        try {
-          const result = await api.testTenantConnection(code);
-          setConnectionStatus(prev => ({ ...prev, [code]: result.status }));
-        } catch {
-          setConnectionStatus(prev => ({ ...prev, [code]: 'disconnected' }));
-        }
-      });
-    } catch (e) {
-      notify.error('Gagal memuat data perusahaan & cabang');
-    } finally {
-      setLoading(false);
-      setTimeout(() => {
-        if (tableContainerRef.current) {
-          tableContainerRef.current.scrollTop = scrollTop;
-        }
-      }, 0);
-    }
-  };
+  // Keyboard standar admin
+  useAdminShortcuts({
+    onEscape: () => {
+      if (confirmState) setConfirmState(null);
+      else if (showCompanyModal) setShowCompanyModal(false);
+      else if (showBranchModal) setShowBranchModal(false);
+      else if (showTenantModal) setShowTenantModal(false);
+      else if (dropdownOpen) setDropdownOpen(null);
+    },
+    isBusy: !!processingCode || saving || testing,
+    searchInputId: 'cb-search',
+  });
 
   // ==========================================
-  // 2. FILTERS & PAGINATION
-  // ==========================================
-  const companiesByCode = useMemo(() => {
-    const map = {};
-    companies.forEach(c => map[c.code] = c);
-    return map;
-  }, [companies]);
-
-  const handleTabChange = (tab) => {
-    setActiveTab(tab);
-    setSearchTerm('');
-  };
-  const handleSort = (key) => {
-    let direction = 'asc';
-    if (sortConfig.key === key && sortConfig.direction === 'asc') {
-      direction = 'desc';
-    }
-    setSortConfig({ key, direction });
-  };
-
-  useEffect(() => {
-    setCompanyPage(1);
-    setBranchPage(1);
-  }, [debouncedSearch]);
-
-  const filteredCompanies = useMemo(() => {
-    if (!debouncedSearch) return companies;
-    const lower = debouncedSearch.toLowerCase();
-    return companies.filter(c =>
-      (c.code || '').toLowerCase().includes(lower) ||
-      (c.name || '').toLowerCase().includes(lower)
-    );
-  }, [companies, debouncedSearch]);
-
-  const filteredBranches = useMemo(() => {
-    if (!debouncedSearch) return branches;
-    const lower = debouncedSearch.toLowerCase();
-    return branches.filter(b => {
-      const companyName = companiesByCode[b.company_code]?.name || '';
-      return (
-        (b.code || '').toLowerCase().includes(lower) ||
-        (b.name || '').toLowerCase().includes(lower) ||
-        (b.company_code || '').toLowerCase().includes(lower) ||
-        companyName.toLowerCase().includes(lower) ||
-        (tenantData[b.code]?.db_host || '').toLowerCase().includes(lower)
-      );
-    });
-  }, [branches, debouncedSearch, companiesByCode, tenantData]);
-
-  const companyTotalPages = Math.max(1, Math.ceil(filteredCompanies.length / PAGE_SIZE));
-  const branchTotalPages = Math.max(1, Math.ceil(filteredBranches.length / PAGE_SIZE));
-
-  const sortedCompanies = useMemo(() => {
-    const sorted = [...filteredCompanies];
-    return sorted.sort((a, b) => {
-      let aVal = a[companySortConfig.key] || '';
-      let bVal = b[companySortConfig.key] || '';
-      if (aVal < bVal) return companySortConfig.direction === 'asc' ? -1 : 1;
-      if (aVal > bVal) return companySortConfig.direction === 'asc' ? 1 : -1;
-      return 0;
-    });
-  }, [filteredCompanies, companySortConfig]);
-
-  const safeCompanyPage = Math.min(companyPage, companyTotalPages);
-  const paginatedCompanies = useMemo(() => {
-    const start = (safeCompanyPage - 1) * PAGE_SIZE;
-    return sortedCompanies.slice(start, start + PAGE_SIZE);
-  }, [sortedCompanies, safeCompanyPage]);
-
-  const sortedBranches = useMemo(() => {
-    const sorted = [...filteredBranches];
-    return sorted.sort((a, b) => {
-      let aVal = a[sortConfig.key] || '';
-      let bVal = b[sortConfig.key] || '';
-
-      if (sortConfig.key === 'company_code') {
-        aVal = companiesByCode[a.company_code]?.name || a.company_code;
-        bVal = companiesByCode[b.company_code]?.name || b.company_code;
-      }
-      
-      if (sortConfig.key === 'status') {
-        aVal = connectionStatus[a.code] === 'connected' ? 1 : 0;
-        bVal = connectionStatus[b.code] === 'connected' ? 1 : 0;
-      }
-
-      if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
-      if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
-      return 0;
-    });
-  }, [filteredBranches, sortConfig, companiesByCode, connectionStatus]);
- 
-  const safeBranchPage = Math.min(branchPage, branchTotalPages);
-  const paginatedBranches = useMemo(() => {
-    const start = (safeBranchPage - 1) * PAGE_SIZE;
-    return sortedBranches.slice(start, start + PAGE_SIZE);
-  }, [sortedBranches, safeBranchPage]);
-
-  // ==========================================
-  // 3. HANDLERS: COMPANY
+  // HANDLERS: COMPANY
   // ==========================================
   const handleSaveCompany = async (form) => {
     setSaving(true);
@@ -298,14 +107,6 @@ export default function CompanyBranchesTab() {
     }
   };
 
-  const handleCompanySort = (key) => {
-    let direction = 'asc';
-    if (companySortConfig.key === key && companySortConfig.direction === 'asc') {
-      direction = 'desc';
-    }
-    setCompanySortConfig({ key, direction });
-  };
-
   const handleDeleteCompany = (code) => {
     setConfirmState({
       title: 'Hapus Perusahaan?',
@@ -322,7 +123,6 @@ export default function CompanyBranchesTab() {
           if (String(detail).toLowerCase().includes('tenant')) {
             toast.custom((t) => (
               <div className="bg-white border border-hairline shadow-lg rounded-lg p-4 flex items-start gap-3 max-w-md">
-                <span className="text-error mt-0.5"><AlertTriangle size={18} /></span>
                 <div className="flex-1 text-sm text-body">{detail}</div>
                 <button
                   onClick={() => { toast.dismiss(t.id); window.dispatchEvent(new CustomEvent('dms-navigate', { detail: 'tenants' })); }}
@@ -344,7 +144,7 @@ export default function CompanyBranchesTab() {
   };
 
   // ==========================================
-  // 4. HANDLERS: BRANCH
+  // HANDLERS: BRANCH
   // ==========================================
   const handleSaveBranch = async (form) => {
     setSaving(true);
@@ -387,19 +187,13 @@ export default function CompanyBranchesTab() {
   };
 
   // ==========================================
-  // 5. HANDLERS: TENANT (DATABASE CONNECTION)
+  // HANDLERS: TENANT (DATABASE CONNECTION)
   // ==========================================
-  const openTenantModal = (branch) => {
-    setEditingTenantBranch(branch.code);
-    setShowTenantModal(true);
-  };
-
   const handleTestTenant = async (branch_code, form) => {
     setTesting(true);
     try {
-      const result = await api.testTenantConnection(branch_code, form);
-      return result;
-    } catch (e) {
+      return await api.testTenantConnection(branch_code, form);
+    } catch {
       return { status: 'disconnected', message: 'Terjadi kesalahan saat uji koneksi' };
     } finally {
       setTesting(false);
@@ -420,8 +214,7 @@ export default function CompanyBranchesTab() {
       setShowTenantModal(false);
       setEditingTenantBranch(null);
     } catch (e) {
-      const detail = e.response?.data?.detail || 'Gagal menyimpan konfigurasi database';
-      notify.error(detail);
+      notify.error(e.response?.data?.detail || 'Gagal menyimpan konfigurasi database');
     } finally {
       await fetchData();
       setSaving(false);
@@ -438,7 +231,7 @@ export default function CompanyBranchesTab() {
           await api.deleteTenant(branch_code);
           notify.success('Koneksi database berhasil diputus');
           await fetchData();
-        } catch (e) {
+        } catch {
           notify.error('Gagal memutus koneksi database');
         } finally {
           setProcessingCode(null);
@@ -449,19 +242,20 @@ export default function CompanyBranchesTab() {
   };
 
   // ==========================================
-  // 6. RENDER
+  // RENDER
   // ==========================================
   if (loading) return <SkeletonTable rows={5} columns={4} />;
 
   return (
     <div className="space-y-6">
-      {/* Global Search & Action Bar */}
+      {/* Global Search */}
       <div className="flex justify-between items-center gap-4 flex-wrap">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
           <input
+            id="cb-search"
             type="text"
-            placeholder="Cari kode, nama, atau host..."
+            placeholder="Cari kode, nama, atau host...  ( / )"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-9 pr-8 py-2 border border-hairline rounded-md bg-canvas text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -474,275 +268,66 @@ export default function CompanyBranchesTab() {
         </div>
       </div>
 
-      {/* Segmented Control Tab */}
+      {/* Segmented Control */}
       <div className="flex gap-2 border border-hairline rounded-md p-1 bg-surface-soft w-fit">
-        <button onClick={() => handleTabChange('companies')} className={`px-4 py-1.5 text-xs font-medium rounded transition-colors ${activeTab === 'companies' ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-ink'}`}>
+        <button onClick={() => setActiveTab('companies')} className={`px-4 py-1.5 text-xs font-medium rounded transition-colors ${activeTab === 'companies' ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-ink'}`}>
           Perusahaan
         </button>
-        <button onClick={() => handleTabChange('branches')} className={`px-4 py-1.5 text-xs font-medium rounded transition-colors ${activeTab === 'branches' ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-ink'}`}>
+        <button onClick={() => setActiveTab('branches')} className={`px-4 py-1.5 text-xs font-medium rounded transition-colors ${activeTab === 'branches' ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-ink'}`}>
           Cabang / Dealer
         </button>
       </div>
 
-      {/* ============= TAB PERUSAHAAN ============= */}
       {activeTab === 'companies' && (
-        <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <span className="text-xs text-muted">Menampilkan {filteredCompanies.length} dari {companies.length}</span>
-            <button onClick={() => { setEditingCompany(null); setShowCompanyModal(true); }} className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active">
-              <Plus size={14} /> Tambah Perusahaan
-            </button>
-          </div>
-
-          {filteredCompanies.length === 0 ? (
-            <EmptyState
-              variant="box"
-              title={companies.length === 0 ? 'Belum ada perusahaan' : 'Tidak ada hasil'}
-              description={
-                companies.length === 0
-                  ? 'Klik "Tambah Perusahaan" untuk mendaftarkan perusahaan pertama.'
-                  : 'Coba kata kunci lain.'
-              }
-            />
-          ) : (
-            <div className="bg-white rounded-xl border border-hairline overflow-hidden shadow-sm">
-              <div ref={tableContainerRef}  className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead className="bg-surface-soft text-sm text-muted">
-                    <tr>
-                      <th className="p-3 w-24 cursor-pointer select-none hover:text-ink" onClick={() => handleCompanySort('code')}>
-                        Kode <SortIcon columnKey="code" sortConfig={companySortConfig} />
-                      </th>
-                      <th className="p-3 cursor-pointer select-none hover:text-ink" onClick={() => handleCompanySort('name')}>
-                        Nama <SortIcon columnKey="name" sortConfig={companySortConfig} />
-                      </th>
-                      <th className="p-3">Alamat</th>
-                      <th className="p-3 w-24 cursor-pointer select-none hover:text-ink" onClick={() => handleCompanySort('is_active')}>
-                        Status <SortIcon columnKey="is_active" sortConfig={companySortConfig} />
-                      </th>
-                      <th className="p-3 w-24">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-hairline">
-                    {paginatedCompanies.map((c, idx) => (
-                      <motion.tr key={c.code} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.03 }} className="hover:bg-surface-soft/50 transition-colors">
-                        <td className="p-3 font-medium text-sm">{c.code}</td>
-                        <td className="p-3 text-body text-sm">{c.name}</td>
-                        <td className="p-3 text-muted text-sm">{c.address || '-'}</td>
-                        <td className="p-3">
-                          <button onClick={() => handleToggleCompany(c)} disabled={processingCode === c.code} className="flex items-center gap-1 text-xs font-medium hover:opacity-80 disabled:opacity-50">
-                            {processingCode === c.code ? <Loader2 size={16} className="animate-spin" /> : c.is_active ? <><ToggleRight size={18} className="text-success" /> Aktif</> : <><ToggleLeft size={18} className="text-error" /> Nonaktif</>}
-                          </button>
-                        </td>
-                        <td className="p-3 flex gap-2">
-                          <button onClick={() => { setEditingCompany(c); setShowCompanyModal(true); }} className="text-muted hover:text-ink"><Pencil size={16} /></button>
-                          <button onClick={() => handleDeleteCompany(c.code)} className="text-muted hover:text-error"><Trash2 size={16} /></button>
-                        </td>
-                      </motion.tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-                <PaginationBar page={companyPage} totalPages={companyTotalPages} onChange={setCompanyPage} totalItems={filteredCompanies.length} pageSize={PAGE_SIZE} />
-            </div>
-          )}
-        </div>
+        <CompaniesTable
+          paginatedCompanies={paginatedCompanies}
+          totalCount={companies.length}
+          filteredCount={filteredCompanies.length}
+          page={companyPage}
+          totalPages={companyTotalPages}
+          onPageChange={setCompanyPage}
+          pageSize={PAGE_SIZE}
+          sortConfig={companySortConfig}
+          onSort={handleCompanySort}
+          processingCode={processingCode}
+          onToggle={handleToggleCompany}
+          onEdit={(c) => { setEditingCompany(c); setShowCompanyModal(true); }}
+          onDelete={handleDeleteCompany}
+          onAdd={() => { setEditingCompany(null); setShowCompanyModal(true); }}
+        />
       )}
 
-      {/* ============= TAB CABANG (Terintegrasi DB) ============= */}
       {activeTab === 'branches' && (
-        <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <span className="text-xs text-muted">Menampilkan {filteredBranches.length} dari {branches.length}</span>
-            <button onClick={() => { setEditingBranch(null); setShowBranchModal(true); }} className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active">
-              <Plus size={14} /> Tambah Cabang
-            </button>
-          </div>
-
-          {filteredBranches.length === 0 ? (
-            <EmptyState
-              variant="plug"
-              title={branches.length === 0 ? 'Belum ada cabang' : 'Tidak ada hasil'}
-              description={
-                branches.length === 0
-                  ? 'Klik "Tambah Cabang" untuk mendaftarkan cabang pertama.'
-                  : 'Coba kata kunci lain.'
-              }
-            />
-          ) : (
-            <div className="bg-white rounded-xl border border-hairline overflow-hidden shadow-sm">
-              <div ref={tableContainerRef}  className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead className="bg-surface-soft text-sm text-muted">
-                    <tr>
-                      <th className="p-3 w-24 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('code')}>
-                        Kode <SortIcon columnKey="code" sortConfig={sortConfig} />
-                      </th>
-                      <th className="p-3 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('name')}>
-                        Nama Cabang <SortIcon columnKey="name" sortConfig={sortConfig} />
-                      </th>
-                      <th className="p-3 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('company_code')}>
-                        Perusahaan <SortIcon columnKey="company_code" sortConfig={sortConfig} />
-                      </th>
-                      <th className="p-3 w-28 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('status')}>
-                        Status DB <SortIcon columnKey="status" sortConfig={sortConfig} />
-                      </th>
-                      <th className="p-3">Host / Port</th>
-                      <th className="p-3 w-0 text-center">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-hairline">
-                    {paginatedBranches.map((b, idx) => {
-                      const isProcessing = processingCode === b.code;
-                      const status = connectionStatus[b.code] || 'disconnected';
-                      const tenant = tenantData[b.code];
-                      const isConnected = status === 'connected';
-                      const isDropdownOpen = dropdownOpen === b.code;
-                      const toggleDropdown = () => setDropdownOpen(isDropdownOpen ? null : b.code);
-
-                      return (
-                        <motion.tr key={b.code} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.03 }} className="hover:bg-surface-soft/50 transition-colors relative">
-                          <td className="p-3 font-medium text-sm">{b.code}</td>
-                          <td className="p-3 text-body text-sm">{b.name}</td>
-                          <td className="p-3 text-muted text-sm">{companiesByCode[b.company_code]?.name || b.company_code}</td>
-                          <td className="p-3">
-                            <span className={`inline-flex items-center text-xs font-medium ${isConnected ? 'text-success' : 'text-error'}`}>
-                              {isConnected ? <CheckCircle size={14} className="mr-1" /> : <XCircle size={14} className="mr-1" />}
-                              {isConnected ? 'Connected' : 'Disconnected'}
-                            </span>
-                          </td>
-                          <td className="p-3 text-sm text-body">{tenant ? `${tenant.db_host}:${tenant.db_port}` : '-'}</td>
-                          
-                          {/* ========== KOLOM AKSI BARU ========== */}
-                          <td className="p-3">
-                            <div className="flex justify-end">
-                              
-                              {/* Aksi Utama (Ikon Langsung) */}
-                              {isConnected ? (
-                                <>
-                                  <button
-                                    onClick={async () => {
-                                      const testPayload = { ...tenant };
-                                      delete testPayload.db_password;
-                                      const result = await handleTestTenant(b.code, testPayload);
-                                      if (result.status === 'connected') {
-                                        notify.success('Koneksi berhasil!');
-                                      } else {
-                                        notify.error(`Koneksi gagal: ${result.message || ''}`);
-                                      }
-                                    }}
-                                    disabled={isProcessing}
-                                    className="p-1.5 text-muted hover:text-primary hover:bg-surface-soft rounded-md transition-colors disabled:opacity-50"
-                                    title="Test Koneksi"
-                                  >
-                                    <Wifi size={16} />
-                                  </button>
-                                  <button 
-                                    onClick={() => handleDisconnectTenant(b.code)} 
-                                    disabled={isProcessing}
-                                    className="p-1.5 text-muted hover:text-error hover:bg-error/5 rounded-md transition-colors disabled:opacity-50"
-                                    title="Putus Koneksi"
-                                  >
-                                    <Unlink size={16} />
-                                  </button>
-                                </>
-                              ) : (
-                                <button 
-                                  onClick={() => openTenantModal(b)} 
-                                  disabled={isProcessing}
-                                  className="p-1.5 text-primary hover:bg-primary/5 rounded-md transition-colors disabled:opacity-50"
-                                  title="Hubungkan Database"
-                                >
-                                  <Link size={16} />
-                                </button>
-                              )}
-
-                              {/* Dropdown Menu (Aksi Sekunder) */}
-                              <div className="relative dropdown-trigger">
-                                <button
-                                  onClick={(e) => {
-                                    const rect = e.currentTarget.getBoundingClientRect();
-                                    setDropdownPos({
-                                      top: rect.bottom + window.scrollY,
-                                      left: rect.right - 160 + window.scrollX
-                                    });
-                                    toggleDropdown();
-                                  }}
-                                  className="dropdown-trigger p-1.5 text-muted hover:text-ink hover:bg-surface-soft rounded-md transition-colors"
-                                >
-                                  <MoreVertical size={16} />
-                                </button>
-                              
-                                {/* Dropdown Content - DI PORTAL KE BODY */}
-                                {isDropdownOpen && createPortal(
-                                  <div
-                                    className="fixed z-[9999] w-40 bg-white rounded-md shadow-lg border border-hairline py-1"
-                                    style={{ top: dropdownPos.top, left: dropdownPos.left }}
-                                  >
-                                    <button
-                                      onMouseDown={(e) => {
-                                          e.preventDefault();
-                                          setDropdownOpen(null);
-                                          setTimeout(() => {
-                                            setEditingBranch(b);
-                                            setShowBranchModal(true);
-                                          }, 50);
-                                        }}
-                                      className="flex items-center gap-2 w-full px-4 py-2 text-xs text-ink hover:bg-surface-soft transition-colors text-left"
-                                    >
-                                      <Pencil size={14} /> Edit Cabang
-                                    </button>
-                              
-                                    {isConnected && (
-                                      <button
-                                        onMouseDown={(e) => {
-                                          e.preventDefault();
-                                          setDropdownOpen(null);
-                                          setTimeout(() => {
-                                            setEditingTenantBranch(b.code);
-                                            setShowTenantModal(true);
-                                          }, 50);
-                                        }}
-                                        className="flex items-center gap-2 w-full px-4 py-2 text-xs text-ink hover:bg-surface-soft transition-colors text-left"
-                                      >
-                                        <Database size={14} /> Edit Database
-                                      </button>
-                                    )}
-                              
-                                    <button
-                                      onMouseDown={(e) => {
-                                        e.preventDefault();
-                                        setDropdownOpen(null);
-                                        setTimeout(() => {
-                                          setDropdownOpen(null);
-                                          handleDeleteBranch(b.code);
-                                        }, 50);
-                                      }}
-                                      className="flex items-center gap-2 w-full px-4 py-2 text-xs text-error hover:bg-error/5 transition-colors text-left"
-                                    >
-                                      <Trash2 size={14} /> Hapus Cabang
-                                    </button>
-                                  </div>,
-                                  document.body
-                                )}
-                              </div>
-                            </div>
-                          </td>
-                        </motion.tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <PaginationBar page={branchPage} totalPages={branchTotalPages} onChange={setBranchPage} totalItems={filteredBranches.length} pageSize={PAGE_SIZE} />
-            </div>
-          )}
-        </div>
+        <BranchesTable
+          paginatedBranches={paginatedBranches}
+          totalCount={data.branches.length}
+          filteredCount={filteredBranches.length}
+          companiesByCode={companiesByCode}
+          connectionStatus={connectionStatus}
+          tenantData={tenantData}
+          page={branchPage}
+          totalPages={branchTotalPages}
+          onPageChange={setBranchPage}
+          pageSize={PAGE_SIZE}
+          sortConfig={branchSortConfig}
+          onSort={handleBranchSort}
+          processingCode={processingCode}
+          tableContainerRef={tableContainerRef}
+          onTestConnection={handleTestTenant}
+          onDisconnect={handleDisconnectTenant}
+          onConnectDb={(b) => { setEditingTenantBranch(b.code); setShowTenantModal(true); }}
+          onEditTenant={(code) => { setEditingTenantBranch(code); setShowTenantModal(true); }}
+          onEditBranch={(b) => { setEditingBranch(b); setShowBranchModal(true); }}
+          onDeleteBranch={handleDeleteBranch}
+          onAddBranch={() => { setEditingBranch(null); setShowBranchModal(true); }}
+          dropdownOpen={dropdownOpen}
+          setDropdownOpen={setDropdownOpen}
+          dropdownPos={dropdownPos}
+          setDropdownPos={setDropdownPos}
+        />
       )}
 
-      {/* ============= MODALS ============= */}
-
-      {/* Company Modal */}
+      {/* ===== MODALS ===== */}
       {showCompanyModal && (
         <CompanyModal
           key="companyModal"
@@ -754,7 +339,6 @@ export default function CompanyBranchesTab() {
         />
       )}
 
-      {/* Branch Modal */}
       {showBranchModal && (
         <BranchModal
           key={editingBranch?.code || 'new'}
@@ -766,8 +350,7 @@ export default function CompanyBranchesTab() {
           isSaving={saving}
         />
       )}
-      
-      {/* Tenant Modal */}
+
       {showTenantModal && (
         <TenantModal
           key={editingTenantBranch || 'new'}
@@ -782,10 +365,9 @@ export default function CompanyBranchesTab() {
         />
       )}
 
-      {/* Confirmation Dialog */}
       {confirmState && (
         <ConfirmationDialog
-          key="confirmDialog"
+          key="cbConfirm"
           isOpen={!!confirmState}
           onClose={() => setConfirmState(null)}
           onConfirm={confirmState.onConfirm}
