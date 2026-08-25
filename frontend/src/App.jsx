@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import LoginModal from './components/LoginModal';
 import AdminLayout from './components/Admin/AdminLayout';
+import ErrorBoundary from './components/ErrorBoundary';
 import toast, { Toaster } from 'react-hot-toast';
 
 // Placeholder untuk User Workspace (nanti kita isi)
@@ -57,11 +58,17 @@ function App() {
     <>
       <Toaster position="top-right" />
       {!user ? (
-        <LoginModal onLoginSuccess={handleLogin} />
+        <ErrorBoundary>
+          <LoginModal onLoginSuccess={handleLogin} />
+        </ErrorBoundary>
       ) : user.role === 'admin' ? (
-        <AdminLayout user={user} onLogout={handleLogout} />
+        <ErrorBoundary>
+          <AdminLayout user={user} onLogout={handleLogout} />
+        </ErrorBoundary>
       ) : (
-        <UserWorkspace user={user} onLogout={handleLogout} />
+        <ErrorBoundary>
+          <UserWorkspace user={user} onLogout={handleLogout} />
+        </ErrorBoundary>
       )}
     </>
   );
