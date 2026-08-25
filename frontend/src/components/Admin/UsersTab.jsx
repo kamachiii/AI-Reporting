@@ -9,6 +9,7 @@ import {
 import PaginationBar from './common/PaginationBar';
 import EmptyState from './common/EmptyState';
 import ConfirmationDialog from './common/ConfirmationDialog';
+import SkeletonTable from './common/SkeletonTable';
 import UserModal from './users/UserModal';
 import useDebounce from '../../hooks/useDebounce';
 import useAdminShortcuts from '../../hooks/useAdminShortcuts';
@@ -150,21 +151,7 @@ export default function UsersTab() {
     });
   };
 
-  const SkeletonLoader = () => (
-    <div className="bg-white rounded-xl border border-hairline overflow-hidden shadow-sm p-4 space-y-3 animate-pulse">
-      <div className="h-8 bg-surface-soft rounded w-1/4 mb-4" />
-      {[...Array(4)].map((_, i) => (
-        <div key={i} className="flex gap-4">
-          <div className="h-6 bg-surface-soft rounded w-1/5" />
-          <div className="h-6 bg-surface-soft rounded w-1/4" />
-          <div className="h-6 bg-surface-soft rounded w-1/6" />
-          <div className="h-6 bg-surface-soft rounded w-1/6" />
-        </div>
-      ))}
-    </div>
-  );
-
-  if (loading) return <SkeletonLoader />;
+  if (loading) return <SkeletonTable rows={4} columns={4} />;
 
   return (
     <div className="space-y-6">

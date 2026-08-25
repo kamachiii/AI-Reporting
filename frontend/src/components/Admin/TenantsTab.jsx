@@ -10,6 +10,7 @@ import PaginationBar from './common/PaginationBar';
 import EmptyState from './common/EmptyState';
 import ConfirmationDialog from './common/ConfirmationDialog';
 import TenantFormModal from './tenants/TenantFormModal';
+import SkeletonTable from './common/SkeletonTable';
 import useDebounce from '../../hooks/useDebounce';
 import useAdminShortcuts from '../../hooks/useAdminShortcuts';
 
@@ -139,21 +140,7 @@ export default function TenantsTab() {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
-  if (loading) {
-    return (
-      <div className="bg-white rounded-xl border border-hairline overflow-hidden shadow-sm p-4 space-y-3 animate-pulse">
-        <div className="h-8 bg-surface-soft rounded w-1/4 mb-4" />
-        {[...Array(4)].map((_, i) => (
-          <div key={i} className="flex gap-4">
-            <div className="h-6 bg-surface-soft rounded w-1/6" />
-            <div className="h-6 bg-surface-soft rounded w-1/4" />
-            <div className="h-6 bg-surface-soft rounded w-1/4" />
-            <div className="h-6 bg-surface-soft rounded w-1/6" />
-          </div>
-        ))}
-      </div>
-    );
-  }
+  if (loading) return <SkeletonTable rows={4} columns={4} />;
 
   return (
     <div className="space-y-6">

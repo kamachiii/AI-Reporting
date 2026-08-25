@@ -15,6 +15,7 @@ import { notify } from '../../utils/notification';
 import ConfirmationDialog from './common/ConfirmationDialog';
 import PaginationBar from './common/PaginationBar';
 import EmptyState from './common/EmptyState';
+import SkeletonTable from './common/SkeletonTable';
 import CompanyModal from './company/CompanyModal';
 import BranchModal from './branch/BranchModal';
 import TenantModal from './tenants/TenantModal';
@@ -450,21 +451,7 @@ export default function CompanyBranchesTab() {
   // ==========================================
   // 6. RENDER
   // ==========================================
-  const SkeletonLoader = () => (
-    <div className="bg-white rounded-xl border border-hairline overflow-hidden shadow-sm p-4 space-y-3 animate-pulse">
-      <div className="h-8 bg-surface-soft rounded w-1/4 mb-4" />
-      {[...Array(5)].map((_, i) => (
-        <div key={i} className="flex gap-4">
-          <div className="h-6 bg-surface-soft rounded w-1/6" />
-          <div className="h-6 bg-surface-soft rounded w-1/4" />
-          <div className="h-6 bg-surface-soft rounded w-1/4" />
-          <div className="h-6 bg-surface-soft rounded w-1/6" />
-        </div>
-      ))}
-    </div>
-  );
-
-  if (loading) return <SkeletonLoader />;
+  if (loading) return <SkeletonTable rows={5} columns={4} />;
 
   return (
     <div className="space-y-6">
