@@ -54,7 +54,7 @@ export default function ModelPickerModal({ isOpen, onClose, onSelect, models }) 
               />
             </div>
 
-            <button onClick={onClose} className="text-muted hover:text-ink transition-colors min-w-[30px] flex justify-end">
+            <button onClick={onClose} aria-label="Tutup" className="text-muted hover:text-ink transition-colors min-w-[30px] flex justify-end">
               <X size={24} />
             </button>
           </div>

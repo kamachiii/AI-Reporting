@@ -160,7 +160,7 @@ export default function AIConfigTab() {
         />
       ) : (
         <div className="bg-white rounded-xl border border-hairline overflow-hidden shadow-sm">
-          <div className="max-h-96 overflow-y-auto">
+          <div className="max-h-96 overflow-auto">
             <table className="w-full text-left">
               <thead className="bg-surface-soft text-sm text-muted sticky top-0 z-10">
                 <tr>

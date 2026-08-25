@@ -105,7 +105,7 @@ export default function TenantModal({
             transition={{ type: 'spring', damping: 20, stiffness: 300 }}
             className="bg-white rounded-xl p-6 max-w-lg w-full shadow-xl border border-hairline relative"
           >
-            <button
+            <button aria-label="Tutup"
               onClick={onClose}
               disabled={isSaving || isTesting}
               className="absolute right-4 top-4 text-muted hover:text-ink disabled:opacity-50"

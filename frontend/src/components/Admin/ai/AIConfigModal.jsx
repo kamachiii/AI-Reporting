@@ -109,7 +109,7 @@ export default function AIConfigModal({ isOpen, onClose, onSave, editing }) {
         transition={{ type: 'spring', damping: 20, stiffness: 300 }}
         className="bg-white rounded-xl p-6 max-w-lg w-full shadow-xl border border-hairline relative max-h-[90vh] overflow-y-auto"
       >
-        <button onClick={onClose} className="absolute right-4 top-4 text-muted hover:text-ink">
+        <button onClick={onClose} aria-label="Tutup" className="absolute right-4 top-4 text-muted hover:text-ink">
           <X size={20} />
         </button>
         <h3 className="font-serif text-lg text-ink mb-4">

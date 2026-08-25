@@ -73,7 +73,7 @@ export default function UserModal({ isOpen, onClose, onSave, user, branches, isS
         transition={{ type: 'spring', damping: 20, stiffness: 300 }}
         className="bg-white rounded-xl p-6 max-w-lg w-full shadow-xl border border-hairline relative max-h-[90vh] overflow-y-auto"
       >
-        <button onClick={onClose} disabled={isSaving} className="absolute right-4 top-4 text-muted hover:text-ink disabled:opacity-50">
+        <button aria-label="Tutup" onClick={onClose} disabled={isSaving} className="absolute right-4 top-4 text-muted hover:text-ink disabled:opacity-50">
           <X size={20} />
         </button>
         <h3 className="font-serif text-lg text-ink mb-4">
