@@ -134,9 +134,9 @@ export default function TenantsTab() {
     return filteredTenants.slice(start, start + PAGE_SIZE);
   }, [filteredTenants, page]);
 
-  useEffect(() => setPage(1), [debouncedSearch, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => setPage(1), [debouncedSearch, statusFilter]);
   useEffect(() => {
-    if (page > totalPages) setPage(totalPages); // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
   if (loading) {

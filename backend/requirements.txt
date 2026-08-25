@@ -10,3 +10,4 @@ python-jose[cryptography]==3.4.0
 passlib[bcrypt]==1.7.4
 sqlglot==26.3.0
 email-validator==2.3.0
+pytest

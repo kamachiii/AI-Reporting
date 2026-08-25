@@ -201,49 +201,81 @@ Frontend tersedia di: **http://localhost:5173**
 
 ```
 ai-report-database-mandiri/
-├── docker-compose.yml          # PostgreSQL + Redis containers
+├── docker-compose.yml              # PostgreSQL + Redis containers
+├── .github/workflows/ci.yml        # CI: lint+build frontend, syntax check backend
 ├── Readme.md
 │
 ├── backend/
-│   ├── .env                    # Environment variables
-│   ├── requirements.txt        # Python dependencies
-│   ├── init_db.py              # Database initialization & seeding
+│   ├── .env                        # Environment variables (tidak di-commit)
+│   ├── requirements.txt            # Python dependencies
+│   ├── init_db.py                  # Init schema + migrasi otomatis + seeding
+│   ├── tests/                      # Pytest (unit & integration)
+│   │   ├── conftest.py
+│   │   ├── test_ai_orchestrator.py # Exception passthrough AI gateway
+│   │   └── test_sql_guard.py       # Katalog serangan SQL (TDD untuk F2.3)
 │   ├── sql/
-│   │   └── 2_DATABASE_DDL.sql  # Database schema (DDL)
+│   │   ├── 1_SCHEMA_BASE.sql       # Skema dasar (9 tabel)
+│   │   └── migrations/             # Migrasi inkremental terlacak (idempotent)
+│   │       ├── 001_users_is_active.sql
+│   │       └── 002_audit_logs_user_id_nullable.sql
 │   └── app/
-│       ├── main.py             # FastAPI entry point
+│       ├── main.py                 # FastAPI entry point
 │       ├── core/
-│       │   ├── config.py       # Application settings (Pydantic)
-│       │   ├── database.py     # PostgreSQL pool & Redis connection
-│       │   └── security.py     # JWT, bcrypt, Fernet encryption
+│       │   ├── config.py           # Settings + validasi fail-fast (JWT/FERNET)
+│       │   ├── database.py         # PostgreSQL pool & Redis connection
+│       │   └── security.py         # JWT, bcrypt, Fernet, guard admin (cek DB)
 │       ├── routers/
-│       │   ├── auth.py         # Login endpoint
-│       │   └── admin.py        # Admin CRUD (company, branch, tenant, AI config)
+│       │   ├── auth.py             # Login (rate limit anti brute-force)
+│       │   ├── users.py            # CRUD user + assign cabang + guards
+│       │   └── admin/              # Satu modul per domain
+│       │       ├── __init__.py     # Agregasi router admin
+│       │       ├── companies.py    # Company & branch CRUD (transaksional)
+│       │       ├── tenants.py      # Tenant DB CRUD + test koneksi
+│       │       └── ai_configs.py   # AI config CRUD + fetch models provider
 │       └── services/
-│           └── ai_orchestrator.py  # AI provider integration (OpenAI/Anthropic)
+│           └── ai_orchestrator.py  # Integrasi AI provider (OpenAI/Anthropic)
 │
 └── frontend/
     ├── package.json
+    ├── eslint.config.js            # Lint gate (error = commit ditolak)
     ├── vite.config.js
     ├── index.html
     └── src/
         ├── main.jsx
-        ├── App.jsx             # Root component (routing by role)
-        ├── App.css
-        ├── index.css
+        ├── App.jsx                 # Routing by role + notice sesi kadaluarsa
+        ├── hooks/
+        │   ├── useDebounce.js      # Debounce search input
+        │   └── useAdminShortcuts.js# Esc tutup modal, "/" fokus search
         ├── services/
-        │   └── api.js          # Axios API client
+        │   └── api.js              # Axios client + interceptor 401 auto-logout
+        ├── utils/
+        │   └── notification.js     # Wrapper toast seragam
         └── components/
-            ├── LoginModal.jsx  # Halaman login
+            ├── LoginModal.jsx      # Halaman login
             └── Admin/
-                ├── AdminLayout.jsx       # Layout admin (sidebar + tabs)
-                ├── CompanyBranchesTab.jsx # Manajemen company & branch
-                ├── TenantsTab.jsx        # Manajemen tenant database
-                ├── AIConfigTab.jsx       # Konfigurasi AI provider
-                ├── ModelPickerModal.jsx  # Modal pemilihan model AI
-                ├── AuditLogTab.jsx       # Log audit query
-                └── UsersTab.jsx          # Manajemen user
+                ├── AdminLayout.jsx          # Sidebar + navigasi antar-tab
+                ├── CompanyBranchesTab.jsx   # Company & branch (+ tenant inline)
+                ├── TenantsTab.jsx           # Manajemen tenant database
+                ├── AIConfigTab.jsx          # Konfigurasi AI provider
+                ├── UsersTab.jsx             # Manajemen user & izin cabang
+                ├── AuditLogTab.jsx          # Log audit query (segera)
+                ├── common/                  # Komponen bersama
+                │   ├── ConfirmationDialog.jsx
+                │   ├── PaginationBar.jsx
+                │   └── EmptyState.jsx       # Empty state ilustratif
+                ├── company/CompanyModal.jsx
+                ├── branch/BranchModal.jsx
+                ├── tenants/                 # Domain tenant
+                │   ├── TenantModal.jsx      # Edit koneksi DB per cabang
+                │   └── TenantFormModal.jsx  # Tambah tenant baru
+                ├── ai/ModelPickerModal.jsx
+                └── users/UserModal.jsx
 ```
+
+### Konvensi Kode
+- **Backend**: satu file router per domain (`routers/<domain>.py` atau `routers/admin/<domain>.py`).
+- **Frontend tab**: file `*Tab.jsx` tipis (orkestrasi); modal di folder domainnya; dialog & pagination dari `common/`; shortcut keyboard via `useAdminShortcuts`.
+- **Migrasi DB**: tambah file bernomor di `sql/migrations/NNN_<deskripsi>.sql` — dijalankan otomatis oleh `init_db.py`, terlacak di tabel `_migrations`.
 
 ---
 
