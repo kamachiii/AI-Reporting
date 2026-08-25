@@ -1,6 +1,16 @@
 import { motion } from 'framer-motion';
 import { X, CheckCircle, XCircle } from 'lucide-react';
 
+/** Baris label:nilai untuk modal detail (didefinisikan di luar render). */
+function DetailRow({ label, children }) {
+  return (
+    <div className="flex justify-between gap-4 py-2 border-b border-hairline last:border-b-0">
+      <span className="text-xs text-muted shrink-0 w-36">{label}</span>
+      <span className="text-sm text-body text-right flex-1">{children}</span>
+    </div>
+  );
+}
+
 /**
  * Modal detail informasi cabang: identitas + status koneksi database.
  * Data dari props (sudah tersedia di useCompanyBranchData).
@@ -10,13 +20,6 @@ export default function BranchDetailModal({ isOpen, onClose, branch, companyName
 
   const tenant = tenantData[branch.code];
   const st = connectionStatus[branch.code];
-
-  const Row = ({ label, children }) => (
-    <div className="flex justify-between gap-4 py-2 border-b border-hairline last:border-b-0">
-      <span className="text-xs text-muted shrink-0 w-36">{label}</span>
-      <span className="text-sm text-body text-right flex-1">{children}</span>
-    </div>
-  );
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
@@ -37,19 +40,19 @@ export default function BranchDetailModal({ isOpen, onClose, branch, companyName
         </div>
 
         <div className="px-6 pb-6">
-          <Row label="Perusahaan">{companyName || branch.company_code}</Row>
-          <Row label="Status Cabang">
+          <DetailRow label="Perusahaan">{companyName || branch.company_code}</DetailRow>
+          <DetailRow label="Status Cabang">
             {branch.is_active
               ? <span className="inline-flex items-center gap-1.5 text-success font-medium"><span className="w-1.5 h-1.5 rounded-full bg-success" /> Aktif</span>
               : <span className="inline-flex items-center gap-1.5 text-error font-medium"><span className="w-1.5 h-1.5 rounded-full bg-error" /> Nonaktif</span>}
-          </Row>
-          <Row label="Alamat">{branch.address || '-'}</Row>
+          </DetailRow>
+          <DetailRow label="Alamat">{branch.address || '-'}</DetailRow>
 
           <p className="text-xs font-medium text-muted uppercase tracking-wide mt-5 mb-1">Database (Tenant)</p>
 
           {tenant ? (
             <>
-              <Row label="Status Koneksi">
+              <DetailRow label="Status Koneksi">
                 {st === 'connected' ? (
                   <span className="inline-flex items-center gap-1.5 text-success font-medium"><CheckCircle size={14} /> Connected</span>
                 ) : st === 'checking' ? (
@@ -57,11 +60,11 @@ export default function BranchDetailModal({ isOpen, onClose, branch, companyName
                 ) : (
                   <span className="inline-flex items-center gap-1.5 text-error font-medium"><XCircle size={14} /> Disconnected</span>
                 )}
-              </Row>
-              <Row label="Host">{tenant.db_host}</Row>
-              <Row label="Port">{tenant.db_port}</Row>
-              <Row label="Nama Database">{tenant.db_name}</Row>
-              <Row label="Username DB">{tenant.db_username}</Row>
+              </DetailRow>
+              <DetailRow label="Host">{tenant.db_host}</DetailRow>
+              <DetailRow label="Port">{tenant.db_port}</DetailRow>
+              <DetailRow label="Nama Database">{tenant.db_name}</DetailRow>
+              <DetailRow label="Username DB">{tenant.db_username}</DetailRow>
             </>
           ) : (
             <p className="text-sm text-muted italic mt-2">

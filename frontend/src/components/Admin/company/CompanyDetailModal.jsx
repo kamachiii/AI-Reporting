@@ -1,6 +1,16 @@
 import { motion } from 'framer-motion';
 import { X, Building2, CheckCircle, XCircle, MinusCircle } from 'lucide-react';
 
+/** Baris label:nilai untuk modal detail (didefinisikan di luar render). */
+function DetailRow({ label, children }) {
+  return (
+    <div className="flex justify-between gap-4 py-2 border-b border-hairline last:border-b-0">
+      <span className="text-xs text-muted shrink-0 w-32">{label}</span>
+      <span className="text-sm text-body text-right flex-1">{children}</span>
+    </div>
+  );
+}
+
 /**
  * Modal detail informasi perusahaan: identitas + ringkasan cabang
  * di bawahnya (termasuk status koneksi DB tiap cabang).
@@ -12,13 +22,6 @@ export default function CompanyDetailModal({ isOpen, onClose, company, branches,
   const companyBranches = branches.filter(b => b.company_code === company.code);
   const activeCount = companyBranches.filter(b => b.is_active).length;
   const connectedCount = companyBranches.filter(b => connectionStatus[b.code] === 'connected').length;
-
-  const Row = ({ label, children }) => (
-    <div className="flex justify-between gap-4 py-2 border-b border-hairline last:border-b-0">
-      <span className="text-xs text-muted shrink-0 w-32">{label}</span>
-      <span className="text-sm text-body text-right flex-1">{children}</span>
-    </div>
-  );
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
@@ -45,14 +48,14 @@ export default function CompanyDetailModal({ isOpen, onClose, company, branches,
 
         {/* Identitas */}
         <div className="px-6">
-          <Row label="Status">
+          <DetailRow label="Status">
             {company.is_active
               ? <span className="inline-flex items-center gap-1.5 text-success font-medium"><span className="w-1.5 h-1.5 rounded-full bg-success" /> Aktif</span>
               : <span className="inline-flex items-center gap-1.5 text-error font-medium"><span className="w-1.5 h-1.5 rounded-full bg-error" /> Nonaktif</span>}
-          </Row>
-          <Row label="Alamat">{company.address || '-'}</Row>
-          <Row label="Jumlah Cabang">{companyBranches.length} cabang ({activeCount} aktif)</Row>
-          <Row label="DB Terhubung">{connectedCount} dari {companyBranches.length}</Row>
+          </DetailRow>
+          <DetailRow label="Alamat">{company.address || '-'}</DetailRow>
+          <DetailRow label="Jumlah Cabang">{companyBranches.length} cabang ({activeCount} aktif)</DetailRow>
+          <DetailRow label="DB Terhubung">{connectedCount} dari {companyBranches.length}</DetailRow>
         </div>
 
         {/* Daftar cabang */}
