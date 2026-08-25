@@ -2,7 +2,7 @@ import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import {
   Plus, CheckCircle, XCircle, Trash2, Pencil,
-  Link, Unlink, MoreVertical, Database, Wifi,
+  Link, Unlink, MoreVertical, Database, Wifi, Eye,
   ArrowUp, ArrowDown, ChevronsUpDown
 } from 'lucide-react';
 import { notify } from '../../../utils/notification';
@@ -30,7 +30,7 @@ export default function BranchesTable({
   sortConfig, onSort,
   processingCode, tableContainerRef,
   onTestConnection, onDisconnect, onConnectDb, onEditTenant,
-  onEditBranch, onDeleteBranch, onAddBranch,
+  onViewDetail, onEditBranch, onDeleteBranch, onAddBranch,
   dropdownOpen, setDropdownOpen, dropdownPos, setDropdownPos,
 }) {
   return (
@@ -159,6 +159,17 @@ export default function BranchesTable({
                                 className="fixed z-[9999] w-40 bg-white rounded-md shadow-lg border border-hairline py-1"
                                 style={{ top: dropdownPos.top, left: dropdownPos.left }}
                               >
+                                <button
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    setDropdownOpen(null);
+                                    setTimeout(() => onViewDetail(b), 50);
+                                  }}
+                                  className="flex items-center gap-2 w-full px-4 py-2 text-xs text-ink hover:bg-surface-soft transition-colors text-left"
+                                >
+                                  <Eye size={14} /> Lihat Detail
+                                </button>
+
                                 <button
                                   onMouseDown={(e) => {
                                     e.preventDefault();

@@ -1,7 +1,9 @@
+import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import {
-  Plus, Loader2, Trash2, Pencil, ToggleRight, ToggleLeft,
-  ArrowUp, ArrowDown, ChevronsUpDown
+  Plus, Loader2, Trash2, Pencil, Eye,
+  ArrowUp, ArrowDown, ChevronsUpDown, MoreVertical, Power
 } from 'lucide-react';
 import EmptyState from '../common/EmptyState';
 import PaginationBar from '../common/PaginationBar';
@@ -16,15 +18,28 @@ function SortIcon({ columnKey, sortConfig }) {
 }
 
 /**
- * Sub-tabel perusahaan. Murni presentasional: semua data & handler
- * datang dari props (sumber: useCompanyBranchData + handler di tab).
+ * Sub-tabel perusahaan.
+ * Status = badge pasif (informasi saja). Aksi aktif/nonaktif pindah ke
+ * dropdown ⋮ dengan konfirmasi di level tab — tidak ada lagi toggle
+ * satu-klik yang mengubah banyak cabang sekaligus.
  */
 export default function CompaniesTable({
   paginatedCompanies, totalCount, filteredCount,
   page, totalPages, onPageChange, pageSize,
   sortConfig, onSort,
-  processingCode, onToggle, onEdit, onDelete, onAdd,
+  processingCode, onToggleRequest, onEdit, onDelete, onAdd, onViewDetail,
 }) {
+  const [menuOpenCode, setMenuOpenCode] = useState(null);
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
+
+  const openMenu = (e, code) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setMenuPos({ top: rect.bottom + window.scrollY, left: rect.right - 180 + window.scrollX });
+    setMenuOpenCode(menuOpenCode === code ? null : code);
+  };
+
+  const closeMenu = () => setMenuOpenCode(null);
+
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
@@ -57,29 +72,83 @@ export default function CompaniesTable({
                     Nama <SortIcon columnKey="name" sortConfig={sortConfig} />
                   </th>
                   <th className="p-3">Alamat</th>
-                  <th className="p-3 w-24 cursor-pointer select-none hover:text-ink" onClick={() => onSort('is_active')}>
+                  <th className="p-3 w-28 cursor-pointer select-none hover:text-ink" onClick={() => onSort('is_active')}>
                     Status <SortIcon columnKey="is_active" sortConfig={sortConfig} />
                   </th>
-                  <th className="p-3 w-24">Aksi</th>
+                  <th className="p-3 w-28">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-hairline">
-                {paginatedCompanies.map((c, idx) => (
-                  <motion.tr key={c.code} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.03 }} className="hover:bg-surface-soft/50 transition-colors">
-                    <td className="p-3 font-medium text-sm">{c.code}</td>
-                    <td className="p-3 text-body text-sm">{c.name}</td>
-                    <td className="p-3 text-muted text-sm">{c.address || '-'}</td>
-                    <td className="p-3">
-                      <button onClick={() => onToggle(c)} disabled={processingCode === c.code} className="flex items-center gap-1 text-xs font-medium hover:opacity-80 disabled:opacity-50">
-                        {processingCode === c.code ? <Loader2 size={16} className="animate-spin" /> : c.is_active ? <><ToggleRight size={18} className="text-success" /> Aktif</> : <><ToggleLeft size={18} className="text-error" /> Nonaktif</>}
-                      </button>
-                    </td>
-                    <td className="p-3 flex gap-2">
-                      <button onClick={() => onEdit(c)} className="text-muted hover:text-ink"><Pencil size={16} /></button>
-                      <button onClick={() => onDelete(c.code)} className="text-muted hover:text-error"><Trash2 size={16} /></button>
-                    </td>
-                  </motion.tr>
-                ))}
+                {paginatedCompanies.map((c, idx) => {
+                  const isProcessing = processingCode === c.code;
+                  const isMenuOpen = menuOpenCode === c.code;
+                  return (
+                    <motion.tr key={c.code} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.03 }} className="hover:bg-surface-soft/50 transition-colors">
+                      <td className="p-3 font-medium text-sm">{c.code}</td>
+                      <td className="p-3 text-body text-sm">{c.name}</td>
+                      <td className="p-3 text-muted text-sm">{c.address || '-'}</td>
+                      {/* Status = badge pasif */}
+                      <td className="p-3">
+                        {isProcessing ? (
+                          <span className="inline-flex items-center gap-1.5 text-muted text-xs"><Loader2 size={14} className="animate-spin" /> Memproses…</span>
+                        ) : c.is_active ? (
+                          <span className="inline-flex items-center gap-1.5 text-success text-xs font-medium">
+                            <span className="w-1.5 h-1.5 rounded-full bg-success" /> Aktif
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 text-error text-xs font-medium">
+                            <span className="w-1.5 h-1.5 rounded-full bg-error opacity-70" /> Nonaktif
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-3">
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => onViewDetail(c)} disabled={isProcessing}
+                            className="p-1.5 text-muted hover:text-primary rounded-md transition-colors disabled:opacity-50" title="Lihat Detail">
+                            <Eye size={16} />
+                          </button>
+                          <button onClick={() => onEdit(c)} disabled={isProcessing}
+                            className="p-1.5 text-muted hover:text-ink rounded-md transition-colors disabled:opacity-50" title="Edit">
+                            <Pencil size={15} />
+                          </button>
+
+                          {/* Dropdown aksi sekunder */}
+                          <div className="relative company-menu-trigger">
+                            <button onClick={(e) => openMenu(e, c.code)} disabled={isProcessing}
+                              className="p-1.5 text-muted hover:text-ink rounded-md transition-colors disabled:opacity-50" title="Aksi Lainnya">
+                              <MoreVertical size={15} />
+                            </button>
+
+                            {isMenuOpen && createPortal(
+                              <>
+                                {/* penutup klik-luar */}
+                                <div className="fixed inset-0 z-[9998]" onMouseDown={closeMenu} />
+                                <div className="fixed z-[9999] w-44 bg-white rounded-md shadow-lg border border-hairline py-1"
+                                  style={{ top: menuPos.top, left: menuPos.left }}>
+                                  <button
+                                    onClick={() => { closeMenu(); onToggleRequest(c); }}
+                                    className="flex items-center gap-2 w-full px-4 py-2 text-xs hover:bg-surface-soft transition-colors text-left"
+                                  >
+                                    {c.is_active
+                                      ? <><Power size={14} className="text-error" /> <span className="text-error">Nonaktifkan…</span></>
+                                      : <><Power size={14} className="text-success" /> <span className="text-success">Aktifkan…</span></>}
+                                  </button>
+                                  <button
+                                    onClick={() => { closeMenu(); onDelete(c.code); }}
+                                    className="flex items-center gap-2 w-full px-4 py-2 text-xs text-error hover:bg-error/5 transition-colors text-left"
+                                  >
+                                    <Trash2 size={14} /> Hapus…
+                                  </button>
+                                </div>
+                              </>,
+                              document.body
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                    </motion.tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

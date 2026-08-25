@@ -7,8 +7,10 @@ import { notify } from '../../utils/notification';
 import ConfirmationDialog from './common/ConfirmationDialog';
 import SkeletonTable from './common/SkeletonTable';
 import CompanyModal from './company/CompanyModal';
+import CompanyDetailModal from './company/CompanyDetailModal';
 import CompaniesTable from './company/CompaniesTable';
 import BranchModal from './branch/BranchModal';
+import BranchDetailModal from './branch/BranchDetailModal';
 import BranchesTable from './branch/BranchesTable';
 import TenantModal from './tenants/TenantModal';
 import useAdminShortcuts from '../../hooks/useAdminShortcuts';
@@ -48,6 +50,10 @@ export default function CompanyBranchesTab() {
   const [testing, setTesting] = useState(false);
   const [processingCode, setProcessingCode] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
+
+  // ---- DETAIL MODALS ----
+  const [detailCompany, setDetailCompany] = useState(null);
+  const [detailBranch, setDetailBranch] = useState(null);
 
   // ---- DROPDOWN ----
   const [dropdownOpen, setDropdownOpen] = useState(null);
@@ -89,22 +95,31 @@ export default function CompanyBranchesTab() {
     }
   };
 
-  const handleToggleCompany = async (company) => {
-    setProcessingCode(company.code);
-    try {
-      const newStatus = !company.is_active;
-      await api.updateCompany(company.code, {
-        name: company.name,
-        address: company.address || '',
-        is_active: newStatus,
-      });
-      notify.success(`Perusahaan berhasil ${newStatus ? 'diaktifkan' : 'dinonaktifkan'}`);
-      await fetchData();
-    } catch (e) {
-      notify.error(e.response?.data?.detail || 'Gagal mengubah status perusahaan');
-    } finally {
-      setProcessingCode(null);
-    }
+  const handleToggleCompany = (company) => {
+    // Aksi berdampak kaskade (semua cabang ikut berubah) -> wajib konfirmasi
+    setConfirmState({
+      title: company.is_active ? 'Nonaktifkan Perusahaan?' : 'Aktifkan Perusahaan?',
+      message: company.is_active
+        ? `Semua cabang di bawah ${company.name} akan ikut dinonaktifkan. Lanjutkan?`
+        : `Perusahaan ${company.name} dan seluruh cabangnya akan diaktifkan kembali. Lanjutkan?`,
+      onConfirm: async () => {
+        setProcessingCode(company.code);
+        try {
+          await api.updateCompany(company.code, {
+            name: company.name,
+            address: company.address || '',
+            is_active: !company.is_active,
+          });
+          notify.success(`Perusahaan berhasil ${!company.is_active ? 'diaktifkan' : 'dinonaktifkan'}`);
+          await fetchData();
+        } catch (e) {
+          notify.error(e.response?.data?.detail || 'Gagal mengubah status perusahaan');
+        } finally {
+          setProcessingCode(null);
+          setConfirmState(null);
+        }
+      },
+    });
   };
 
   const handleDeleteCompany = (code) => {
@@ -290,10 +305,11 @@ export default function CompanyBranchesTab() {
           sortConfig={companySortConfig}
           onSort={handleCompanySort}
           processingCode={processingCode}
-          onToggle={handleToggleCompany}
+          onToggleRequest={handleToggleCompany}
           onEdit={(c) => { setEditingCompany(c); setShowCompanyModal(true); }}
           onDelete={handleDeleteCompany}
           onAdd={() => { setEditingCompany(null); setShowCompanyModal(true); }}
+          onViewDetail={(c) => setDetailCompany(c)}
         />
       )}
 
@@ -317,6 +333,7 @@ export default function CompanyBranchesTab() {
           onDisconnect={handleDisconnectTenant}
           onConnectDb={(b) => { setEditingTenantBranch(b.code); setShowTenantModal(true); }}
           onEditTenant={(code) => { setEditingTenantBranch(code); setShowTenantModal(true); }}
+          onViewDetail={(b) => setDetailBranch(b)}
           onEditBranch={(b) => { setEditingBranch(b); setShowBranchModal(true); }}
           onDeleteBranch={handleDeleteBranch}
           onAddBranch={() => { setEditingBranch(null); setShowBranchModal(true); }}
@@ -362,6 +379,27 @@ export default function CompanyBranchesTab() {
           tenant={tenantData[editingTenantBranch]}
           isSaving={saving}
           isTesting={testing}
+        />
+      )}
+
+      {detailCompany && (
+        <CompanyDetailModal
+          isOpen={!!detailCompany}
+          onClose={() => setDetailCompany(null)}
+          company={detailCompany}
+          branches={data.branches}
+          connectionStatus={connectionStatus}
+        />
+      )}
+
+      {detailBranch && (
+        <BranchDetailModal
+          isOpen={!!detailBranch}
+          onClose={() => setDetailBranch(null)}
+          branch={detailBranch}
+          companyName={companiesByCode[detailBranch.company_code]?.name}
+          tenantData={tenantData}
+          connectionStatus={connectionStatus}
         />
       )}
 
