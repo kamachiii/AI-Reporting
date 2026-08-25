@@ -105,9 +105,6 @@ export default function UsersTab() {
   };
 
   const handleToggleStatus = (u) => {
-    if (!u.is_active && u.role === 'admin') {
-      // mengaktifkan kembali admin selalu boleh
-    }
     setConfirmState({
       title: u.is_active ? 'Nonaktifkan User?' : 'Aktifkan User?',
       message: u.is_active

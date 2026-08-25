@@ -283,9 +283,6 @@ ai-report-database-mandiri/
 
 Platform ini menggunakan **9 tabel** di database core (`ai-dms`):
 
-## 🗄 Database Schema
-
-Platform ini menggunakan **9 tabel** di database core (`ai-dms`):
 
 ```mermaid
 erDiagram

@@ -107,7 +107,7 @@ export const api = {
   },
 
   // ==========================================
-  // 5. ADMIN: USERS
+  // 3. ADMIN: USERS
   // ==========================================
   getUsers: async () => {
     const response = await apiClient.get('/admin/users');

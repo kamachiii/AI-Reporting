@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     # Database Core
     core_db_host: str = os.getenv("CORE_DB_HOST", "localhost")
     core_db_port: int = int(os.getenv("CORE_DB_PORT", "5433"))
-    core_db_name: str = os.getenv("CORE_DB_NAME", "platform_core")
+    core_db_name: str = os.getenv("CORE_DB_NAME", "ai-dms")
     core_db_user: str = os.getenv("CORE_DB_USER", "postgres")
     core_db_password: str = os.getenv("CORE_DB_PASSWORD", "postgres")
 
