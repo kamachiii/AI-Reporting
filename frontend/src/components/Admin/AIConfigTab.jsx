@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import ModelPickerModal from './ModelPickerModal';
+import ModelPickerModal from './ai/ModelPickerModal';
 import { api } from '../../services/api';
 import {
   Plus, X, CheckCircle, XCircle, Eye, EyeOff,
@@ -10,6 +10,7 @@ import {
 import toast from 'react-hot-toast';
 import EmptyState from './common/EmptyState';
 import useDebounce from '../../hooks/useDebounce';
+import useAdminShortcuts from '../../hooks/useAdminShortcuts';
 
 export default function AIConfigTab() {
   const [configs, setConfigs] = useState([]);
@@ -215,17 +216,14 @@ export default function AIConfigTab() {
   }, [configs, debouncedSearch]);
 
   // Keyboard: Esc menutup modal paling atas
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key !== 'Escape') return;
-      if (isTesting || fetchingModels) return; // jangan tutup saat proses berjalan
+  useAdminShortcuts({
+    onEscape: () => {
       if (configToDelete) setConfigToDelete(null);
       else if (isModelPickerOpen) setIsModelPickerOpen(false);
       else if (showModal) setShowModal(false);
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [configToDelete, isModelPickerOpen, showModal, isTesting, fetchingModels]);
+    },
+    isBusy: isTesting || fetchingModels,
+  });
 
   // --- Skeleton Loader ---
   const SkeletonLoader = () => (

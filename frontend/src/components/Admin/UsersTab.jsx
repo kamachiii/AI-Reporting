@@ -11,6 +11,7 @@ import EmptyState from './common/EmptyState';
 import ConfirmationDialog from './common/ConfirmationDialog';
 import UserModal from './users/UserModal';
 import useDebounce from '../../hooks/useDebounce';
+import useAdminShortcuts from '../../hooks/useAdminShortcuts';
 
 const PAGE_SIZE = 10;
 
@@ -33,20 +34,14 @@ export default function UsersTab() {
   }, []);
 
   // Esc menutup modal/dialog; "/" fokus pencarian
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === 'Escape') {
-        if (processingId || saving) return;
-        if (confirmState) setConfirmState(null);
-        else if (showUserModal) setShowUserModal(false);
-      } else if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
-        e.preventDefault();
-        document.getElementById('user-search')?.focus();
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [confirmState, showUserModal, processingId, saving]);
+  useAdminShortcuts({
+    onEscape: () => {
+      if (confirmState) setConfirmState(null);
+      else if (showUserModal) setShowUserModal(false);
+    },
+    isBusy: !!processingId || saving,
+    searchInputId: 'user-search',
+  });
 
   const fetchData = async () => {
     setLoading(true);

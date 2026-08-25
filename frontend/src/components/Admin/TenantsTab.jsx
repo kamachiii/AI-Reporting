@@ -1,14 +1,17 @@
 import { useState, useEffect, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { api } from '../../services/api';
 import {
   Plus, CheckCircle, XCircle, Search,
-  Loader2, AlertTriangle, Trash2, Wifi, X
+  Loader2, Trash2, Wifi, X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import PaginationBar from './common/PaginationBar';
 import EmptyState from './common/EmptyState';
+import ConfirmationDialog from './common/ConfirmationDialog';
+import TenantFormModal from './tenants/TenantFormModal';
 import useDebounce from '../../hooks/useDebounce';
+import useAdminShortcuts from '../../hooks/useAdminShortcuts';
 
 const PAGE_SIZE = 10;
 
@@ -16,96 +19,89 @@ export default function TenantsTab() {
   const [tenants, setTenants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const debouncedSearch = useDebounce(searchTerm, 300);
   const [statusFilter, setStatusFilter] = useState('All');
   const [page, setPage] = useState(1);
   const [connectionStatus, setConnectionStatus] = useState({});
   const [showAddModal, setShowAddModal] = useState(false);
   const [processingCode, setProcessingCode] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
-  const debouncedSearch = useDebounce(searchTerm, 300);
-
-  // Form state for Add Tenant
-  const [form, setForm] = useState({
-    branch_code: '',
-    db_host: '',
-    db_port: '5432',
-    db_name: '',
-    db_username: '',
-    db_password: '',
-  });
 
   useEffect(() => {
     fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useAdminShortcuts({
+    onEscape: () => {
+      if (confirmState) setConfirmState(null);
+      else if (showAddModal) setShowAddModal(false);
+    },
+    isBusy: !!processingCode,
+    searchInputId: 'tenant-search',
+  });
 
   const fetchData = async () => {
     setLoading(true);
     try {
       const data = await api.getTenants();
       setTenants(data || []);
-      await testAllConnections(data || []);
-    } catch (e) {
+      testAllConnections(data || []);
+    } catch {
       toast.error('Gagal memuat data tenant');
     } finally {
       setLoading(false);
     }
   };
 
-  const testAllConnections = async (tenantList) => {
-    const statuses = {};
-    await Promise.all(tenantList.map(async (t) => {
-      // Tampilkan status 'checking' per baris selama tes berjalan (paralel)
+  const testAllConnections = (tenantList) => {
+    // Paralel; tiap baris menampilkan spinner sampai hasilnya masuk
+    tenantList.forEach(async (t) => {
       setConnectionStatus(prev => ({ ...prev, [t.branch_code]: 'checking' }));
       try {
         const result = await api.testTenantConnection(t.branch_code);
-        statuses[t.branch_code] = result.status;
-      } catch (e) {
-        statuses[t.branch_code] = 'disconnected';
+        setConnectionStatus(prev => ({ ...prev, [t.branch_code]: result.status }));
+      } catch {
+        setConnectionStatus(prev => ({ ...prev, [t.branch_code]: 'disconnected' }));
       }
-      setConnectionStatus(prev => ({ ...prev, [t.branch_code]: statuses[t.branch_code] }));
-    }));
+    });
   };
 
   const handleTestSingle = async (branch_code) => {
-    setConnectionStatus(prev => ({ ...prev, [branch_code]: 'loading' }));
+    setConnectionStatus(prev => ({ ...prev, [branch_code]: 'checking' }));
     try {
       const result = await api.testTenantConnection(branch_code);
       setConnectionStatus(prev => ({ ...prev, [branch_code]: result.status }));
       if (result.status === 'connected') toast.success(`Koneksi ke ${branch_code} berhasil!`);
       else toast.error(`Koneksi gagal: ${result.message || ''}`);
-    } catch (e) {
+    } catch {
       setConnectionStatus(prev => ({ ...prev, [branch_code]: 'disconnected' }));
       toast.error('Gagal melakukan test koneksi');
     }
   };
 
-  const handleAddTenant = async (e) => {
-    e.preventDefault();
+  const handleAddTenant = async (form) => {
     try {
       await api.createTenant(form);
       toast.success('Tenant berhasil ditambahkan!');
       setShowAddModal(false);
-      setForm({ branch_code: '', db_host: '', db_port: '5432', db_name: '', db_username: '', db_password: '' });
       await fetchData();
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Gagal menambahkan tenant');
     }
   };
 
-  // --- DELETE LOGIC ---
   const handleDeleteTenant = (branch_code) => {
     setConfirmState({
       title: 'Hapus Tenant?',
       message: `Konfigurasi database untuk cabang ${branch_code} akan dihapus permanen. Tindakan ini tidak bisa dibatalkan.`,
-      danger: true,
       onConfirm: async () => {
         setProcessingCode(branch_code);
         try {
-          // Pastikan ada endpoint DELETE /admin/tenants/{branch_code} di backend
-          await api.deleteTenant(branch_code); 
+          await api.deleteTenant(branch_code);
           toast.success('Tenant berhasil dihapus');
           await fetchData();
-        } catch (e) {
+        } catch {
           toast.error('Gagal menghapus tenant');
         } finally {
           setProcessingCode(null);
@@ -138,49 +134,30 @@ export default function TenantsTab() {
     return filteredTenants.slice(start, start + PAGE_SIZE);
   }, [filteredTenants, page]);
 
-  // Reset page ketika search/filter berubah
-  useEffect(() => setPage(1), [debouncedSearch, statusFilter]);
-  // Clamp page jika halaman saat ini melebihi total
+  useEffect(() => setPage(1), [debouncedSearch, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
+    if (page > totalPages) setPage(totalPages); // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, totalPages]);
 
-  // Keyboard: Esc menutup modal/dialog paling atas; "/" fokus ke pencarian
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === 'Escape') {
-        if (processingCode) return; // jangan tutup saat proses berjalan
-        if (confirmState) setConfirmState(null);
-        else if (showAddModal) setShowAddModal(false);
-      } else if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
-        e.preventDefault();
-        document.getElementById('tenant-search')?.focus();
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [confirmState, showAddModal, processingCode]);
-
-  // --- Skeleton Loader ---
-  const SkeletonLoader = () => (
-    <div className="bg-white rounded-xl border border-hairline overflow-hidden shadow-sm p-4 space-y-3 animate-pulse">
-      <div className="h-8 bg-surface-soft rounded w-1/4 mb-4" />
-      {[...Array(4)].map((_, i) => (
-        <div key={i} className="flex gap-4">
-          <div className="h-6 bg-surface-soft rounded w-1/6" />
-          <div className="h-6 bg-surface-soft rounded w-1/4" />
-          <div className="h-6 bg-surface-soft rounded w-1/4" />
-          <div className="h-6 bg-surface-soft rounded w-1/6" />
-        </div>
-      ))}
-    </div>
-  );
-
-  if (loading) return <SkeletonLoader />;
+  if (loading) {
+    return (
+      <div className="bg-white rounded-xl border border-hairline overflow-hidden shadow-sm p-4 space-y-3 animate-pulse">
+        <div className="h-8 bg-surface-soft rounded w-1/4 mb-4" />
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="flex gap-4">
+            <div className="h-6 bg-surface-soft rounded w-1/6" />
+            <div className="h-6 bg-surface-soft rounded w-1/4" />
+            <div className="h-6 bg-surface-soft rounded w-1/4" />
+            <div className="h-6 bg-surface-soft rounded w-1/6" />
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      {/* Header & Search & Filter */}
+      {/* Search + filter status + tambah */}
       <div className="flex flex-col md:flex-row justify-between items-center gap-4 flex-wrap">
         <div className="relative flex-1 max-w-sm w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
@@ -193,44 +170,30 @@ export default function TenantsTab() {
             className="w-full pl-9 pr-8 py-2 border border-hairline rounded-md bg-canvas text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
           />
           {searchTerm && (
-            <button
-              type="button"
-              onClick={() => setSearchTerm('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-ink"
-            >
+            <button type="button" onClick={() => setSearchTerm('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-ink">
               <X size={14} />
             </button>
           )}
         </div>
-        
+
         <div className="flex items-center gap-3 w-full md:w-auto">
-          {/* Segmented Control Filter Status */}
           <div className="flex gap-1 border border-hairline rounded-md p-1 bg-surface-soft">
             {['All', 'Connected', 'Disconnected'].map((status) => (
-              <button
-                key={status}
-                onClick={() => setStatusFilter(status)}
+              <button key={status} onClick={() => setStatusFilter(status)}
                 className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-                  statusFilter === status
-                    ? 'bg-primary text-white shadow-sm'
-                    : 'text-muted hover:text-ink'
-                }`}
-              >
+                  statusFilter === status ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-ink'
+                }`}>
                 {status}
               </button>
             ))}
           </div>
-
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active whitespace-nowrap"
-          >
+          <button onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active whitespace-nowrap">
             <Plus size={14} /> Tambah Tenant
           </button>
         </div>
       </div>
 
-      {/* Table */}
       {filteredTenants.length === 0 ? (
         <EmptyState
           variant="plug"
@@ -255,13 +218,12 @@ export default function TenantsTab() {
               </thead>
               <tbody className="divide-y divide-hairline">
                 {paginatedTenants.map((t, idx) => {
-                  const status = connectionStatus[t.branch_code] || 'loading';
+                  const status = connectionStatus[t.branch_code] || 'checking';
                   const isProcessing = processingCode === t.branch_code;
                   return (
                     <motion.tr
                       key={t.branch_code}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
+                      initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: Math.min(idx * 0.03, 0.3) }}
                       className="hover:bg-surface-soft/50 transition-colors"
                     >
@@ -283,19 +245,13 @@ export default function TenantsTab() {
                       </td>
                       <td className="p-3 text-sm text-body">{t.db_host}:{t.db_port}</td>
                       <td className="p-3 flex gap-2">
-                        <button
-                          onClick={() => handleTestSingle(t.branch_code)}
-                          disabled={status === 'loading' || status === 'checking'}
-                          className="text-muted hover:text-primary transition-colors disabled:opacity-50"
-                          title="Test Koneksi"
-                        >
+                        <button onClick={() => handleTestSingle(t.branch_code)}
+                          disabled={status === 'checking' || status === 'loading'}
+                          className="text-muted hover:text-primary transition-colors disabled:opacity-50" title="Test Koneksi">
                           <Wifi size={14} />
                         </button>
-                        <button
-                          onClick={() => handleDeleteTenant(t.branch_code)}
-                          disabled={isProcessing}
-                          className="text-muted hover:text-error transition-colors disabled:opacity-50"
-                        >
+                        <button onClick={() => handleDeleteTenant(t.branch_code)} disabled={isProcessing}
+                          className="text-muted hover:text-error transition-colors disabled:opacity-50" title="Hapus">
                           {isProcessing ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                         </button>
                       </td>
@@ -305,165 +261,31 @@ export default function TenantsTab() {
               </tbody>
             </table>
           </div>
-          <PaginationBar
-            page={page}
-            totalPages={totalPages}
-            onChange={setPage}
-            totalItems={filteredTenants.length}
-            pageSize={PAGE_SIZE}
-          />
+          <PaginationBar page={page} totalPages={totalPages} onChange={setPage} totalItems={filteredTenants.length} pageSize={PAGE_SIZE} />
         </div>
       )}
 
-      {/* ============== CONFIRM DELETE DIALOG ============== */}
-      <AnimatePresence>
-        {confirmState && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4"
-            onClick={(e) => { if (e.target === e.currentTarget && !processingCode) setConfirmState(null); }}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              transition={{ type: 'spring', damping: 20, stiffness: 300 }}
-              className="bg-white rounded-xl p-6 max-w-sm w-full shadow-xl border border-hairline"
-            >
-              <div className="flex items-start gap-3 mb-4">
-                <AlertTriangle size={18} className="text-error mt-0.5" />
-                <div>
-                  <h3 className="font-serif text-base text-ink">{confirmState.title}</h3>
-                  <p className="text-sm text-muted mt-1">{confirmState.message}</p>
-                </div>
-              </div>
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setConfirmState(null)}
-                  disabled={!!processingCode}
-                  className="px-4 py-2 border border-hairline rounded-md text-sm hover:bg-surface-soft disabled:opacity-50"
-                >
-                  Batal
-                </button>
-                <button
-                  type="button"
-                  onClick={confirmState.onConfirm}
-                  disabled={!!processingCode}
-                  className="flex items-center gap-2 px-4 py-2 bg-error text-white rounded-md text-sm hover:opacity-90 disabled:opacity-60"
-                >
-                  {processingCode && <Loader2 size={14} className="animate-spin" />}
-                  Hapus
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Confirm delete */}
+      {confirmState && (
+        <ConfirmationDialog
+          key="tenantConfirm"
+          isOpen={!!confirmState}
+          onClose={() => setConfirmState(null)}
+          onConfirm={confirmState.onConfirm}
+          title={confirmState.title}
+          message={confirmState.message}
+          isLoading={!!processingCode}
+        />
+      )}
 
-      {/* ============== MODAL TAMBAH TENANT ============== */}
-      <AnimatePresence>
-        {showAddModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-            onClick={(e) => { if (e.target === e.currentTarget) setShowAddModal(false); }}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              transition={{ type: 'spring', damping: 20, stiffness: 300 }}
-              className="bg-white rounded-xl p-6 max-w-lg w-full shadow-xl border border-hairline relative"
-            >
-              <button onClick={() => setShowAddModal(false)} className="absolute right-4 top-4 text-muted hover:text-ink">
-                <X size={20} />
-              </button>
-              <h3 className="font-serif text-lg text-ink mb-4">Tambah Tenant Baru</h3>
-              <form onSubmit={handleAddTenant} className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-ink mb-1">Kode Cabang</label>
-                    <input
-                      required
-                      value={form.branch_code}
-                      onChange={(e) => setForm({ ...form, branch_code: e.target.value })}
-                      className="w-full px-3 py-2 border border-hairline rounded-md bg-canvas focus:ring-2 focus:ring-primary/30"
-                      placeholder="JKT_01"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-ink mb-1">Database Port</label>
-                    <input
-                      required
-                      type="number"
-                      value={form.db_port}
-                      onChange={(e) => setForm({ ...form, db_port: e.target.value })}
-                      className="w-full px-3 py-2 border border-hairline rounded-md bg-canvas focus:ring-2 focus:ring-primary/30"
-                      placeholder="5432"
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-ink mb-1">Database Host</label>
-                    <input
-                      required
-                      value={form.db_host}
-                      onChange={(e) => setForm({ ...form, db_host: e.target.value })}
-                      className="w-full px-3 py-2 border border-hairline rounded-md bg-canvas focus:ring-2 focus:ring-primary/30"
-                      placeholder="localhost atau domain"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-ink mb-1">Database Name</label>
-                    <input
-                      required
-                      value={form.db_name}
-                      onChange={(e) => setForm({ ...form, db_name: e.target.value })}
-                      className="w-full px-3 py-2 border border-hairline rounded-md bg-canvas focus:ring-2 focus:ring-primary/30"
-                      placeholder="nama_database"
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-ink mb-1">Username DB</label>
-                    <input
-                      required
-                      value={form.db_username}
-                      onChange={(e) => setForm({ ...form, db_username: e.target.value })}
-                      className="w-full px-3 py-2 border border-hairline rounded-md bg-canvas focus:ring-2 focus:ring-primary/30"
-                      placeholder="postgres"
-                    />
-                  </div>
-                  <div className="flex flex-col">
-                    <label className="block text-sm font-medium text-ink mb-1">Password DB</label>
-                    <div className="relative flex-1">
-                      <input
-                        required
-                        type="password"
-                        value={form.db_password}
-                        onChange={(e) => setForm({ ...form, db_password: e.target.value })}
-                        className="w-full px-3 py-2 border border-hairline rounded-md bg-canvas focus:ring-2 focus:ring-primary/30"
-                        placeholder="••••••••"
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div className="flex justify-end gap-2 pt-3 border-t border-hairline mt-2">
-                  <button type="button" onClick={() => setShowAddModal(false)} className="px-4 py-2 border border-hairline rounded-md text-sm hover:bg-surface-soft">Batal</button>
-                  <button type="submit" className="px-4 py-2 bg-primary text-white rounded-md text-sm hover:bg-primary-active">Simpan Tenant</button>
-                </div>
-              </form>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Modal tambah */}
+      {showAddModal && (
+        <TenantFormModal
+          isOpen={showAddModal}
+          onClose={() => setShowAddModal(false)}
+          onSubmit={handleAddTenant}
+        />
+      )}
     </div>
   );
 }

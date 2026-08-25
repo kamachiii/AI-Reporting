@@ -17,7 +17,7 @@ import PaginationBar from './common/PaginationBar';
 import EmptyState from './common/EmptyState';
 import CompanyModal from './company/CompanyModal';
 import BranchModal from './branch/BranchModal';
-import TenantModal from './branch/TenantModal';
+import TenantModal from './tenants/TenantModal';
 import useDebounce from '../../hooks/useDebounce';
 
 const PAGE_SIZE = 15;
