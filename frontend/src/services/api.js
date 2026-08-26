@@ -130,10 +130,6 @@ export const api = {
     const response = await apiClient.post(`/admin/tenants/${branch_code}/test-connection`, data || {});
     return response.data;
   },
-  testTenantDraft: async (data) => {
-    const response = await apiClient.post('/admin/tenants/test-draft', data);
-    return response.data;
-  },
 
   // ==========================================
   // 3. ADMIN: USERS
