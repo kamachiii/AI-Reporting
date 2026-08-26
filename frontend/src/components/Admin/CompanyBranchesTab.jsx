@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, Search , Database, Plus, CheckCircle, Wifi, Pencil, Trash2, Loader2} from 'lucide-react';
+import { X, Search , Plus,} from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { notify } from '../../utils/notification';
@@ -13,7 +13,6 @@ import BranchModal from './branch/BranchModal';
 import BranchDetailModal from './branch/BranchDetailModal';
 import BranchesTable from './branch/BranchesTable';
 import ConnectDbModal from './tenants/ConnectDbModal';
-import DbConnectionModal from './tenants/DbConnectionModal';
 import useAdminShortcuts from '../../hooks/useAdminShortcuts';
 import useCompanyBranchData from '../../hooks/useCompanyBranchData';
 
@@ -27,7 +26,7 @@ export default function CompanyBranchesTab() {
   const {
     companies, loading, fetchData,
     tenantData, connectionStatus, companiesByCode, tableContainerRef,
-    dbConnections, dbConnectionsById,
+    dbConnectionsById,
     searchTerm, setSearchTerm,
     paginatedCompanies, companyPage, setCompanyPage, companyTotalPages, filteredCompanies,
     companySortConfig, handleCompanySort,
@@ -45,8 +44,6 @@ export default function CompanyBranchesTab() {
   const [editingCompany, setEditingCompany] = useState(null);
   const [editingBranch, setEditingBranch] = useState(null);
   const [connectDbBranch, setConnectDbBranch] = useState(null);
-  const [showRegistryModal, setShowRegistryModal] = useState(false);
-  const [editingRegistry, setEditingRegistry] = useState(null);
 
   // ---- PROCESSING / CONFIRM ----
   const [saving, setSaving] = useState(false);
@@ -234,57 +231,8 @@ export default function CompanyBranchesTab() {
     }
   };
 
-  const handleSaveRegistry = async ({ id, ...payload }) => {
-    setSaving(true);
-    try {
-      if (id) {
-        await api.updateDbConnection(id, payload);
-        notify.success('Database terdaftar berhasil diperbarui');
-      } else {
-        await api.createDbConnection(payload);
-        notify.success('Database berhasil didaftarkan');
-      }
-      setShowRegistryModal(false);
-      setEditingRegistry(null);
-      await fetchData();
-    } catch (e) {
-      notify.error(e.response?.data?.detail || 'Gagal menyimpan database');
-    } finally {
-      setSaving(false);
-    }
-  };
 
-  const handleDeleteRegistry = (conn) => {
-    setConfirmState({
-      title: 'Hapus Database Terdaftar?',
-      message: `Database "${conn.name}" akan dihapus dari registry. Cabang yang masih memakainya harus diputuskan dulu.`,
-      onConfirm: async () => {
-        try {
-          await api.deleteDbConnection(conn.id);
-          notify.success('Database dihapus dari registry');
-          setConfirmState(null);
-          await fetchData();
-        } catch (e) {
-          notify.error(e.response?.data?.detail || 'Gagal menghapus database');
-          setConfirmState(null);
-        }
-      },
-    });
-  };
 
-  const handleTestRegistry = async (connId) => {
-    setTesting(true);
-    try {
-      const result = await api.testDbConnection(connId);
-      result.status === 'connected'
-        ? notify.success('Koneksi berhasil!')
-        : notify.error(`Gagal: ${result.message || ''}`);
-    } catch {
-      notify.error('Gagal menguji koneksi');
-    } finally {
-      setTesting(false);
-    }
-  };
 
   const handleToggleBranchStatus = (b) => {
     setConfirmState({
@@ -379,47 +327,6 @@ export default function CompanyBranchesTab() {
       )}
 
       {activeTab === 'branches' && (
-        <div className="bg-white rounded-xl border border-hairline shadow-sm p-4">
-          <div className="flex justify-between items-center mb-3">
-            <div>
-              <h4 className="text-sm font-medium text-ink">Database Terdaftar</h4>
-              <p className="text-xs text-muted">Kredensial didaftarkan sekali di sini; cabang tinggal memilih.</p>
-            </div>
-            <button onClick={() => { setEditingRegistry(null); setShowRegistryModal(true); }}
-              className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active">
-              <Plus size={14} /> Daftarkan Database
-            </button>
-          </div>
-          {dbConnections.length === 0 ? (
-            <p className="text-sm text-muted italic">Belum ada database terdaftar. Klik &quot;Daftarkan Database&quot; untuk mulai.</p>
-          ) : (
-            <ul className="flex flex-wrap gap-2">
-              {dbConnections.map((c) => (
-                <li key={c.id} className="group flex items-center gap-2 border border-hairline rounded-md px-3 py-1.5 bg-surface-soft">
-                  <Database size={13} className={c.is_active ? 'text-success' : 'text-muted'} />
-                  <span className="text-sm text-body">{c.name}</span>
-                  <span className="text-xs text-muted">· dipakai {c.used_by} cabang</span>
-                  {Object.values(tenantData).some(t => t.db_connection_id === c.id) && (
-                    <span className="inline-flex items-center text-success text-xs"><CheckCircle size={12} /></span>
-                  )}
-                  <span className="hidden group-hover:flex items-center gap-1 ml-1">
-                    <button onClick={() => handleTestRegistry(c.id)} disabled={testing}
-                      title="Test Koneksi" aria-label={`Test koneksi ${c.name}`} className="p-0.5 text-muted hover:text-primary disabled:opacity-50">
-                      {testing ? <Loader2 size={12} className="animate-spin" /> : <Wifi size={12} />}
-                    </button>
-                    <button onClick={() => setEditingRegistry(c)} title="Edit" aria-label={`Edit ${c.name}`}
-                      className="p-0.5 text-muted hover:text-ink"><Pencil size={12} /></button>
-                    <button onClick={() => handleDeleteRegistry(c)} title="Hapus" aria-label={`Hapus ${c.name}`}
-                      className="p-0.5 text-muted hover:text-error"><Trash2 size={12} /></button>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-
-      {activeTab === 'branches' && (
         <BranchesTable
           paginatedBranches={paginatedBranches}
           filteredBranches={filteredBranches}
@@ -480,17 +387,6 @@ export default function CompanyBranchesTab() {
           branchCode={connectDbBranch}
           currentConnId={tenantData[connectDbBranch]?.db_connection_id}
           onSaved={handleSaveConnectDb}
-        />
-      )}
-
-      {showRegistryModal && (
-        <DbConnectionModal
-          key={editingRegistry?.id || 'new'}
-          isOpen={showRegistryModal}
-          onClose={() => { setShowRegistryModal(false); setEditingRegistry(null); }}
-          onSave={handleSaveRegistry}
-          editing={editingRegistry}
-          isSaving={saving}
         />
       )}
 

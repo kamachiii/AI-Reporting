@@ -31,8 +31,7 @@ test.describe('Admin — Perusahaan & Cabang', () => {
     page.on('pageerror', (e) => err.push(e.message));
     await page.getByRole('button', { name: 'Cabang / Dealer' }).click();
     // panel registry + tombol tambah cabang harus tampak
-    await expect(page.getByText('Database Terdaftar').first()).toBeVisible();
-    await expect(page.getByRole('button', { name: /tambah cabang/i })).toBeVisible();
+        await expect(page.getByRole('button', { name: /tambah cabang/i })).toBeVisible();
     expect(err, 'tidak boleh ada page error').toEqual([]);
   });
 
