@@ -123,8 +123,15 @@ export default function AIConfigTab() {
   return (
     <div className="space-y-6">
       {/* Search + Tambah */}
-      <div className="flex items-center gap-4 flex-wrap">
-        <div className="relative flex-1 max-w-sm">
+<div className="flex items-center gap-4 flex-wrap">
+        <button
+          onClick={() => { setEditing(null); setShowModal(true); }}
+          className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-md text-sm hover:bg-primary-active shadow-sm whitespace-nowrap"
+        >
+          <Plus size={16} /> Tambah Config AI
+        </button>
+
+        <div className="relative ml-auto w-full sm:w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
           <input
             id="aiconfig-search"
@@ -132,20 +139,14 @@ export default function AIConfigTab() {
             placeholder="Cari provider atau model...  ( / )"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 border border-hairline rounded-md bg-canvas text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+            className="w-full pl-9 pr-8 py-2 border border-hairline rounded-md bg-canvas text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
           />
           {searchTerm && (
-            <button type="button" onClick={() => setSearchTerm('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-ink">
+            <button type="button" onClick={() => setSearchTerm('')} aria-label="Bersihkan pencarian" className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-ink">
               <X size={14} />
             </button>
           )}
         </div>
-        <button
-          onClick={() => { setEditing(null); setShowModal(true); }}
-          className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-md text-sm hover:bg-primary-active shadow-sm whitespace-nowrap"
-        >
-          <Plus size={16} /> Tambah Config AI
-        </button>
       </div>
 
       {filteredConfigs.length === 0 ? (

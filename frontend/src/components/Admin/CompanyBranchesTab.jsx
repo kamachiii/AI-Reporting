@@ -323,8 +323,29 @@ export default function CompanyBranchesTab() {
   return (
     <div className="space-y-6">
       {/* Toolbar: search kiri - switch tengah - aksi kanan */}
-      <div className="flex items-center gap-4 flex-wrap">
-        <div className="relative flex-1 min-w-[200px] max-w-xs">
+<div className="flex items-center gap-4 flex-wrap">
+        {activeTab === 'companies' ? (
+          <button onClick={() => { setEditingCompany(null); setShowCompanyModal(true); }}
+            className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active whitespace-nowrap">
+            <Plus size={14} /> Tambah Perusahaan
+          </button>
+        ) : (
+          <button onClick={() => { setEditingBranch(null); setShowBranchModal(true); }}
+            className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active whitespace-nowrap">
+            <Plus size={14} /> Tambah Cabang
+          </button>
+        )}
+
+        <div className="flex gap-2 border border-hairline rounded-md p-1 bg-surface-soft">
+          <button onClick={() => { setActiveTab('companies'); setSearchTerm(''); }} className={`px-4 py-1.5 text-xs font-medium rounded transition-colors ${activeTab === 'companies' ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-ink'}`}>
+            Perusahaan
+          </button>
+          <button onClick={() => { setActiveTab('branches'); setSearchTerm(''); }} className={`px-4 py-1.5 text-xs font-medium rounded transition-colors ${activeTab === 'branches' ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-ink'}`}>
+            Cabang / Dealer
+          </button>
+        </div>
+
+        <div className="relative ml-auto w-full sm:w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
           <input
             id="cb-search"
@@ -337,29 +358,6 @@ export default function CompanyBranchesTab() {
           {searchTerm && (
             <button type="button" onClick={() => setSearchTerm('')} aria-label="Bersihkan pencarian" className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-ink">
               <X size={14} />
-            </button>
-          )}
-        </div>
-
-        <div className="flex gap-2 border border-hairline rounded-md p-1 bg-surface-soft">
-          <button onClick={() => { setActiveTab('companies'); setSearchTerm(''); }} className={`px-4 py-1.5 text-xs font-medium rounded transition-colors ${activeTab === 'companies' ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-ink'}`}>
-            Perusahaan
-          </button>
-          <button onClick={() => { setActiveTab('branches'); setSearchTerm(''); }} className={`px-4 py-1.5 text-xs font-medium rounded transition-colors ${activeTab === 'branches' ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-ink'}`}>
-            Cabang / Dealer
-          </button>
-        </div>
-
-        <div className="ml-auto">
-          {activeTab === 'companies' ? (
-            <button onClick={() => { setEditingCompany(null); setShowCompanyModal(true); }}
-              className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active whitespace-nowrap">
-              <Plus size={14} /> Tambah Perusahaan
-            </button>
-          ) : (
-            <button onClick={() => { setEditingBranch(null); setShowBranchModal(true); }}
-              className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active whitespace-nowrap">
-              <Plus size={14} /> Tambah Cabang
             </button>
           )}
         </div>

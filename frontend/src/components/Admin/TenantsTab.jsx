@@ -145,8 +145,24 @@ export default function TenantsTab() {
   return (
     <div className="space-y-6">
       {/* Search + filter status + tambah */}
-      <div className="flex items-center gap-4 flex-wrap">
-        <div className="relative flex-1 max-w-sm w-full">
+<div className="flex items-center gap-4 flex-wrap">
+        <button onClick={() => setShowAddModal(true)}
+          className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active whitespace-nowrap">
+          <Plus size={14} /> Tambah Tenant
+        </button>
+
+        <div className="flex gap-2 border border-hairline rounded-md p-1 bg-surface-soft">
+          {['All', 'Connected', 'Disconnected'].map((status) => (
+            <button key={status} onClick={() => setStatusFilter(status)}
+              className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                statusFilter === status ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-ink'
+              }`}>
+              {status}
+            </button>
+          ))}
+        </div>
+
+        <div className="relative ml-auto w-full sm:w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
           <input
             id="tenant-search"
@@ -157,27 +173,10 @@ export default function TenantsTab() {
             className="w-full pl-9 pr-8 py-2 border border-hairline rounded-md bg-canvas text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
           />
           {searchTerm && (
-            <button type="button" onClick={() => setSearchTerm('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-ink">
+            <button type="button" onClick={() => setSearchTerm('')} aria-label="Bersihkan pencarian" className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-ink">
               <X size={14} />
             </button>
           )}
-        </div>
-
-        <div className="flex items-center gap-3 ml-auto">
-          <div className="flex gap-1 border border-hairline rounded-md p-1 bg-surface-soft">
-            {['All', 'Connected', 'Disconnected'].map((status) => (
-              <button key={status} onClick={() => setStatusFilter(status)}
-                className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-                  statusFilter === status ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-ink'
-                }`}>
-                {status}
-              </button>
-            ))}
-          </div>
-          <button onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active whitespace-nowrap">
-            <Plus size={14} /> Tambah Tenant
-          </button>
         </div>
       </div>
 
