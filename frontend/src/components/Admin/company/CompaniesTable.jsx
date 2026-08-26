@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import {
-  Plus, Loader2, Trash2, Pencil, Eye,
+  Loader2, Trash2, Pencil, Eye,
   ArrowUp, ArrowDown, ChevronsUpDown, MoreVertical, Power
 } from 'lucide-react';
 import EmptyState from '../common/EmptyState';
@@ -24,10 +24,10 @@ function SortIcon({ columnKey, sortConfig }) {
  * satu-klik yang mengubah banyak cabang sekaligus.
  */
 export default function CompaniesTable({
-  paginatedCompanies, totalCount, filteredCount,
+  paginatedCompanies, filteredCount,
   page, totalPages, onPageChange, pageSize,
   sortConfig, onSort,
-  processingCode, onToggleRequest, onEdit, onDelete, onAdd, onViewDetail,
+  processingCode, onToggleRequest, onEdit, onDelete, onViewDetail,
 }) {
   const [menuOpenCode, setMenuOpenCode] = useState(null);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
@@ -42,22 +42,12 @@ export default function CompaniesTable({
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center">
-        <span className="text-xs text-muted">Menampilkan {filteredCount} dari {totalCount}</span>
-        <button onClick={onAdd} className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active">
-          <Plus size={14} /> Tambah Perusahaan
-        </button>
-      </div>
 
       {filteredCount === 0 ? (
         <EmptyState
           variant="box"
-          title={totalCount === 0 ? 'Belum ada perusahaan' : 'Tidak ada hasil'}
-          description={
-            totalCount === 0
-              ? 'Klik "Tambah Perusahaan" untuk mendaftarkan perusahaan pertama.'
-              : 'Coba kata kunci lain.'
-          }
+          title={'Belum ada perusahaan'}
+          description='Klik "Tambah Perusahaan" di kanan atas untuk mendaftarkan perusahaan pertama.'
         />
       ) : (
         <div className="bg-white rounded-xl border border-hairline overflow-hidden shadow-sm">

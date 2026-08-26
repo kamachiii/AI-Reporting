@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import {
-  Plus, CheckCircle, XCircle, Loader2, Trash2, Pencil,
+  CheckCircle, XCircle, Loader2, Trash2, Pencil,
   Link, MoreVertical, Database, Wifi, Eye, Power,
   ArrowUp, ArrowDown, ChevronsUpDown
 } from 'lucide-react';
@@ -25,34 +25,24 @@ function SortIcon({ columnKey, sortConfig }) {
  * hapus). Toggle status cabang memakai endpoint khusus + konfirmasi di tab.
  */
 export default function BranchesTable({
-  paginatedBranches, totalCount, filteredCount, companiesByCode,
+  paginatedBranches, filteredBranches, companiesByCode,
   connectionStatus, tenantData, dbConnectionsById,
   page, totalPages, onPageChange, pageSize,
   sortConfig, onSort,
   processingCode, tableContainerRef,
   onTestConnection, onConnectDb,
-  onViewDetail, onEditBranch, onDeleteBranch, onAddBranch,
+  onViewDetail, onEditBranch, onDeleteBranch,
   onToggleStatusRequest,
   dropdownOpen, setDropdownOpen, dropdownPos, setDropdownPos,
 }) {
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center">
-        <span className="text-xs text-muted">Menampilkan {filteredCount} dari {totalCount}</span>
-        <button onClick={onAddBranch} className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active">
-          <Plus size={14} /> Tambah Cabang
-        </button>
-      </div>
 
-      {filteredCount === 0 ? (
+      {paginatedBranches.length === 0 ? (
         <EmptyState
           variant="plug"
-          title={totalCount === 0 ? 'Belum ada cabang' : 'Tidak ada hasil'}
-          description={
-            totalCount === 0
-              ? 'Klik "Tambah Cabang" untuk mendaftarkan cabang pertama.'
-              : 'Coba kata kunci lain.'
-          }
+          title={'Belum ada cabang'}
+          description='Klik "Tambah Cabang" di kanan atas untuk mendaftarkan cabang pertama. Cabang terhubung database lewat panel Database Terdaftar di bawah.'
         />
       ) : (
         <div className="bg-white rounded-xl border border-hairline overflow-hidden shadow-sm">
@@ -243,7 +233,7 @@ export default function BranchesTable({
               </tbody>
             </table>
           </div>
-          <PaginationBar page={page} totalPages={totalPages} onChange={onPageChange} totalItems={filteredCount} pageSize={pageSize} />
+          <PaginationBar page={page} totalPages={totalPages} onChange={onPageChange} totalItems={filteredBranches.length} pageSize={pageSize} />
         </div>
       )}
     </div>

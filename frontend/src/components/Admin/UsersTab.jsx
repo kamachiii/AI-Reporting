@@ -153,7 +153,7 @@ export default function UsersTab() {
   return (
     <div className="space-y-6">
       {/* Search + Add */}
-      <div className="flex justify-between items-center gap-4 flex-wrap">
+      <div className="flex items-center gap-4 flex-wrap">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
           <input
