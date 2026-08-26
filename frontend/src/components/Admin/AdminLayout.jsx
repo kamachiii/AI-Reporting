@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Users, Database, Bot, FileText, LogOut, Building2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -8,28 +9,37 @@ import AIConfigTab from './AIConfigTab';
 import UsersTab from './UsersTab';
 import AuditLogTab from './AuditLogTab';
 
-const TAB_IDS = ['company', 'tenants', 'ai', 'users', 'audit'];
+// Tab resmi + slug URL-nya
+const TABS = [
+  { id: 'company', path: 'perusahaan-cabang', label: 'Perusahaan & Cabang', icon: Building2 },
+  { id: 'tenants', path: 'database-tenant',   label: 'Database & Tenant',    icon: Database },
+  { id: 'ai',      path: 'ai-config',         label: 'Penyedia & Model AI',  icon: Bot },
+  { id: 'users',   path: 'pengguna',          label: 'Pengguna & Izin',      icon: Users },
+  { id: 'audit',   path: 'audit-log',         label: 'Audit Log & Monitoring', icon: FileText },
+];
 
 export default function AdminLayout({ user, onLogout }) {
-  const [activeTab, setActiveTab] = useState('company');
+  const navigate = useNavigate();
+  const params = useParams();
+  // URL: /admin/:tabSlug — fallback ke tab pertama
+  const activeTab = TABS.find(t => t.path === params.tabSlug)?.id || 'company';
+
+  const setActiveTab = (id) => {
+    const tab = TABS.find(t => t.id === id);
+    if (tab) navigate(`/admin/${tab.path}`);
+  };
 
   // Navigasi antar-tab dari mana saja (mis. tombol di dalam toast):
   // window.dispatchEvent(new CustomEvent('dms-navigate', { detail: 'tenants' }))
   useEffect(() => {
     const onNavigate = (e) => {
-      if (TAB_IDS.includes(e.detail)) setActiveTab(e.detail);
+      if (TABS.some(t => t.id === e.detail)) setActiveTab(e.detail);
     };
     window.addEventListener('dms-navigate', onNavigate);
     return () => window.removeEventListener('dms-navigate', onNavigate);
   }, []);
 
-  const tabs = [
-    { id: 'company', label: 'Perusahaan & Cabang', icon: Building2 },
-    { id: 'tenants', label: 'Database & Tenant', icon: Database },
-    { id: 'ai', label: 'Penyedia & Model AI', icon: Bot },
-    { id: 'users', label: 'Pengguna & Izin', icon: Users },
-    { id: 'audit', label: 'Audit Log & Monitoring', icon: FileText },
-  ];
+  const tabs = TABS;
 
   const renderTabContent = () => {
     switch (activeTab) {

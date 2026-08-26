@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import LoginModal from './components/LoginModal';
 import AdminLayout from './components/Admin/AdminLayout';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -58,17 +59,32 @@ function App() {
     <>
       <Toaster position="top-right" />
       {!user ? (
-        <ErrorBoundary>
-          <LoginModal onLoginSuccess={handleLogin} />
-        </ErrorBoundary>
+        <Routes>
+          <Route path="*" element={
+            <ErrorBoundary>
+              <LoginModal onLoginSuccess={handleLogin} />
+            </ErrorBoundary>
+          } />
+        </Routes>
       ) : user.role === 'admin' ? (
-        <ErrorBoundary>
-          <AdminLayout user={user} onLogout={handleLogout} />
-        </ErrorBoundary>
+        <Routes>
+          <Route path="/admin" element={<Navigate to="/admin/perusahaan-cabang" replace />} />
+          <Route path="/" element={<Navigate to="/admin/perusahaan-cabang" replace />} />
+          <Route path="/admin/:tabSlug" element={
+            <ErrorBoundary>
+              <AdminLayout user={user} onLogout={handleLogout} />
+            </ErrorBoundary>
+          } />
+          <Route path="*" element={<Navigate to="/admin/perusahaan-cabang" replace />} />
+        </Routes>
       ) : (
-        <ErrorBoundary>
-          <UserWorkspace user={user} onLogout={handleLogout} />
-        </ErrorBoundary>
+        <Routes>
+          <Route path="*" element={
+            <ErrorBoundary>
+              <UserWorkspace user={user} onLogout={handleLogout} />
+            </ErrorBoundary>
+          } />
+        </Routes>
       )}
     </>
   );
