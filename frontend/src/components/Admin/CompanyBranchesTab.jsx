@@ -427,8 +427,7 @@ export default function CompanyBranchesTab() {
       {activeTab === 'branches' && (
         <BranchesTable
           paginatedBranches={paginatedBranches}
-          totalCount={data.branches.length}
-          filteredCount={filteredBranches.length}
+          filteredBranches={filteredBranches}
           companiesByCode={companiesByCode}
           connectionStatus={connectionStatus}
           tenantData={tenantData}
