@@ -64,12 +64,13 @@ async def create_db_connection(payload: DbConnectionCreate, user: dict = Depends
     try:
         pool = await get_core_pool()
         encrypted = encrypt_credential(payload.db_password)
-        await pool.execute("""
+        new_id = await pool.fetchval("""
             INSERT INTO db_connections (name, db_host, db_port, db_name, db_username, db_password)
             VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id
         """, payload.name.strip(), payload.db_host, payload.db_port,
             payload.db_name, payload.db_username, encrypted)
-        return {"message": f"Database '{payload.name}' berhasil didaftarkan"}
+        return {"message": f"Database '{payload.name}' berhasil didaftarkan", "id": new_id}
     except asyncpg.exceptions.UniqueViolationError:
         raise HTTPException(status_code=400, detail=f"Nama database '{payload.name}' sudah digunakan")
     except Exception as e:
