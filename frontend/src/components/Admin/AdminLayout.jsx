@@ -29,6 +29,13 @@ export default function AdminLayout({ user, onLogout }) {
     if (tab) navigate(`/admin/${tab.path}`);
   };
 
+  // Slug tidak dikenal -> alihkan ke tab pertama (URL benar-benar berubah)
+  useEffect(() => {
+    if (!TABS.some(t => t.path === params.tabSlug)) {
+      navigate('/admin/perusahaan-cabang', { replace: true });
+    }
+  }, [params.tabSlug, navigate]);
+
   // Navigasi antar-tab dari mana saja (mis. tombol di dalam toast):
   // window.dispatchEvent(new CustomEvent('dms-navigate', { detail: 'tenants' }))
   useEffect(() => {
