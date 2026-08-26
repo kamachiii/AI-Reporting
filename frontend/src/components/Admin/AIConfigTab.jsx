@@ -124,14 +124,7 @@ export default function AIConfigTab() {
     <div className="space-y-6">
       {/* Search + Tambah */}
 <div className="flex items-center gap-4 flex-wrap">
-        <button
-          onClick={() => { setEditing(null); setShowModal(true); }}
-          className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-md text-sm hover:bg-primary-active shadow-sm whitespace-nowrap"
-        >
-          <Plus size={16} /> Tambah Config AI
-        </button>
-
-        <div className="relative ml-auto w-full sm:w-64">
+        <div className="relative w-full sm:w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
           <input
             id="aiconfig-search"
@@ -147,6 +140,13 @@ export default function AIConfigTab() {
             </button>
           )}
         </div>
+
+        <button
+          onClick={() => { setEditing(null); setShowModal(true); }}
+          className="ml-auto flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-md text-sm hover:bg-primary-active shadow-sm whitespace-nowrap"
+        >
+          <Plus size={16} /> Tambah Config AI
+        </button>
       </div>
 
       {filteredConfigs.length === 0 ? (
