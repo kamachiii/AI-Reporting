@@ -182,7 +182,7 @@ export default function useCompanyBranchData() {
       if (aVal > bVal) return branchSortConfig.direction === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [filteredBranches, branchSortConfig, companiesByCode, connectionStatus]);
+  }, [filteredBranches, branchSortConfig, companiesByCode, connectionStatus, tenantData]);
 
   const [branchPage, setBranchPage] = useState(1);
   const branchTotalPages = Math.max(1, Math.ceil(sortedBranches.length / PAGE_SIZE));
