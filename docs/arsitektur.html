@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DMS AI Platform — Arsitektur Sistem</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background:#020617; color:#e2e8f0;
+    font-family:'JetBrains Mono', monospace;
+    min-height:100vh; padding:32px 24px;
+  }
+  .wrap { max-width:1200px; margin:0 auto; }
+  header { text-align:center; margin-bottom:28px; }
+  .title { display:flex; align-items:center; justify-content:center; gap:10px; }
+  .pulse { width:9px; height:9px; border-radius:50%; background:#34d399; animation:pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1; box-shadow:0 0 8px #34d399} 50%{opacity:.4; box-shadow:none} }
+  h1 { font-size:20px; font-weight:700; letter-spacing:1px; }
+  .sub { color:#64748b; font-size:11px; margin-top:6px; }
+  .card-svg { background:#0b1222; border:1px solid #1e293b; border-radius:12px; padding:18px; overflow-x:auto; }
+  svg { display:block; min-width:900px; width:100%; height:auto; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; margin-top:16px; }
+  .card { background:#0b1222; border:1px solid #1e293b; border-radius:10px; padding:16px; }
+  .card-header { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  .dot { width:8px; height:8px; border-radius:50%; }
+  .cyan{background:#22d3ee}.green{background:#34d399}.violet{background:#a78bfa}
+  .rose{background:#fb7185}.amber{background:#fbbf24}.orange{background:#fb923c}
+  .card h3 { font-size:12px; color:#cbd5e1; letter-spacing:.5px; }
+  .card ul { list-style:none; font-size:11px; color:#94a3b8; line-height:1.9; }
+  footer { text-align:center; color:#475569; font-size:9px; margin-top:18px; letter-spacing:1px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="title"><span class="pulse"></span><h1>DMS AI PLATFORM — ARSITEKTUR SAAT INI</h1></div>
+    <p class="sub">SaaS Add-on Chat AI untuk DMS · status: fondasi admin selesai, chat NL→SQL menyusul (Rabu)</p>
+  </header>
+
+  <div class="card-svg">
+  <svg viewBox="0 0 1160 760" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+        <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+      </pattern>
+      <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#64748b"/>
+      </marker>
+      <marker id="arrCyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#22d3ee"/>
+      </marker>
+      <marker id="arrGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#34d399"/>
+      </marker>
+      <marker id="arrRose" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#fb7185"/>
+      </marker>
+    </defs>
+
+    <rect width="100%" height="100%" fill="url(#grid)"/>
+
+    <!-- ============ ARROWS (di belakang box) ============ -->
+    <!-- Browser -> Backend (REST JWT) -->
+    <line x1="580" y1="150" x2="580" y2="205" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+    <text x="592" y="182" fill="#94a3b8" font-size="8">REST · JWT Bearer</text>
+
+    <!-- Backend -> Core DB -->
+    <line x1="430" y1="420" x2="330" y2="480" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrGreen)"/>
+    <text x="300" y="452" fill="#34d399" font-size="8">asyncpg :5433</text>
+
+    <!-- Backend -> Redis -->
+    <line x1="750" y1="420" x2="850" y2="480" stroke="#34d399" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#arrGreen)"/>
+    <text x="800" y="452" fill="#34d399" font-size="8">cache/session</text>
+
+    <!-- tenants -> registry (penunjuk) -->
+    <line x1="240" y1="600" x2="380" y2="600" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arr)" />
+    <text x="255" y="592" fill="#a78bfa" font-size="8">db_connection_id (Fernet)</text>
+
+    <!-- ai_orchestrator -> provider eksternal -->
+    <line x1="700" y1="500" x2="830" y2="560" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,4" marker-end="url(#arrRose)"/>
+    <text x="760" y="528" fill="#fb7185" font-size="8">API key terenkripsi</text>
+
+    <!-- backend -> dealer DBs (Rabu, dashed amber) -->
+    <line x1="520" y1="500" x2="470" y2="690" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="8,4" marker-end="url(#arr)"/>
+    <text x="360" y="640" fill="#fbbf24" font-size="8">RABU: query NL→SQL via registry</text>
+
+    <!-- ============ BROWSER LAYER ============ -->
+    <rect x="330" y="60" width="500" height="90" rx="6" fill="#0f172a"/>
+    <rect x="330" y="60" width="500" height="90" rx="6" fill="rgba(8,51,68,.4)" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="350" y="85" fill="#22d3ee" font-size="12">BROWSER — React 19 + Vite + Tailwind</text>
+    <text x="350" y="107" fill="#94a3b8" font-size="9">LoginModal · AdminLayout (/admin/*) · UserWorkspace</text>
+    <text x="350" y="124" fill="#64748b" font-size="8">ErrorBoundary · toast · skeleton · konfirmasi aksi berbahaya</text>
+
+    <!-- URL chips -->
+    <rect x="352" y="132" rx="3" width="88" height="13" fill="#0f172a" stroke="#1e293b"/>
+    <text x="358" y="141.5" fill="#64748b" font-size="7">perusahaan-cabang</text>
+    <rect x="446" y="132" rx="3" width="82" height="13" fill="#0f172a" stroke="#1e293b"/>
+    <text x="452" y="141.5" fill="#64748b" font-size="7">database-tenant</text>
+    <rect x="534" y="132" rx="3" width="58" height="13" fill="#0f172a" stroke="#1e293b"/>
+    <text x="540" y="141.5" fill="#64748b" font-size="7">ai-config</text>
+    <rect x="598" y="132" rx="3" width="52" height="13" fill="#0f172a" stroke="#1e293b"/>
+    <text x="604" y="141.5" fill="#64748b" font-size="7">pengguna</text>
+    <rect x="656" y="132" rx="3" width="56" height="13" fill="#0f172a" stroke="#1e293b"/>
+    <text x="662" y="141.5" fill="#64748b" font-size="7">audit-log</text>
+
+    <!-- ============ BACKEND BOX ============ -->
+    <rect x="230" y="210" width="700" height="300" rx="12" fill="rgba(251,191,36,.04)" stroke="#fbbf24" stroke-width="1.2" stroke-dasharray="8,4"/>
+    <text x="250" y="234" fill="#fbbf24" font-size="9">FASTAPI :8000 — app/main.py</text>
+
+    <!-- routers column -->
+    <rect x="260" y="252" width="200" height="228" rx="6" fill="#0f172a"/>
+    <rect x="260" y="252" width="200" height="228" rx="6" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.5"/>
+    <text x="276" y="274" fill="#34d399" font-size="11">routers/</text>
+    <text x="276" y="296" fill="#94a3b8" font-size="9">auth.py          login/JWT</text>
+    <text x="276" y="314" fill="#94a3b8" font-size="9">users.py         CRUD+guards</text>
+    <text x="276" y="332" fill="#64748b" font-size="9">admin/</text>
+    <text x="290" y="350" fill="#94a3b8" font-size="9">companies.py     +status</text>
+    <text x="290" y="368" fill="#94a3b8" font-size="9">db_connections   registry</text>
+    <text x="290" y="386" fill="#94a3b8" font-size="9">tenants.py       pilih DB</text>
+    <text x="290" y="404" fill="#94a3b8" font-size="9">ai_configs.py    provider</text>
+    <text x="276" y="428" fill="#64748b" font-size="9">services/ai_orchestrator</text>
+    <text x="276" y="444" fill="#64748b" font-size="8">core/: config·database·security</text>
+
+    <!-- security column -->
+    <rect x="490" y="252" width="180" height="228" rx="6" fill="#0f172a"/>
+    <rect x="490" y="252" width="180" height="228" rx="6" fill="rgba(136,19,55,.4)" stroke="#fb7185" stroke-width="1.5"/>
+    <text x="506" y="274" fill="#fb7185" font-size="11">SECURITY</text>
+    <text x="506" y="296" fill="#94a3b8" font-size="9">bcrypt password hash</text>
+    <text x="506" y="314" fill="#94a3b8" font-size="9">JWT exp 30m</text>
+    <text x="506" y="332" fill="#94a3b8" font-size="9">Fernet encrypt:</text>
+    <text x="518" y="350" fill="#64748b" font-size="9">· db_password</text>
+    <text x="518" y="368" fill="#64748b" font-size="9">· api_key AI</text>
+    <text x="506" y="386" fill="#94a3b8" font-size="9">rate-limit login</text>
+    <text x="506" y="404" fill="#94a3b8" font-size="9">guard: admin terakhir,</text>
+    <text x="518" y="422" fill="#64748b" font-size="9">self-delete, registry terpakai</text>
+
+    <!-- orchestrator -->
+    <rect x="700" y="252" width="200" height="228" rx="6" fill="#0f172a"/>
+    <rect x="700" y="252" width="200" height="228" rx="6" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.5"/>
+    <text x="716" y="274" fill="#34d399" font-size="11">AI ORCHESTRATOR</text>
+    <text x="716" y="296" fill="#94a3b8" font-size="9">provider: OpenAI /</text>
+    <text x="716" y="314" fill="#94a3b8" font-size="9">Anthropic (per tenant)</text>
+    <text x="716" y="340" fill="#fbbf24" font-size="9">⏳ RABU:</text>
+    <text x="716" y="358" fill="#94a3b8" font-size="9">NL → SQL generation</text>
+    <text x="716" y="376" fill="#94a3b8" font-size="9">sqlglot guard non-SELECT</text>
+    <text x="716" y="394" fill="#94a3b8" font-size="9">hasil + grafik + PDF</text>
+    <text x="716" y="420" fill="#64748b" font-size="8">kuota token per tenant siap</text>
+
+    <!-- ============ CORE DB ============ -->
+    <rect x="120" y="480" width="400" height="240" rx="6" fill="#0f172a"/>
+    <rect x="120" y="480" width="400" height="240" rx="6" fill="rgba(76,29,149,.4)" stroke="#a78bfa" stroke-width="1.5"/>
+    <text x="140" y="504" fill="#a78bfa" font-size="11">CORE DB "ai-dms" — PostgreSQL :5433</text>
+    <text x="140" y="526" fill="#94a3b8" font-size="9">users (is_active)     companies     branches (is_active)</text>
+    <text x="140" y="544" fill="#94a3b8" font-size="9">user_branches         audit_logs    conversations/messages</text>
+    <text x="140" y="562" fill="#94a3b8" font-size="9">ai_configs            _migrations (001-003)</text>
+    <rect x="140" y="580" width="160" height="46" rx="4" fill="rgba(76,29,149,.55)" stroke="#a78bfa"/>
+    <text x="152" y="599" fill="#c4b5fd" font-size="9">db_connections</text>
+    <text x="152" y="615" fill="#64748b" font-size="8">registry kredensial</text>
+    <rect x="320" y="580" width="170" height="46" rx="4" fill="rgba(76,29,149,.55)" stroke="#a78bfa"/>
+    <text x="332" y="599" fill="#c4b5fd" font-size="9">tenants</text>
+    <text x="332" y="615" fill="#64748b" font-size="8">branch → conn_id</text>
+    <text x="140" y="652" fill="#64748b" font-size="8">aturan: 1 cabang = 1 DB · 1 DB boleh banyak cabang</text>
+    <text x="140" y="668" fill="#64748b" font-size="8">migrasi otomatis via init_db.py (idempotent)</text>
+    <text x="140" y="696" fill="#64748b" font-size="8"></text>
+
+    <!-- Redis -->
+    <rect x="790" y="480" width="180" height="70" rx="6" fill="#0f172a"/>
+    <rect x="790" y="480" width="180" height="70" rx="6" fill="rgba(251,146,60,.3)" stroke="#fb923c" stroke-width="1.5"/>
+    <text x="806" y="504" fill="#fb923c" font-size="11">REDIS :6379</text>
+    <text x="806" y="524" fill="#94a3b8" font-size="9">cache &amp; session state</text>
+
+    <!-- Dealer DBs (Rabu - external dashed) -->
+    <rect x="330" y="650" width="290" height="86" rx="6" fill="rgba(30,41,59,.5)" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,4"/>
+    <text x="348" y="674" fill="#cbd5e1" font-size="10">DATABASE DEALER ASLI (per cabang)</text>
+    <text x="348" y="692" fill="#94a3b8" font-size="9">⏳ masuk hari Rabu — data penjualan nyata</text>
+    <text x="348" y="710" fill="#94a3b8" font-size="9">diakses read-only via kredensial registry</text>
+
+    <!-- Provider AI external -->
+    <rect x="830" y="560" width="220" height="70" rx="6" fill="rgba(30,41,59,.5)" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,4"/>
+    <text x="846" y="584" fill="#cbd5e1" font-size="10">OPENAI / ANTHROPIC</text>
+    <text x="846" y="604" fill="#94a3b8" font-size="9">API eksternal · key terenkripsi</text>
+
+    <!-- Legend (di luar semua boundary) -->
+    <g transform="translate(60,720)">
+      <rect width="1040" height="28" rx="6" fill="#0b1222" stroke="#1e293b"/>
+      <circle cx="20" cy="14" r="4" fill="#22d3ee"/><text x="30" y="17" fill="#94a3b8" font-size="8">Frontend</text>
+      <circle cx="105" cy="14" r="4" fill="#34d399"/><text x="115" y="17" fill="#94a3b8" font-size="8">Backend</text>
+      <circle cx="195" cy="14" r="4" fill="#a78bfa"/><text x="205" y="17" fill="#94a3b8" font-size="8">Database</text>
+      <circle cx="295" cy="14" r="4" fill="#fb7185"/><text x="305" y="17" fill="#94a3b8" font-size="8">Security</text>
+      <circle cx="395" cy="14" r="4" fill="#fb923c"/><text x="405" y="17" fill="#94a3b8" font-size="8">Cache</text>
+      <line x1="480" y1="14" x2="520" y2="14" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+      <text x="528" y="17" fill="#94a3b8" font-size="8">alur data aktif</text>
+      <line x1="620" y1="14" x2="660" y2="14" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,4" marker-end="url(#arrRose)"/>
+      <text x="668" y="17" fill="#94a3b8" font-size="8">enkripsi/kredensial</text>
+      <line x1="800" y1="14" x2="840" y2="14" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="8,4" marker-end="url(#arr)"/>
+      <text x="848" y="17" fill="#94a3b8" font-size="8">rencana Rabu ⏳</text>
+    </g>
+  </svg>
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <div class="card-header"><span class="dot cyan"></span><h3>SIAPA MEMAKAI APA</h3></div>
+      <ul>
+        <li>• Admin: kelola perusahaan→cabang→database, AI, user</li>
+        <li>• User: akses hanya cabang yang diizinkan (user_branches)</li>
+        <li>• Semua lewat satu gerbang JWT, role di server</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="dot rose"></span><h3>ATURAN KEAMANAN KUNCI</h3></div>
+      <ul>
+        <li>• Kredensial DB &amp; API key AI tersimpan terenkripsi Fernet</li>
+        <li>• Aksi berbahaya = dialog konfirmasi + guard backend</li>
+        <li>• Password tidak pernah dikirim balik ke browser</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="dot amber"></span><h3>LANGKAH BERIKUTNYA (RABU)</h3></div>
+      <ul>
+        <li>• Daftarkan DB dealer asli ke registry</li>
+        <li>• Rotasi Fernet/JWT secret sambil input ulang tenant</li>
+        <li>• Bangun pipeline: pertanyaan → SQL → hasil → grafik</li>
+      </ul>
+    </div>
+  </div>
+
+  <footer>DMS AI PLATFORM · kondisi 26 Agustus 2026 · CI hijau · E2E 10/10</footer>
+</div>
+</body>
+</html>
