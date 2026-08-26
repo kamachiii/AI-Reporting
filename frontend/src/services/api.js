@@ -110,6 +110,10 @@ export const api = {
     const response = await apiClient.post(`/admin/db-connections/${id}/test-connection`);
     return response.data;
   },
+  testAllDbConnections: async () => {
+    const response = await apiClient.post('/admin/db-connections/test-all');
+    return response.data; // { "<id>": {status, message} }
+  },
   getTenantByBranch: async (branch_code) => {
       const response = await apiClient.get(`/admin/tenants/${branch_code}`);
       return response.data;

@@ -4,7 +4,8 @@ import {
   Plus, CheckCircle, XCircle, Search, Loader2,
   Trash2, Wifi, X, Pencil, Database as DbIcon,
   Server,
-  Check} from 'lucide-react';
+  Check,
+  RefreshCw} from 'lucide-react';
 import toast from 'react-hot-toast';
 import PaginationBar from './common/PaginationBar';
 import EmptyState from './common/EmptyState';
@@ -31,13 +32,18 @@ export default function TenantsTab() {
   const [connections, setConnections] = useState([]);
   // data tenant (relasi)
   const [tenants, setTenants] = useState([]);
-  const [connectionStatus, setConnectionStatus] = useState({});
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testingId, setTestingId] = useState(null);
   const [processingKey, setProcessingKey] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
+
+
+  // status koneksi NYATA milik DATABASE (registry): { "<id>": {status, message} }
+  const [dbStatus, setDbStatus] = useState({});
+  const [statusLoading, setStatusLoading] = useState(false);
+  const REFRESH_MS = 45000;
 
   // modal
   const [showConnModal, setShowConnModal] = useState(false);      // hubungkan cabang
@@ -60,13 +66,31 @@ export default function TenantsTab() {
     searchInputId: 'tenant-search',
   });
 
+  const fetchStatuses = async () => {
+    // SATU request batch untuk semua database (backend paralel, timeout 4s)
+    if (!connections.length) return;
+    setStatusLoading(true);
+    try {
+      const result = await api.testAllDbConnections();
+      setDbStatus(result || {});
+    } catch {
+      // diam: biarkan status lama bertahan
+    } finally {
+      setStatusLoading(false);
+    }
+  };
+
   const fetchData = async () => {
     setLoading(true);
     try {
       const [conns, tns] = await Promise.all([api.getDbConnections(), api.getTenants()]);
       setConnections(conns || []);
       setTenants(tns || []);
-      testAllConnections(tns || []);
+      // status awal semua 'checking' sampai batch selesai
+      const initial = {};
+      (conns || []).forEach(c => { initial[String(c.id)] = { status: 'checking', message: '' }; });
+      setDbStatus(initial);
+      api.testAllDbConnections().then(r => setDbStatus(r || {})).catch(() => {});
     } catch {
       toast.error('Gagal memuat data database');
     } finally {
@@ -74,33 +98,6 @@ export default function TenantsTab() {
     }
   };
 
-  const testAllConnections = (tns) => {
-    tns.forEach(async (t) => {
-      setConnectionStatus(prev => ({ ...prev, [t.branch_code]: 'checking' }));
-      try {
-        const result = await api.testTenantConnection(t.branch_code);
-        setConnectionStatus(prev => ({ ...prev, [t.branch_code]: result.status }));
-      } catch {
-        setConnectionStatus(prev => ({ ...prev, [t.branch_code]: 'disconnected' }));
-      }
-    });
-  };
-
-  const handleTestSingle = async (branch_code) => {
-    setTestingId(branch_code);
-    setConnectionStatus(prev => ({ ...prev, [branch_code]: 'checking' }));
-    try {
-      const result = await api.testTenantConnection(branch_code);
-      setConnectionStatus(prev => ({ ...prev, [branch_code]: result.status }));
-      result.status === 'connected'
-        ? toast.success(`Koneksi ke ${branch_code} berhasil!`)
-        : toast.error(`Koneksi gagal: ${result.message || ''}`);
-    } catch {
-      setConnectionStatus(prev => ({ ...prev, [branch_code]: 'disconnected' }));
-    } finally {
-      setTestingId(null);
-    }
-  };
 
   const handleTestRegistry = async (conn) => {
     setTestingId(conn.id);
@@ -200,6 +197,15 @@ export default function TenantsTab() {
     });
   };
 
+  // Auto-refresh status tiap 45 dtk — hanya saat tab browser terlihat (hemat resource)
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchStatuses();
+    }, REFRESH_MS);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connections.length]);
+
   // ---- filter & pagination ----
   const filteredDbs = useMemo(() => {
     if (!debouncedSearch) return connections;
@@ -235,7 +241,6 @@ export default function TenantsTab() {
   const paginatedConns = useMemo(
     () => filteredConns.slice((connPage - 1) * PAGE_SIZE, connPage * PAGE_SIZE),
     [filteredConns, connPage]);
-
 
 
   const openConnectModal = async () => {
@@ -279,10 +284,17 @@ export default function TenantsTab() {
           </div>
 
           {activeTab === 'database' ? (
-            <button onClick={() => { setEditingDb(null); setShowDbModal(true); }}
-              className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active whitespace-nowrap">
-              <Plus size={14} /> Daftarkan Database
-            </button>
+            <>
+              <button onClick={fetchStatuses} disabled={statusLoading}
+                title="Refresh status koneksi" aria-label="Refresh status koneksi"
+                className="p-2 border border-hairline rounded-md text-muted hover:text-primary hover:border-primary/30 disabled:opacity-50">
+                <RefreshCw size={14} className={statusLoading ? 'animate-spin' : ''} />
+              </button>
+              <button onClick={() => { setEditingDb(null); setShowDbModal(true); }}
+                className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active whitespace-nowrap">
+                <Plus size={14} /> Daftarkan Database
+              </button>
+            </>
           ) : (
             <button onClick={openConnectModal}
               className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active whitespace-nowrap">
@@ -309,6 +321,7 @@ export default function TenantsTab() {
                     <th className="p-3">Database</th>
                     <th className="p-3 w-24 text-center">Dipakai</th>
                     <th className="p-3 w-20">Status</th>
+                    <th className="p-3 w-28">Koneksi</th>
                     <th className="p-3 w-0 text-center">Aksi</th>
                   </tr>
                 </thead>
@@ -333,6 +346,26 @@ export default function TenantsTab() {
                           </span>
                         )}
                       </td>
+                      {(() => {
+                        const st = dbStatus[String(c.id)];
+                        return (
+                          <td className="p-3" title={st?.message || ''}>
+                            {!st || st.status === 'checking' ? (
+                              <span className="inline-flex items-center text-muted text-xs">
+                                <Loader2 size={12} className="mr-1.5 animate-spin" /> Menguji…
+                              </span>
+                            ) : st.status === 'connected' ? (
+                              <span className="inline-flex items-center gap-1.5 text-success text-xs font-medium">
+                                <CheckCircle size={13} /> Connected
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 text-error text-xs font-medium">
+                                <XCircle size={13} /> Disconnected
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })()}
                       <td className="p-3">
                         <div className="flex justify-end gap-0.5">
                           <button onClick={() => handleTestRegistry(c)} disabled={testingId === c.id}
@@ -383,31 +416,14 @@ export default function TenantsTab() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-hairline">
-                  {paginatedConns.map((t, idx) => {
-                    const st = connectionStatus[t.branch_code];
-                    return (
+                  {paginatedConns.map((t, idx) => (
                       <motion.tr key={t.branch_code} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                         transition={{ delay: idx * 0.03 }} className="hover:bg-surface-soft/50">
                         <td className="p-3 text-sm font-medium">{t.branch_code}</td>
                         <td className="p-3 text-sm text-body">{t.db_name_label}</td>
                         <td className="p-3 text-sm text-muted">{t.db_host}:{t.db_port}</td>
                         <td className="p-3">
-                          {st === 'checking' || !st ? (
-                            <span className="inline-flex items-center text-muted text-xs"><Loader2 size={12} className="mr-1 animate-spin" /> Menguji…</span>
-                          ) : st === 'connected' ? (
-                            <span className="inline-flex items-center gap-1.5 text-success text-xs"><CheckCircle size={13} /> Connected</span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1.5 text-error text-xs"><XCircle size={13} /> Disconnected</span>
-                          )}
-                        </td>
-                        <td className="p-3">
                           <div className="flex justify-end gap-0.5">
-                            <button onClick={() => handleTestSingle(t.branch_code)}
-                              disabled={testingId === t.branch_code}
-                              title="Test Koneksi" aria-label={`Test koneksi ${t.branch_code}`}
-                              className="p-1.5 text-muted hover:text-primary hover:bg-surface-soft rounded-md disabled:opacity-50">
-                              {testingId === t.branch_code ? <Loader2 size={15} className="animate-spin" /> : <Wifi size={15} />}
-                            </button>
                             <button onClick={() => handleDisconnect(t)} disabled={processingKey === t.branch_code}
                               title="Putuskan" aria-label={`Putuskan ${t.branch_code}`}
                               className="p-1.5 text-muted hover:text-error hover:bg-error/5 rounded-md disabled:opacity-50">
@@ -416,8 +432,7 @@ export default function TenantsTab() {
                           </div>
                         </td>
                       </motion.tr>
-                    );
-                  })}
+                  ))}
                 </tbody>
               </table>
             </div>
