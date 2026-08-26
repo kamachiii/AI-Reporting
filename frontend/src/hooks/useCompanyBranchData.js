@@ -20,6 +20,8 @@ export default function useCompanyBranchData() {
 
   const [connectionStatus, setConnectionStatus] = useState({});
   const [tenantData, setTenantData] = useState({});
+  const [dbConnections, setDbConnections] = useState([]);
+  const [dbConnectionsById, setDbConnectionsById] = useState({});
 
   const tableContainerRef = useRef(null);
   const PAGE_SIZE = 15;
@@ -28,45 +30,41 @@ export default function useCompanyBranchData() {
     const scrollTop = tableContainerRef.current?.scrollTop || 0;
     setLoading(true);
     try {
-      const [companiesData, branchesWithTenantsData] = await Promise.all([
+      const [companiesData, branchesData, connectionsData] = await Promise.all([
         api.getCompanies(),
-        api.getBranchesWithTenants(),
+        api.getBranches(),
+        api.getDbConnections(),
       ]);
       setCompanies(companiesData || []);
+      setDbConnections(connectionsData || []);
+
+      const byId = {};
+      (connectionsData || []).forEach(c => { byId[c.id] = c; });
+      setDbConnectionsById(byId);
+
+      // Tenant aktif per cabang (model baru: penunjuk ke registry)
+      const tenantsData = await api.getTenants();
+      const tenantsByBranch = {};
+      (tenantsData || []).forEach(t => { tenantsByBranch[t.branch_code] = t; });
+      setTenantData(tenantsByBranch);
 
       const statuses = {};
-      const tenantDetails = {};
-      const formattedBranches = [];
+      const formattedBranches = (branchesData || []).map(b => ({
+        code: b.code,
+        name: b.name,
+        company_code: b.company_code,
+        address: b.address,
+        is_active: b.is_active,
+      }));
 
-      (branchesWithTenantsData || []).forEach(item => {
-        formattedBranches.push({
-          code: item.code,
-          name: item.name,
-          company_code: item.company_code,
-          address: item.address,
-          is_active: item.is_active,
-        });
-
-        if (item.db_host) {
-          tenantDetails[item.code] = {
-            db_host: item.db_host,
-            db_port: item.db_port,
-            db_name: item.db_name,
-            db_username: item.db_username,
-          };
-          statuses[item.code] = 'checking';
-        } else {
-          statuses[item.code] = 'disconnected';
-        }
-      });
+      Object.keys(tenantsByBranch).forEach(code => { statuses[code] = 'checking'; });
 
       setBranches(formattedBranches);
-      setTenantData(tenantDetails);
       // Set awal; hasil tes nyata menimpa per baris di bawah
       setConnectionStatus(statuses);
 
       // Status koneksi NYATA (paralel)
-      Object.keys(tenantDetails).forEach(async (code) => {
+      Object.keys(tenantsByBranch).forEach(async (code) => {
         try {
           const result = await api.testTenantConnection(code);
           setConnectionStatus(prev => ({ ...prev, [code]: result.status }));
@@ -171,9 +169,13 @@ export default function useCompanyBranchData() {
         aVal = companiesByCode[a.company_code]?.name || a.company_code;
         bVal = companiesByCode[b.company_code]?.name || b.company_code;
       }
-      if (branchSortConfig.key === 'status') {
-        aVal = connectionStatus[a.code] === 'connected' ? 1 : 0;
-        bVal = connectionStatus[b.code] === 'connected' ? 1 : 0;
+      if (branchSortConfig.key === 'db') {
+        aVal = tenantData[a.code]?.db_name_label || '';
+        bVal = tenantData[b.code]?.db_name_label || '';
+      }
+      if (branchSortConfig.key === 'status_branch') {
+        aVal = a.is_active ? 1 : 0;
+        bVal = b.is_active ? 1 : 0;
       }
 
       if (aVal < bVal) return branchSortConfig.direction === 'asc' ? -1 : 1;
@@ -194,7 +196,7 @@ export default function useCompanyBranchData() {
   return {
     // data
     companies, branches, loading, fetchData,
-    tenantData, connectionStatus,
+    tenantData, connectionStatus, dbConnections, dbConnectionsById,
     companiesByCode, tableContainerRef,
     // search
     searchTerm, setSearchTerm, debouncedSearch,

@@ -32,6 +32,9 @@ class BranchUpdate(BaseModel):
     address: str = ""
     is_active: bool = True
 
+class BranchStatusUpdate(BaseModel):
+    is_active: bool
+
 
 @router.get("/companies")
 async def get_companies(user: dict = Depends(require_admin_role)):
@@ -151,6 +154,24 @@ async def update_branch(code: str, payload: BranchUpdate, user: dict = Depends(r
         return {"message": "Cabang berhasil diperbarui"}
     except Exception as e:
         logger.error(f"Error updating branch: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.put("/branches/{code}/status")
+async def set_branch_status(code: str, payload: BranchStatusUpdate, user: dict = Depends(require_admin_role)):
+    """Aktifkan/nonaktifkan satu cabang tanpa menyentuh data lainnya."""
+    try:
+        pool = await get_core_pool()
+        exists = await pool.fetchval("SELECT 1 FROM branches WHERE code = $1", code)
+        if not exists:
+            raise HTTPException(status_code=404, detail="Cabang tidak ditemukan")
+        await pool.execute(
+            "UPDATE branches SET is_active = $1, updated_at = CURRENT_TIMESTAMP WHERE code = $2",
+            payload.is_active, code)
+        return {"message": f"Cabang {code} berhasil {'diaktifkan' if payload.is_active else 'dinonaktifkan'}"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error setting branch status {code}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/branches/{code}")

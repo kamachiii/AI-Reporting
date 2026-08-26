@@ -89,12 +89,41 @@ export const api = {
     const response = await apiClient.get('/admin/tenants');
     return response.data;
   },
+  // Registry Database (kredensial didaftarkan sekali, cabang tinggal pilih)
+  getDbConnections: async () => {
+    const response = await apiClient.get('/admin/db-connections');
+    return response.data;
+  },
+  createDbConnection: async (data) => {
+    const response = await apiClient.post('/admin/db-connections', data);
+    return response.data;
+  },
+  updateDbConnection: async (id, data) => {
+    const response = await apiClient.put(`/admin/db-connections/${id}`, data);
+    return response.data;
+  },
+  deleteDbConnection: async (id) => {
+    const response = await apiClient.delete(`/admin/db-connections/${id}`);
+    return response.data;
+  },
+  testDbConnection: async (id) => {
+    const response = await apiClient.post(`/admin/db-connections/${id}/test-connection`);
+    return response.data;
+  },
   getTenantByBranch: async (branch_code) => {
       const response = await apiClient.get(`/admin/tenants/${branch_code}`);
       return response.data;
     },
   createTenant: async (data) => {
     const response = await apiClient.post('/admin/tenants', data);
+    return response.data;
+  },
+  updateTenantDb: async (branchCode, dbConnectionId) => {
+    const response = await apiClient.put(`/admin/tenants/${branchCode}`, { branch_code: branchCode, db_connection_id: dbConnectionId });
+    return response.data;
+  },
+  setBranchStatus: async (code, isActive) => {
+    const response = await apiClient.put(`/admin/branches/${code}/status`, { is_active: isActive });
     return response.data;
   },
   testTenantConnection: async (branch_code, data) => {

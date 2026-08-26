@@ -1,12 +1,24 @@
 import asyncio
 import asyncpg
 import os
+import re
 import bcrypt
 from dotenv import load_dotenv
 
 load_dotenv()
 
 MIGRATIONS_DIR = os.path.join(os.path.dirname(__file__), "sql", "migrations")
+
+
+def _is_comment_only(stmt: str) -> bool:
+    """True jika statement hanya berisi komentar SQL (tanpa perintah).
+
+    asyncpg 0.30 mem-bug AttributeError saat mengeksekusi statement
+    yang hasilnya kosong (komentar murni) — kita lewati saja.
+    """
+    no_strings = re.sub(r"'[^']*'", "''", stmt)
+    lines = [line.strip() for line in no_strings.splitlines()]
+    return all(line == "" or line.startswith("--") for line in lines)
 
 
 async def run_migrations(conn):
@@ -31,12 +43,14 @@ async def run_migrations(conn):
             continue
         path = os.path.join(MIGRATIONS_DIR, fname)
         with open(path, "r", encoding="utf-8") as f:
-            sql = f.read().replace("\r", "")
+            sql = f.read().replace("\r\n", "\n")
 
         print(f"  applying migration: {fname} ...")
         try:
             async with conn.transaction():
                 for stmt in [s.strip() for s in sql.split(";") if s.strip()]:
+                    if _is_comment_only(stmt):
+                        continue  # asyncpg bug pada statement tanpa hasil
                     await conn.execute(stmt)
                 await conn.execute(
                     "INSERT INTO _migrations (filename) VALUES ($1)", fname

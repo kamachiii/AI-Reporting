@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, Search } from 'lucide-react';
+import { X, Search , Database, Plus, CheckCircle, Wifi, Pencil, Trash2, Loader2} from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { notify } from '../../utils/notification';
@@ -12,7 +12,8 @@ import CompaniesTable from './company/CompaniesTable';
 import BranchModal from './branch/BranchModal';
 import BranchDetailModal from './branch/BranchDetailModal';
 import BranchesTable from './branch/BranchesTable';
-import TenantModal from './tenants/TenantModal';
+import ConnectDbModal from './tenants/ConnectDbModal';
+import DbConnectionModal from './tenants/DbConnectionModal';
 import useAdminShortcuts from '../../hooks/useAdminShortcuts';
 import useCompanyBranchData from '../../hooks/useCompanyBranchData';
 
@@ -26,6 +27,7 @@ export default function CompanyBranchesTab() {
   const {
     companies, loading, fetchData,
     tenantData, connectionStatus, companiesByCode, tableContainerRef,
+    dbConnections, dbConnectionsById,
     searchTerm, setSearchTerm,
     paginatedCompanies, companyPage, setCompanyPage, companyTotalPages, filteredCompanies,
     companySortConfig, handleCompanySort,
@@ -40,10 +42,11 @@ export default function CompanyBranchesTab() {
   // ---- MODAL STATES ----
   const [showCompanyModal, setShowCompanyModal] = useState(false);
   const [showBranchModal, setShowBranchModal] = useState(false);
-  const [showTenantModal, setShowTenantModal] = useState(false);
   const [editingCompany, setEditingCompany] = useState(null);
   const [editingBranch, setEditingBranch] = useState(null);
-  const [editingTenantBranch, setEditingTenantBranch] = useState(null);
+  const [connectDbBranch, setConnectDbBranch] = useState(null); // cabang yang sedang memilih database
+  const [showRegistryModal, setShowRegistryModal] = useState(false);
+  const [editingRegistry, setEditingRegistry] = useState(null);
 
   // ---- PROCESSING / CONFIRM ----
   const [saving, setSaving] = useState(false);
@@ -65,7 +68,6 @@ export default function CompanyBranchesTab() {
       if (confirmState) setConfirmState(null);
       else if (showCompanyModal) setShowCompanyModal(false);
       else if (showBranchModal) setShowBranchModal(false);
-      else if (showTenantModal) setShowTenantModal(false);
       else if (dropdownOpen) setDropdownOpen(null);
     },
     isBusy: !!processingCode || saving || testing,
@@ -204,10 +206,10 @@ export default function CompanyBranchesTab() {
   // ==========================================
   // HANDLERS: TENANT (DATABASE CONNECTION)
   // ==========================================
-  const handleTestTenant = async (branch_code, form) => {
+  const handleTestTenant = async (branch_code) => {
     setTesting(true);
     try {
-      return await api.testTenantConnection(branch_code, form);
+      return await api.testTenantConnection(branch_code);
     } catch {
       return { status: 'disconnected', message: 'Terjadi kesalahan saat uji koneksi' };
     } finally {
@@ -215,39 +217,94 @@ export default function CompanyBranchesTab() {
     }
   };
 
-  const handleSaveTenant = async (form) => {
+  // Simpan pilihan database untuk cabang (hubungkan baru / ganti)
+  const handleSaveConnectDb = async ({ branch_code, db_connection_id, isChange }) => {
     setSaving(true);
     try {
-      const isEdit = !!tenantData[editingTenantBranch];
-      if (isEdit) {
-        await api.updateTenant(editingTenantBranch, form);
-        notify.success('Konfigurasi database berhasil diperbarui!');
+      if (isChange) {
+        await api.updateTenantDb(branch_code, db_connection_id);
+        notify.success('Database cabang berhasil diganti');
       } else {
-        await api.createTenant({ ...form, branch_code: editingTenantBranch });
-        notify.success('Database berhasil dihubungkan ke cabang!');
+        await api.createTenant({ branch_code, db_connection_id });
+        notify.success('Database berhasil dihubungkan ke cabang');
       }
-      setShowTenantModal(false);
-      setEditingTenantBranch(null);
-    } catch (e) {
-      notify.error(e.response?.data?.detail || 'Gagal menyimpan konfigurasi database');
-    } finally {
+      setConnectDbBranch(null);
       await fetchData();
+    } catch (e) {
+      notify.error(e.response?.data?.detail || 'Gagal menghubungkan database');
+    } finally {
       setSaving(false);
     }
   };
 
-  const handleDisconnectTenant = (branch_code) => {
+  // Registry: daftarkan / edit database
+  const handleSaveRegistry = async ({ id, ...payload }) => {
+    setSaving(true);
+    try {
+      if (id) {
+        await api.updateDbConnection(id, payload);
+        notify.success('Database terdaftar berhasil diperbarui');
+      } else {
+        await api.createDbConnection(payload);
+        notify.success('Database berhasil didaftarkan');
+      }
+      setShowRegistryModal(false);
+      setEditingRegistry(null);
+      await fetchData();
+    } catch (e) {
+      notify.error(e.response?.data?.detail || 'Gagal menyimpan database');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteRegistry = (conn) => {
     setConfirmState({
-      title: 'Putuskan Koneksi Database?',
-      message: `Koneksi database untuk cabang ${branch_code} akan dihapus. Tindakan ini tidak bisa dibatalkan.`,
+      title: 'Hapus Database Terdaftar?',
+      message: `Database "${conn.name}" akan dihapus dari registry. Cabang yang masih memakainya harus diputuskan dulu.`,
       onConfirm: async () => {
-        setProcessingCode(branch_code);
         try {
-          await api.deleteTenant(branch_code);
-          notify.success('Koneksi database berhasil diputus');
+          await api.deleteDbConnection(conn.id);
+          notify.success('Database dihapus dari registry');
+          setConfirmState(null);
           await fetchData();
-        } catch {
-          notify.error('Gagal memutus koneksi database');
+        } catch (e) {
+          notify.error(e.response?.data?.detail || 'Gagal menghapus database');
+          setConfirmState(null);
+        }
+      },
+    });
+  };
+
+  const handleTestRegistry = async (connId) => {
+    setTesting(true);
+    try {
+      const result = await api.testDbConnection(connId);
+      result.status === 'connected'
+        ? notify.success('Koneksi berhasil!')
+        : notify.error(`Gagal: ${result.message || ''}`);
+    } catch {
+      notify.error('Gagal menguji koneksi');
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  // Toggle aktif/nonaktif satu cabang (dengan konfirmasi)
+  const handleToggleBranchStatus = (b) => {
+    setConfirmState({
+      title: b.is_active ? 'Nonaktifkan Cabang?' : 'Aktifkan Cabang?',
+      message: b.is_active
+        ? `Cabang ${b.code} - ${b.name} akan dinonaktifkan. Lanjutkan?`
+        : `Cabang ${b.code} - ${b.name} akan diaktifkan kembali. Lanjutkan?`,
+      onConfirm: async () => {
+        setProcessingCode(b.code);
+        try {
+          await api.setBranchStatus(b.code, !b.is_active);
+          notify.success(`Cabang ${b.code} berhasil ${!b.is_active ? 'diaktifkan' : 'dinonaktifkan'}`);
+          await fetchData();
+        } catch (e) {
+          notify.error(e.response?.data?.detail || 'Gagal mengubah status cabang');
         } finally {
           setProcessingCode(null);
           setConfirmState(null);
@@ -255,6 +312,8 @@ export default function CompanyBranchesTab() {
       },
     });
   };
+
+
 
   // ==========================================
   // RENDER
@@ -314,6 +373,47 @@ export default function CompanyBranchesTab() {
       )}
 
       {activeTab === 'branches' && (
+        <div className="bg-white rounded-xl border border-hairline shadow-sm p-4">
+          <div className="flex justify-between items-center mb-3">
+            <div>
+              <h4 className="text-sm font-medium text-ink">Database Terdaftar</h4>
+              <p className="text-xs text-muted">Kredensial didaftarkan sekali di sini; cabang tinggal memilih.</p>
+            </div>
+            <button onClick={() => { setEditingRegistry(null); setShowRegistryModal(true); }}
+              className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active">
+              <Plus size={14} /> Daftarkan Database
+            </button>
+          </div>
+          {dbConnections.length === 0 ? (
+            <p className="text-sm text-muted italic">Belum ada database terdaftar. Klik "Daftarkan Database" untuk mulai.</p>
+          ) : (
+            <ul className="flex flex-wrap gap-2">
+              {dbConnections.map((c) => (
+                <li key={c.id} className="group flex items-center gap-2 border border-hairline rounded-md px-3 py-1.5 bg-surface-soft">
+                  <Database size={13} className={c.is_active ? 'text-success' : 'text-muted'} />
+                  <span className="text-sm text-body">{c.name}</span>
+                  <span className="text-xs text-muted">· dipakai {c.used_by} cabang</span>
+                  {tenantData && Object.values(tenantData).some(t => t.db_connection_id === c.id) ? (
+                    <span className="inline-flex items-center text-success text-xs"><CheckCircle size={12} /></span>
+                  ) : null}
+                  <span className="hidden group-hover:flex items-center gap-1 ml-1">
+                    <button onClick={() => handleTestRegistry(c.id)} disabled={testing}
+                      title="Test Koneksi" className="p-0.5 text-muted hover:text-primary disabled:opacity-50">
+                      {testing ? <Loader2 size={12} className="animate-spin" /> : <Wifi size={12} />}
+                    </button>
+                    <button onClick={() => setEditingRegistry(c)} title="Edit"
+                      className="p-0.5 text-muted hover:text-ink"><Pencil size={12} /></button>
+                    <button onClick={() => handleDeleteRegistry(c)} title="Hapus"
+                      className="p-0.5 text-muted hover:text-error"><Trash2 size={12} /></button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'branches' && (
         <BranchesTable
           paginatedBranches={paginatedBranches}
           totalCount={data.branches.length}
@@ -330,10 +430,10 @@ export default function CompanyBranchesTab() {
           processingCode={processingCode}
           tableContainerRef={tableContainerRef}
           onTestConnection={handleTestTenant}
-          onDisconnect={handleDisconnectTenant}
-          onConnectDb={(b) => { setEditingTenantBranch(b.code); setShowTenantModal(true); }}
-          onEditTenant={(code) => { setEditingTenantBranch(code); setShowTenantModal(true); }}
+          onConnectDb={(b) => setConnectDbBranch(b.code)}
           onViewDetail={(b) => setDetailBranch(b)}
+          onToggleStatusRequest={handleToggleBranchStatus}
+          dbConnectionsById={dbConnectionsById}
           onEditBranch={(b) => { setEditingBranch(b); setShowBranchModal(true); }}
           onDeleteBranch={handleDeleteBranch}
           onAddBranch={() => { setEditingBranch(null); setShowBranchModal(true); }}
@@ -368,17 +468,25 @@ export default function CompanyBranchesTab() {
         />
       )}
 
-      {showTenantModal && (
-        <TenantModal
-          key={editingTenantBranch || 'new'}
-          isOpen={showTenantModal}
-          onClose={() => setShowTenantModal(false)}
-          onSave={handleSaveTenant}
-          onTest={handleTestTenant}
-          branchCode={editingTenantBranch}
-          tenant={tenantData[editingTenantBranch]}
+      {connectDbBranch && (
+        <ConnectDbModal
+          key={connectDbBranch}
+          isOpen={!!connectDbBranch}
+          onClose={() => setConnectDbBranch(null)}
+          branchCode={connectDbBranch}
+          currentConnId={tenantData[connectDbBranch]?.db_connection_id}
+          onSaved={handleSaveConnectDb}
+        />
+      )}
+
+      {showRegistryModal && (
+        <DbConnectionModal
+          key={editingRegistry?.id || 'new'}
+          isOpen={showRegistryModal}
+          onClose={() => { setShowRegistryModal(false); setEditingRegistry(null); }}
+          onSave={handleSaveRegistry}
+          editing={editingRegistry}
           isSaving={saving}
-          isTesting={testing}
         />
       )}
 
