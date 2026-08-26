@@ -15,12 +15,15 @@ import DbConnectionModal from './DbConnectionModal';
  * - Tidak ada uji-koneksi manual: status nyata muncul otomatis
  *   di kolom Database setelah connect.
  */
+const PAGE_SIZE = 6;
+
 export default function ConnectDbModal({ isOpen, onClose, branchCode, currentConnId, onSaved }) {
   const [connections, setConnections] = useState([]);
   const [selectedId, setSelectedId] = useState(currentConnId || null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -30,7 +33,13 @@ export default function ConnectDbModal({ isOpen, onClose, branchCode, currentCon
       .then((data) => {
         if (cancelled) return;
         // registry aktif; entri milik cabang ini tetap tampak walau nonaktif
-        setConnections(data.filter(c => c.is_active || c.id === currentConnId));
+        const filtered = data.filter(c => c.is_active || c.id === currentConnId);
+        setConnections(filtered);
+        // buka halaman yang memuat DB terpilih
+        if (currentConnId) {
+          const idx = filtered.findIndex(c => c.id === currentConnId);
+          if (idx >= 0) setPage(Math.floor(idx / PAGE_SIZE) + 1);
+        }
       })
       .catch(() => toast.error('Gagal memuat daftar database'))
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -96,54 +105,70 @@ export default function ConnectDbModal({ isOpen, onClose, branchCode, currentCon
             </div>
           </div>
 
-          {/* LIST KARTU DATABASE */}
-          <div className="mt-4 max-h-[300px] overflow-y-auto space-y-2 pr-1">
-            {loading ? (
-              <div className="flex items-center justify-center py-10 text-muted text-sm">
-                <Loader2 size={18} className="animate-spin mr-2" /> Memuat…
-              </div>
-            ) : connections.length === 0 ? (
-              <div className="text-center py-8">
-                <p className="text-sm text-muted mb-3">Belum ada database terdaftar.</p>
-              </div>
-            ) : (
-              connections.map((c) => {
-                const active = c.id === Number(selectedId);
-                return (
-                  <button key={c.id} type="button" onClick={() => setSelectedId(c.id)}
-                    className={`w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-all ${
-                      active
-                        ? 'border-primary bg-primary/5 ring-1 ring-primary/40'
-                        : 'border-hairline hover:border-muted/40 hover:bg-surface-soft'
-                    }`}>
-                    {/* ikon database dalam lingkaran — beda gaya dari list AI */}
-                    <span className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 border ${
-                      c.is_active ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600'
-                                  : 'bg-slate-400/10 border-slate-400/30 text-slate-400'
-                    }`}>
-                      <Server size={17} />
-                    </span>
-
-                    <span className="flex-1 min-w-0">
-                      <span className="block text-sm font-medium text-ink truncate">{c.name}</span>
-                      <span className="block text-xs text-muted truncate">{c.db_name} @ {c.db_host}:{c.db_port}</span>
-                    </span>
-
-                    <span className="flex items-center gap-2 shrink-0">
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-soft border border-hairline text-muted whitespace-nowrap">
-                        {c.used_by} cabang
-                      </span>
-                      {active && (
-                        <span className="w-5 h-5 rounded-full bg-primary text-white flex items-center justify-center">
-                          <Check size={12} strokeWidth={3} />
+          {/* LIST KARTU DATABASE — grid fix-size + paginasi */}
+          {loading ? (
+            <div className="flex items-center justify-center py-14 text-muted text-sm">
+              <Loader2 size={18} className="animate-spin mr-2" /> Memuat…
+            </div>
+          ) : connections.length === 0 ? (
+            <div className="text-center py-10">
+              <p className="text-sm text-muted mb-3">Belum ada database terdaftar.</p>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-2 min-h-[264px] content-start">
+                {connections.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((c) => {
+                  const active = c.id === Number(selectedId);
+                  return (
+                    <button key={c.id} type="button" onClick={() => setSelectedId(c.id)}
+                      className={`relative flex flex-col items-start gap-1.5 p-3 rounded-lg border text-left transition-all ${
+                        active
+                          ? 'border-primary bg-primary/5 ring-1 ring-primary/40'
+                          : 'border-hairline hover:border-muted/40 hover:bg-surface-soft'
+                      }`}>
+                      <span className="flex items-center gap-2 w-full">
+                        <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 border ${
+                          c.is_active ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600'
+                                      : 'bg-slate-400/10 border-slate-400/30 text-slate-400'
+                        }`}>
+                          <Server size={15} />
                         </span>
-                      )}
-                    </span>
-                  </button>
-                );
-              })
-            )}
-          </div>
+                        {active && (
+                          <span className="ml-auto w-5 h-5 rounded-full bg-primary text-white flex items-center justify-center">
+                            <Check size={12} strokeWidth={3} />
+                          </span>
+                        )}
+                      </span>
+                      <span className="block text-sm font-medium text-ink truncate w-full">{c.name}</span>
+                      <span className="block text-[11px] text-muted truncate w-full">{c.db_name}</span>
+                      <span className="flex items-center justify-between w-full mt-auto pt-1">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-soft border border-hairline text-muted whitespace-nowrap">
+                          {c.used_by} cabang
+                        </span>
+                        <span className={`w-1.5 h-1.5 rounded-full ${c.is_active ? 'bg-success' : 'bg-slate-300'}`} />
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* paginasi dalam modal */}
+              {connections.length > PAGE_SIZE && (
+                <div className="flex items-center justify-between mt-3">
+                  <span className="text-[10px] text-muted">
+                    {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, connections.length)} dari {connections.length}
+                  </span>
+                  <span className="flex gap-1.5">
+                    <button type="button" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+                      className="px-2 py-1 border border-hairline rounded text-xs hover:bg-surface-soft disabled:opacity-40">‹</button>
+                    <span className="px-2 py-1 text-xs text-muted">{page} / {Math.ceil(connections.length / PAGE_SIZE)}</span>
+                    <button type="button" onClick={() => setPage(p => Math.min(Math.ceil(connections.length / PAGE_SIZE), p + 1))} disabled={page >= Math.ceil(connections.length / PAGE_SIZE)}
+                      className="px-2 py-1 border border-hairline rounded text-xs hover:bg-surface-soft disabled:opacity-40">›</button>
+                  </span>
+                </div>
+              )}
+            </>
+          )}
 
           {/* FOOTER: tambah + batal + hubungkan */}
           <div className="flex items-center justify-between mt-5 pt-4 border-t border-hairline">
