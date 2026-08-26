@@ -193,9 +193,9 @@ export default function TenantsTab() {
         />
       ) : (
         <div className="bg-white rounded-xl border border-hairline overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
+          <div className="overflow-auto max-h-[420px]">
             <table className="w-full text-left">
-              <thead className="bg-surface-soft text-sm text-muted">
+              <thead className="bg-surface-soft text-sm text-muted sticky top-0 z-10">
                 <tr>
                   <th className="p-3 w-24">Kode Cabang</th>
                   <th className="p-3 w-32">Status Koneksi</th>

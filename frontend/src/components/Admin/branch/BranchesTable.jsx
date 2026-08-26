@@ -46,9 +46,9 @@ export default function BranchesTable({
         />
       ) : (
         <div className="bg-white rounded-xl border border-hairline overflow-hidden shadow-sm">
-          <div ref={tableContainerRef} className="overflow-x-auto">
+          <div ref={tableContainerRef} className="overflow-auto max-h-[420px]">
             <table className="w-full text-left">
-              <thead className="bg-surface-soft text-sm text-muted">
+              <thead className="bg-surface-soft text-sm text-muted sticky top-0 z-10">
                 <tr>
                   <th className="p-3 w-24 cursor-pointer select-none hover:text-ink" onClick={() => onSort('code')}>
                     Kode <SortIcon columnKey="code" sortConfig={sortConfig} />

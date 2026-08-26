@@ -44,7 +44,7 @@ export default function CompanyBranchesTab() {
   const [showBranchModal, setShowBranchModal] = useState(false);
   const [editingCompany, setEditingCompany] = useState(null);
   const [editingBranch, setEditingBranch] = useState(null);
-  const [connectDbBranch, setConnectDbBranch] = useState(null); // cabang yang sedang memilih database
+  const [connectDbBranch, setConnectDbBranch] = useState(null);
   const [showRegistryModal, setShowRegistryModal] = useState(false);
   const [editingRegistry, setEditingRegistry] = useState(null);
 
@@ -98,7 +98,6 @@ export default function CompanyBranchesTab() {
   };
 
   const handleToggleCompany = (company) => {
-    // Aksi berdampak kaskade (semua cabang ikut berubah) -> wajib konfirmasi
     setConfirmState({
       title: company.is_active ? 'Nonaktifkan Perusahaan?' : 'Aktifkan Perusahaan?',
       message: company.is_active
@@ -136,7 +135,6 @@ export default function CompanyBranchesTab() {
           await fetchData();
         } catch (e) {
           const detail = e.response?.data?.detail || 'Gagal menghapus perusahaan';
-          // Kalau ditolak karena masih ada tenant, tawarkan jalan pintas ke tab tenant
           if (String(detail).toLowerCase().includes('tenant')) {
             toast.custom((t) => (
               <div className="bg-white border border-hairline shadow-lg rounded-lg p-4 flex items-start gap-3 max-w-md">
@@ -217,7 +215,6 @@ export default function CompanyBranchesTab() {
     }
   };
 
-  // Simpan pilihan database untuk cabang (hubungkan baru / ganti)
   const handleSaveConnectDb = async ({ branch_code, db_connection_id, isChange }) => {
     setSaving(true);
     try {
@@ -237,7 +234,6 @@ export default function CompanyBranchesTab() {
     }
   };
 
-  // Registry: daftarkan / edit database
   const handleSaveRegistry = async ({ id, ...payload }) => {
     setSaving(true);
     try {
@@ -290,7 +286,6 @@ export default function CompanyBranchesTab() {
     }
   };
 
-  // Toggle aktif/nonaktif satu cabang (dengan konfirmasi)
   const handleToggleBranchStatus = (b) => {
     setConfirmState({
       title: b.is_active ? 'Nonaktifkan Cabang?' : 'Aktifkan Cabang?',
@@ -396,7 +391,7 @@ export default function CompanyBranchesTab() {
             </button>
           </div>
           {dbConnections.length === 0 ? (
-            <p className="text-sm text-muted italic">Belum ada database terdaftar. Klik "Daftarkan Database" untuk mulai.</p>
+            <p className="text-sm text-muted italic">Belum ada database terdaftar. Klik &quot;Daftarkan Database&quot; untuk mulai.</p>
           ) : (
             <ul className="flex flex-wrap gap-2">
               {dbConnections.map((c) => (
@@ -404,17 +399,17 @@ export default function CompanyBranchesTab() {
                   <Database size={13} className={c.is_active ? 'text-success' : 'text-muted'} />
                   <span className="text-sm text-body">{c.name}</span>
                   <span className="text-xs text-muted">· dipakai {c.used_by} cabang</span>
-                  {tenantData && Object.values(tenantData).some(t => t.db_connection_id === c.id) ? (
+                  {Object.values(tenantData).some(t => t.db_connection_id === c.id) && (
                     <span className="inline-flex items-center text-success text-xs"><CheckCircle size={12} /></span>
-                  ) : null}
+                  )}
                   <span className="hidden group-hover:flex items-center gap-1 ml-1">
                     <button onClick={() => handleTestRegistry(c.id)} disabled={testing}
-                      title="Test Koneksi" className="p-0.5 text-muted hover:text-primary disabled:opacity-50">
+                      title="Test Koneksi" aria-label={`Test koneksi ${c.name}`} className="p-0.5 text-muted hover:text-primary disabled:opacity-50">
                       {testing ? <Loader2 size={12} className="animate-spin" /> : <Wifi size={12} />}
                     </button>
-                    <button onClick={() => setEditingRegistry(c)} title="Edit"
+                    <button onClick={() => setEditingRegistry(c)} title="Edit" aria-label={`Edit ${c.name}`}
                       className="p-0.5 text-muted hover:text-ink"><Pencil size={12} /></button>
-                    <button onClick={() => handleDeleteRegistry(c)} title="Hapus"
+                    <button onClick={() => handleDeleteRegistry(c)} title="Hapus" aria-label={`Hapus ${c.name}`}
                       className="p-0.5 text-muted hover:text-error"><Trash2 size={12} /></button>
                   </span>
                 </li>
