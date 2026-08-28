@@ -285,14 +285,14 @@ export default function TenantsTab() {
 
           {activeTab === 'database' ? (
             <>
+              <button onClick={() => { setEditingDb(null); setShowDbModal(true); }}
+                className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active whitespace-nowrap">
+                <Plus size={14} /> Daftarkan Database
+              </button>
               <button onClick={fetchStatuses} disabled={statusLoading}
                 title="Refresh status koneksi" aria-label="Refresh status koneksi"
                 className="p-2 border border-hairline rounded-md text-muted hover:text-primary hover:border-primary/30 disabled:opacity-50">
                 <RefreshCw size={14} className={statusLoading ? 'animate-spin' : ''} />
-              </button>
-              <button onClick={() => { setEditingDb(null); setShowDbModal(true); }}
-                className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active whitespace-nowrap">
-                <Plus size={14} /> Daftarkan Database
               </button>
             </>
           ) : (
