@@ -272,6 +272,11 @@ export default function TenantsTab() {
         </div>
 
         <div className="ml-auto flex items-center gap-3">
+                  <button onClick={fetchStatuses} disabled={statusLoading}
+                    title="Refresh status koneksi" aria-label="Refresh status koneksi"
+                    className="p-2 border border-hairline rounded-md text-muted hover:text-primary hover:border-primary/30 disabled:opacity-50">
+                    <RefreshCw size={14} className={statusLoading ? 'animate-spin' : ''} />
+                  </button>
           <div className="flex gap-2 border border-hairline rounded-md p-1 bg-surface-soft">
             <button onClick={() => setActiveTab('database')}
               className={`px-4 py-1.5 text-xs font-medium rounded transition-colors ${activeTab === 'database' ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-ink'}`}>
@@ -288,11 +293,6 @@ export default function TenantsTab() {
               <button onClick={() => { setEditingDb(null); setShowDbModal(true); }}
                 className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active whitespace-nowrap">
                 <Plus size={14} /> Daftarkan Database
-              </button>
-              <button onClick={fetchStatuses} disabled={statusLoading}
-                title="Refresh status koneksi" aria-label="Refresh status koneksi"
-                className="p-2 border border-hairline rounded-md text-muted hover:text-primary hover:border-primary/30 disabled:opacity-50">
-                <RefreshCw size={14} className={statusLoading ? 'animate-spin' : ''} />
               </button>
             </>
           ) : (
