@@ -161,8 +161,16 @@ python init_db.py
 ```
 
 Script ini akan:
-- Membuat semua tabel dari `sql/2_DATABASE_DDL.sql`
+- Membuat semua tabel dari `sql/1_SCHEMA_BASE.sql`
 - Membuat data awal (company, branch, user admin & user biasa)
+
+#### (Opsional) Database Tenant Dummy — untuk testing AI
+
+```bash
+python seed_tenant_dummy.py --reset
+```
+
+Membuat database `dealer_dummy` di Postgres yang sama: 5 tabel (`kendaraan`, `pelanggan`, `penjualan`, `detail_penjualan`, `service_records`) berisi ±1.700 baris data dealer 12 bulan terakhir. Setelah dibuat, daftarkan di menu **Admin → Database & Tenant** lalu hubungkan ke cabang yang diinginkan. Tanpa `--reset`, script tidak akan menimpa database yang sudah ada.
 
 ### 6. Setup Frontend
 
