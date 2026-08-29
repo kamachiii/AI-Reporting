@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { MotionConfig } from 'framer-motion';
 import LoginModal from './components/LoginModal';
 import AdminLayout from './components/Admin/AdminLayout';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -56,7 +57,7 @@ function App() {
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-canvas text-ink">Memuat aplikasi...</div>;
   return (
-    <>
+    <MotionConfig reducedMotion="user">
       <Toaster position="top-right" />
       {!user ? (
         <Routes>
@@ -86,7 +87,7 @@ function App() {
           } />
         </Routes>
       )}
-    </>
+    </MotionConfig>
   );
 }
 

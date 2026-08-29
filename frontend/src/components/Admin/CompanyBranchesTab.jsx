@@ -65,6 +65,7 @@ export default function CompanyBranchesTab() {
       if (confirmState) setConfirmState(null);
       else if (showCompanyModal) setShowCompanyModal(false);
       else if (showBranchModal) setShowBranchModal(false);
+      else if (connectDbBranch) setConnectDbBranch(null);
       else if (dropdownOpen) setDropdownOpen(null);
     },
     isBusy: !!processingCode || saving || testing,
@@ -272,7 +273,7 @@ export default function CompanyBranchesTab() {
           <input
             id="cb-search"
             type="text"
-            placeholder="Cari kode, nama, atau host...  ( / )"
+            placeholder={activeTab === 'companies' ? 'Cari kode atau nama perusahaan...  ( / )' : 'Cari kode, nama, atau host...  ( / )'}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-9 pr-8 py-2 border border-hairline rounded-md bg-canvas text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"

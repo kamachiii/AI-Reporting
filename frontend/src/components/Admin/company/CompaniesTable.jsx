@@ -34,7 +34,8 @@ export default function CompaniesTable({
 
   const openMenu = (e, code) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    setMenuPos({ top: rect.bottom + window.scrollY, left: rect.right - 180 + window.scrollX });
+    // position:fixed memakai koordinat viewport — TIDAK ditambah scroll halaman
+    setMenuPos({ top: rect.bottom + 2, left: rect.right - 180 });
     setMenuOpenCode(menuOpenCode === code ? null : code);
   };
 
@@ -94,18 +95,21 @@ export default function CompaniesTable({
                       <td className="p-3">
                         <div className="flex items-center gap-1">
                           <button onClick={() => onViewDetail(c)} disabled={isProcessing}
-                            className="p-1.5 text-muted hover:text-primary rounded-md transition-colors disabled:opacity-50" title="Lihat Detail">
+                            className="p-1.5 text-muted hover:text-primary rounded-md transition-colors disabled:opacity-50" title="Lihat Detail"
+                            aria-label={`Lihat detail ${c.code}`}>
                             <Eye size={16} />
                           </button>
                           <button onClick={() => onEdit(c)} disabled={isProcessing}
-                            className="p-1.5 text-muted hover:text-ink rounded-md transition-colors disabled:opacity-50" title="Edit">
+                            className="p-1.5 text-muted hover:text-ink rounded-md transition-colors disabled:opacity-50" title="Edit"
+                            aria-label={`Edit ${c.code}`}>
                             <Pencil size={15} />
                           </button>
 
                           {/* Dropdown aksi sekunder */}
                           <div className="relative company-menu-trigger">
                             <button onClick={(e) => openMenu(e, c.code)} disabled={isProcessing}
-                              className="p-1.5 text-muted hover:text-ink rounded-md transition-colors disabled:opacity-50" title="Aksi Lainnya">
+                              className="p-1.5 text-muted hover:text-ink rounded-md transition-colors disabled:opacity-50" title="Aksi Lainnya"
+                              aria-label={`Aksi lainnya untuk ${c.code}`}>
                               <MoreVertical size={15} />
                             </button>
 

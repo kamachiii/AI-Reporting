@@ -9,20 +9,26 @@ import AIConfigTab from './AIConfigTab';
 import UsersTab from './UsersTab';
 import AuditLogTab from './AuditLogTab';
 
-// Tab resmi + slug URL-nya
+// Tab resmi + slug URL-nya (+ deskripsi singkat untuk header & title dokumen)
 const TABS = [
-  { id: 'company', path: 'perusahaan-cabang', label: 'Perusahaan & Cabang', icon: Building2 },
-  { id: 'tenants', path: 'database-tenant',   label: 'Database & Tenant',    icon: Database },
-  { id: 'ai',      path: 'ai-config',         label: 'Penyedia & Model AI',  icon: Bot },
-  { id: 'users',   path: 'pengguna',          label: 'Pengguna & Izin',      icon: Users },
-  { id: 'audit',   path: 'audit-log',         label: 'Audit Log & Monitoring', icon: FileText },
+  { id: 'company', path: 'perusahaan-cabang', label: 'Perusahaan & Cabang', desc: 'Kelola perusahaan induk dan cabang/dealer', icon: Building2 },
+  { id: 'tenants', path: 'database-tenant',   label: 'Database & Tenant',    desc: 'Registry database & relasi cabang', icon: Database },
+  { id: 'ai',      path: 'ai-config',         label: 'Penyedia & Model AI',  desc: 'Koneksi provider & pemilihan model AI', icon: Bot },
+  { id: 'users',   path: 'pengguna',          label: 'Pengguna & Izin',      desc: 'Akun, role, dan akses cabang', icon: Users },
+  { id: 'audit',   path: 'audit-log',         label: 'Audit Log & Monitoring', desc: 'Jejak setiap pertanyaan AI', icon: FileText },
 ];
 
 export default function AdminLayout({ user, onLogout }) {
   const navigate = useNavigate();
   const params = useParams();
   // URL: /admin/:tabSlug — fallback ke tab pertama
-  const activeTab = TABS.find(t => t.path === params.tabSlug)?.id || 'company';
+  const activeTabObj = TABS.find(t => t.path === params.tabSlug) || TABS[0];
+  const activeTab = activeTabObj.id;
+
+  // Judul dokumen mengikuti tab aktif (riwayat tab browser tetap informatif)
+  useEffect(() => {
+    document.title = `${activeTabObj.label} · DMS AI Platform`;
+  }, [activeTabObj.label]);
 
   const setActiveTab = (id) => {
     const tab = TABS.find(t => t.id === id);
@@ -103,8 +109,8 @@ export default function AdminLayout({ user, onLogout }) {
         <div className="max-w-6xl mx-auto space-y-6">
           <header className="flex items-center justify-between">
             <div>
-              <h2 className="font-serif text-2xl text-ink">Dashboard Admin</h2>
-              <p className="text-muted text-sm">Pengelolaan Multi-Tenant, AI, Pengguna, & Log</p>
+              <h2 className="font-serif text-2xl text-ink">{activeTabObj.label}</h2>
+              <p className="text-muted text-sm">{activeTabObj.desc}</p>
             </div>
             <div className="flex items-center gap-2">
               <span className="px-3 py-1 bg-primary/10 text-primary text-xs font-medium rounded-full">

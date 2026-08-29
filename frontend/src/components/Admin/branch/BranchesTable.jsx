@@ -140,6 +140,7 @@ export default function BranchesTable({
                                 disabled={isProcessing}
                                 className="p-1.5 text-muted hover:text-primary hover:bg-surface-soft rounded-md transition-colors disabled:opacity-50"
                                 title="Test Koneksi"
+                                aria-label={`Test koneksi ${b.code}`}
                               >
                                 <Wifi size={16} />
                               </button>
@@ -148,6 +149,7 @@ export default function BranchesTable({
                                 disabled={isProcessing}
                                 className="p-1.5 text-muted hover:text-primary hover:bg-surface-soft rounded-md transition-colors disabled:opacity-50"
                                 title="Ganti Database"
+                                aria-label={`Ganti database ${b.code}`}
                               >
                                 <Database size={16} />
                               </button>
@@ -167,6 +169,8 @@ export default function BranchesTable({
                                 toggleDropdown();
                               }}
                               className="dropdown-trigger p-1.5 text-muted hover:text-ink hover:bg-surface-soft rounded-md transition-colors"
+                              title="Aksi Lainnya"
+                              aria-label={`Aksi lainnya untuk ${b.code}`}
                             >
                               <MoreVertical size={16} />
                             </button>
