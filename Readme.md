@@ -440,6 +440,7 @@ erDiagram
 | `PUT` | `/admin/tenants/{branch_code}` | Ganti database milik cabang |
 | `DELETE` | `/admin/tenants/{branch_code}` | Putuskan koneksi cabang (registry tetap) |
 | `POST` | `/admin/tenants/{branch_code}/test-connection` | Tes koneksi database cabang |
+| `POST` | `/admin/tenants/{branch_code}/refresh-schema` | Introspeksi skema DB tenant → simpan ke `schema_config_json` (jalan otomatis saat connect) |
 
 ### Admin — Users
 | Method | Endpoint | Deskripsi |

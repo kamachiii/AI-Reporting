@@ -125,6 +125,10 @@ export const api = {
     const response = await apiClient.post(`/admin/tenants/${branch_code}/test-connection`, data || {});
     return response.data;
   },
+  refreshTenantSchema: async (branch_code) => {
+    const response = await apiClient.post(`/admin/tenants/${branch_code}/refresh-schema`);
+    return response.data; // { message, tables, columns }
+  },
 
   // ==========================================
   // 3. ADMIN: USERS

@@ -37,6 +37,7 @@ export default function TenantsTab() {
   const [saving, setSaving] = useState(false);
   const [testingId, setTestingId] = useState(null);
   const [processingKey, setProcessingKey] = useState(null);
+  const [introspecting, setIntrospecting] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
 
 
@@ -159,6 +160,18 @@ export default function TenantsTab() {
   };
 
   // ---- relasi ----
+  const handleRefreshSchema = async (t) => {
+    setIntrospecting(t.branch_code);
+    try {
+      const r = await api.refreshTenantSchema(t.branch_code);
+      notify.success(r.message || `Skema ${t.branch_code} diperbarui`);
+    } catch (e) {
+      notify.error(e.response?.data?.detail || 'Gagal memperbarui skema');
+    } finally {
+      setIntrospecting(null);
+    }
+  };
+
   const handleSaveConnect = async ({ branch_code, db_connection_id, isChange }) => {
     setSaving(true);
     try {
@@ -447,6 +460,11 @@ export default function TenantsTab() {
                         </td>
                         <td className="p-3">
                           <div className="flex justify-end gap-0.5">
+                            <button onClick={() => handleRefreshSchema(t)} disabled={introspecting === t.branch_code}
+                              title="Perbarui Skema" aria-label={`Perbarui skema ${t.branch_code}`}
+                              className="p-1.5 text-muted hover:text-primary hover:bg-surface-soft rounded-md disabled:opacity-50">
+                              {introspecting === t.branch_code ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+                            </button>
                             <button onClick={() => handleDisconnect(t)} disabled={processingKey === t.branch_code}
                               title="Putuskan" aria-label={`Putuskan ${t.branch_code}`}
                               className="p-1.5 text-muted hover:text-error hover:bg-error/5 rounded-md disabled:opacity-50">

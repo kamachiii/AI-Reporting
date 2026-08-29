@@ -4,13 +4,15 @@ Model baru: tenants TIDAK menyimpan kredensial. Satu baris tenant
 = penunjuk satu cabang ke satu entri di db_connections.
 Satu cabang = satu database; satu database boleh dipakai banyak cabang.
 """
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 import asyncpg
 import logging
 
 from app.core.database import get_core_pool
-from app.core.security import require_admin_role
+from app.core.security import require_admin_role, decrypt_credential
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["Admin - Tenants"])
@@ -19,6 +21,44 @@ router = APIRouter(prefix="/admin", tags=["Admin - Tenants"])
 class TenantCreate(BaseModel):
     branch_code: str
     db_connection_id: int
+
+
+async def _introspect_dan_simpan(pool, branch_code: str) -> int | None:
+    """Introspeksi skema DB tenant lalu simpan ke schema_config_json (F1.2).
+
+    Best-effort: mengembalikan jumlah tabel, atau None bila koneksi/introspeksi
+    gagal (tidak menggagalkan operasi connect yang memanggilnya).
+    """
+    from app.services.schema_introspector import introspect_schema
+
+    row = await pool.fetchrow(
+        """
+        SELECT dc.db_host, dc.db_port, dc.db_name, dc.db_username, dc.db_password
+        FROM tenants t
+        JOIN db_connections dc ON dc.id = t.db_connection_id
+        WHERE t.branch_code = $1
+        """,
+        branch_code,
+    )
+    if not row:
+        return None
+    conn = None
+    try:
+        password = decrypt_credential(row["db_password"])
+        conn = await asyncpg.connect(
+            host=row["db_host"], port=row["db_port"], database=row["db_name"],
+            user=row["db_username"], password=password, timeout=5.0)
+        skema = await introspect_schema(conn)
+    except Exception as e:
+        logger.warning(f"Auto-introspeksi skema {branch_code} gagal: {e}")
+        return None
+    finally:
+        if conn:
+            await conn.close()
+    await pool.execute(
+        "UPDATE tenants SET schema_config_json = $2::jsonb, updated_at = CURRENT_TIMESTAMP WHERE branch_code = $1",
+        branch_code, json.dumps(skema))
+    return len(skema["tables"])
 
 
 @router.get("/tenants")
@@ -81,7 +121,11 @@ async def create_tenant(payload: TenantCreate, user: dict = Depends(require_admi
             INSERT INTO tenants (branch_code, db_connection_id)
             VALUES ($1, $2)
         """, payload.branch_code, payload.db_connection_id)
-        return {"message": f"Database berhasil dihubungkan ke cabang {payload.branch_code}"}
+        n_tabel = await _introspect_dan_simpan(pool, payload.branch_code)
+        pesan = f"Database berhasil dihubungkan ke cabang {payload.branch_code}"
+        if n_tabel is not None:
+            pesan += f" (skema: {n_tabel} tabel)"
+        return {"message": pesan}
     except HTTPException:
         raise
     except asyncpg.exceptions.UniqueViolationError:
@@ -118,6 +162,7 @@ async def update_tenant(branch_code: str, payload: TenantCreate, user: dict = De
                 UPDATE tenants SET db_connection_id = $1, updated_at = CURRENT_TIMESTAMP
                 WHERE branch_code = $2
             """, new_conn, branch_code)
+            await _introspect_dan_simpan(pool, branch_code)
         return {"message": f"Database cabang {branch_code} berhasil diganti"}
     except HTTPException:
         raise
@@ -145,7 +190,6 @@ async def delete_tenant(branch_code: str, user: dict = Depends(require_admin_rol
 @router.post("/tenants/{branch_code}/test-connection")
 async def test_tenant_connection(branch_code: str, user: dict = Depends(require_admin_role)):
     """Tes koneksi nyata database milik cabang (via registry)."""
-    from app.core.security import decrypt_credential
     try:
         pool = await get_core_pool()
         row = await pool.fetchrow("""
@@ -167,3 +211,50 @@ async def test_tenant_connection(branch_code: str, user: dict = Depends(require_
     except Exception as e:
         logger.error(f"Test connection failed for {branch_code}: {e}")
         return {"status": "disconnected", "message": f"Gagal koneksi: {str(e)}"}
+
+
+@router.post("/tenants/{branch_code}/refresh-schema")
+async def refresh_tenant_schema(branch_code: str, user: dict = Depends(require_admin_role)):
+    """Introspeksi ulang skema DB tenant & simpan ke schema_config_json (F1.2).
+
+    Berbeda dari auto-introspeksi (best-effort), endpoint ini melempar error
+    yang jelas bila tenant tak ada (404) atau DB tenant tak bisa dihubungi (502).
+    """
+    from app.services.schema_introspector import introspect_schema
+
+    pool = await get_core_pool()
+    row = await pool.fetchrow(
+        """
+        SELECT dc.db_host, dc.db_port, dc.db_name, dc.db_username, dc.db_password
+        FROM tenants t
+        JOIN db_connections dc ON dc.id = t.db_connection_id
+        WHERE t.branch_code = $1
+        """,
+        branch_code,
+    )
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Tenant untuk cabang '{branch_code}' tidak ditemukan. Hubungkan database terlebih dahulu.")
+
+    password = decrypt_credential(row["db_password"])
+    try:
+        conn = await asyncpg.connect(
+            host=row["db_host"], port=row["db_port"], database=row["db_name"],
+            user=row["db_username"], password=password, timeout=5.0)
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Gagal terhubung ke database tenant: {str(e).splitlines()[0][:150]}")
+    try:
+        skema = await introspect_schema(conn)
+    finally:
+        await conn.close()
+
+    n_tabel = len(skema["tables"])
+    n_kolom = sum(len(info["columns"]) for info in skema["tables"].values())
+    await pool.execute(
+        "UPDATE tenants SET schema_config_json = $2::jsonb, updated_at = CURRENT_TIMESTAMP WHERE branch_code = $1",
+        branch_code, json.dumps(skema))
+    return {"message": f"Skema '{branch_code}' diperbarui: {n_tabel} tabel / {n_kolom} kolom",
+            "tables": n_tabel, "columns": n_kolom}
