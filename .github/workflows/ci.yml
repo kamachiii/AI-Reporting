@@ -66,3 +66,6 @@ jobs:
 
       - name: Import app (catches undefined refs & bad config)
         run: python -c "from app.main import app; print('routes:', len(app.routes))"
+
+      - name: Unit tests (pytest, tanpa DB)
+        run: python -m pytest tests/ -q

@@ -209,15 +209,16 @@ ai-report-database-mandiri/
 │   ├── .env                        # Environment variables (tidak di-commit)
 │   ├── requirements.txt            # Python dependencies
 │   ├── init_db.py                  # Init schema + migrasi otomatis + seeding
-│   ├── tests/                      # Pytest (unit & integration)
+│   ├── tests/                      # Pytest (unit, tanpa DB)
 │   │   ├── conftest.py
 │   │   ├── test_ai_orchestrator.py # Exception passthrough AI gateway
 │   │   └── test_sql_guard.py       # Katalog serangan SQL (TDD untuk F2.3)
 │   ├── sql/
-│   │   ├── 1_SCHEMA_BASE.sql       # Skema dasar (9 tabel)
+│   │   ├── 1_SCHEMA_BASE.sql       # Skema dasar (10 tabel)
 │   │   └── migrations/             # Migrasi inkremental terlacak (idempotent)
 │   │       ├── 001_users_is_active.sql
-│   │       └── 002_audit_logs_user_id_nullable.sql
+│   │       ├── 002_audit_logs_user_id_nullable.sql
+│   │       └── 003_db_connection_registry.sql
 │   └── app/
 │       ├── main.py                 # FastAPI entry point
 │       ├── core/
@@ -226,49 +227,53 @@ ai-report-database-mandiri/
 │       │   └── security.py         # JWT, bcrypt, Fernet, guard admin (cek DB)
 │       ├── routers/
 │       │   ├── auth.py             # Login (rate limit anti brute-force)
-│       │   ├── users.py            # CRUD user + assign cabang + guards
 │       │   └── admin/              # Satu modul per domain
 │       │       ├── __init__.py     # Agregasi router admin
 │       │       ├── companies.py    # Company & branch CRUD (transaksional)
-│       │       ├── tenants.py      # Tenant DB CRUD + test koneksi
-│       │       └── ai_configs.py   # AI config CRUD + fetch models provider
+│       │       ├── users.py        # CRUD user + assign cabang + guards
+│       │       ├── db_connections.py # Registry database (kredensial terenkripsi)
+│       │       ├── db_status.py    # Batch test-all koneksi database (paralel)
+│       │       ├── tenants.py      # Relasi cabang ↔ database + test koneksi
+│       │       ├── ai_configs.py   # AI config CRUD + fetch models + test-all
+│       │       └── audit_logs.py   # Listing audit log (filter + pagination)
 │       └── services/
 │           └── ai_orchestrator.py  # Integrasi AI provider (OpenAI/Anthropic)
 │
 └── frontend/
     ├── package.json
     ├── eslint.config.js            # Lint gate (error = commit ditolak)
-    ├── vite.config.js
-    ├── index.html
+    ├── playwright.config.mjs
+    ├── e2e/                        # Playwright: alur admin + visual regression
     └── src/
         ├── main.jsx
-        ├── App.jsx                 # Routing by role + notice sesi kadaluarsa
+        ├── App.jsx                 # Routing by role (react-router) + notice sesi kadaluarsa
         ├── hooks/
         │   ├── useDebounce.js      # Debounce search input
-        │   └── useAdminShortcuts.js# Esc tutup modal, "/" fokus search
+        │   ├── useAdminShortcuts.js# Esc tutup modal, "/" fokus search
+        │   └── useCompanyBranchData.js # Sumber data tunggal tab Perusahaan & Cabang
         ├── services/
         │   └── api.js              # Axios client + interceptor 401 auto-logout
         ├── utils/
         │   └── notification.js     # Wrapper toast seragam
         └── components/
             ├── LoginModal.jsx      # Halaman login
+            ├── ErrorBoundary.jsx   # Penahan crash per-subtree
             └── Admin/
-                ├── AdminLayout.jsx          # Sidebar + navigasi antar-tab
-                ├── CompanyBranchesTab.jsx   # Company & branch (+ tenant inline)
-                ├── TenantsTab.jsx           # Manajemen tenant database
+                ├── AdminLayout.jsx          # Sidebar + routing /admin/:tabSlug
+                ├── CompanyBranchesTab.jsx   # Perusahaan & cabang (tab tipis)
+                ├── TenantsTab.jsx           # Registry database & relasi (2 sub-tab)
                 ├── AIConfigTab.jsx          # Konfigurasi AI provider
                 ├── UsersTab.jsx             # Manajemen user & izin cabang
-                ├── AuditLogTab.jsx          # Log audit query (segera)
+                ├── AuditLogTab.jsx          # Log audit query AI
                 ├── common/                  # Komponen bersama
                 │   ├── ConfirmationDialog.jsx
                 │   ├── PaginationBar.jsx
+                │   ├── SkeletonTable.jsx
                 │   └── EmptyState.jsx       # Empty state ilustratif
-                ├── company/CompanyModal.jsx
-                ├── branch/BranchModal.jsx
-                ├── tenants/                 # Domain tenant
-                │   ├── TenantModal.jsx      # Edit koneksi DB per cabang
-                │   └── TenantFormModal.jsx  # Tambah tenant baru
-                ├── ai/ModelPickerModal.jsx
+                ├── company/                 # CompaniesTable, CompanyModal, CompanyDetailModal
+                ├── branch/                  # BranchesTable, BranchModal, BranchDetailModal
+                ├── tenants/                 # ConnectDbModal, DbConnectionModal
+                ├── ai/                      # AIConfigModal, ModelPickerModal
                 └── users/UserModal.jsx
 ```
 
@@ -281,18 +286,19 @@ ai-report-database-mandiri/
 
 ## 🗄 Database Schema
 
-Platform ini menggunakan **9 tabel** di database core (`ai-dms`):
+Platform ini menggunakan **10 tabel** di database core (`ai-dms`):
 
 
 ```mermaid
 erDiagram
     companies ||--o{ branches : "has"
-    branches ||--o| tenants : "connects to"
     branches ||--o{ user_branches : "assigned via"
     users ||--o{ user_branches : "belongs to"
     users ||--o{ conversations : "creates"
     users ||--o{ audit_logs : "triggers"
     conversations ||--o{ messages : "contains"
+    branches ||--o| tenants : "connects to"
+    tenants }o--|| db_connections : "points to"
 
     companies {
         serial id PK
@@ -327,13 +333,20 @@ erDiagram
     tenants {
         serial id PK
         varchar branch_code FK, UK
+        integer db_connection_id FK
+        jsonb schema_config_json
+        integer daily_token_quota
+    }
+
+    db_connections {
+        serial id PK
+        varchar name UK
         varchar db_host
         integer db_port
         varchar db_name
         varchar db_username
         text db_password "encrypted"
-        jsonb schema_config_json
-        integer daily_token_quota
+        boolean is_active
     }
 
     ai_configs {
@@ -401,15 +414,38 @@ erDiagram
 | `PUT` | `/admin/branches/{code}` | Update branch |
 | `DELETE` | `/admin/branches/{code}` | Hapus branch |
 
-### Admin — Tenant (Database Connection)
+### Admin — Database Registry (Kredensial)
 | Method | Endpoint | Deskripsi |
 |---|---|---|
-| `GET` | `/admin/tenants` | Daftar semua tenant |
-| `GET` | `/admin/tenants/{branch_code}` | Detail tenant per branch |
-| `GET` | `/admin/branches-with-tenants` | Branch dengan status tenant |
-| `POST` | `/admin/tenants` | Buat koneksi tenant baru |
-| `POST` | `/admin/tenants/{branch_code}/test-connection` | Test koneksi tenant |
-| `POST` | `/admin/tenants/test-draft` | Test draft koneksi (sebelum save) |
+| `GET` | `/admin/db-connections` | Daftar semua database terdaftar (tanpa password) |
+| `POST` | `/admin/db-connections` | Daftarkan database (password terenkripsi Fernet) |
+| `PUT` | `/admin/db-connections/{id}` | Update database (password kosong = tidak diubah) |
+| `DELETE` | `/admin/db-connections/{id}` | Hapus dari registry (ditolak jika masih dipakai cabang) |
+| `POST` | `/admin/db-connections/{id}/test-connection` | Tes koneksi satu database |
+| `POST` | `/admin/db-connections/test-all` | Tes koneksi semua database secara paralel |
+
+### Admin — Tenant (Relasi Cabang ↔ Database)
+| Method | Endpoint | Deskripsi |
+|---|---|---|
+| `GET` | `/admin/tenants` | Daftar semua relasi cabang → database |
+| `POST` | `/admin/tenants` | Hubungkan cabang ke database registry |
+| `PUT` | `/admin/tenants/{branch_code}` | Ganti database milik cabang |
+| `DELETE` | `/admin/tenants/{branch_code}` | Putuskan koneksi cabang (registry tetap) |
+| `POST` | `/admin/tenants/{branch_code}/test-connection` | Tes koneksi database cabang |
+
+### Admin — Users
+| Method | Endpoint | Deskripsi |
+|---|---|---|
+| `GET` | `/admin/users` | Daftar user + cabang yang di-assign |
+| `POST` | `/admin/users` | Buat user baru |
+| `PUT` | `/admin/users/{id}` | Update user (password opsional) |
+| `PUT` | `/admin/users/{id}/status` | Aktifkan / nonaktifkan user |
+| `DELETE` | `/admin/users/{id}` | Hapus user permanen |
+
+### Admin — Audit Log
+| Method | Endpoint | Deskripsi |
+|---|---|---|
+| `GET` | `/admin/audit-logs` | Riwayat query AI (filter status/tanggal/pencarian + pagination) |
 
 ### Admin — AI Configuration
 | Method | Endpoint | Deskripsi |
@@ -461,6 +497,7 @@ Setelah menjalankan `init_db.py`, akun berikut tersedia:
 - **Fernet Encryption** — Kredensial database tenant dan API key AI dienkripsi saat disimpan
 - **Role-Based Access Control** — Endpoint admin dilindungi dengan middleware `require_admin_role`
 - **CORS** — Hanya origin tertentu yang diizinkan (localhost dev server)
+- **Rate Limit Login** — Maksimal 5 percobaan gagal per kombinasi username+IP dalam 60 detik (in-memory; hitungan reset saat backend restart — cukup untuk single-instance)
 
 ---
 

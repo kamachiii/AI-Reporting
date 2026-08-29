@@ -22,3 +22,10 @@ desktop.ini
 
 # Logs
 *.log
+
+# Backup lokal & artefak kerja AI/QA
+backup_*/
+.hermes/
+frontend/qa-toolbar.png
+frontend/test-results/
+frontend/playwright-report/

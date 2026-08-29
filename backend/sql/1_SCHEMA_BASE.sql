@@ -57,6 +57,9 @@ CREATE TABLE user_branches (
 );
 
 CREATE TABLE tenants (
+    -- CATATAN: tabel ini DIBENTUK ULANG oleh migrations/003_db_connection_registry.sql.
+    -- Kredensial (db_host..db_password) dipindahkan ke tabel db_connections;
+    -- akhirnya tenants hanya menyimpan db_connection_id (penunjuk ke registry).
     id SERIAL PRIMARY KEY,
     branch_code VARCHAR(50) UNIQUE NOT NULL,
     db_host VARCHAR(255) NOT NULL,
