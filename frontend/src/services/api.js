@@ -80,11 +80,6 @@ export const api = {
     return response.data;
   },
 
-  getBranchesWithTenants: async () => {
-      const response = await apiClient.get('/admin/branches-with-tenants');
-      return response.data;
-  },
-  
   getTenants: async () => {
     const response = await apiClient.get('/admin/tenants');
     return response.data;
@@ -114,10 +109,6 @@ export const api = {
     const response = await apiClient.post('/admin/db-connections/test-all');
     return response.data; // { "<id>": {status, message} }
   },
-  getTenantByBranch: async (branch_code) => {
-      const response = await apiClient.get(`/admin/tenants/${branch_code}`);
-      return response.data;
-    },
   createTenant: async (data) => {
     const response = await apiClient.post('/admin/tenants', data);
     return response.data;
@@ -166,6 +157,10 @@ export const api = {
     const response = await apiClient.get('/admin/ai-configs');
     return response.data;
   },
+  getAuditLogs: async (params = {}) => {
+    const response = await apiClient.get('/admin/audit-logs', { params });
+    return response.data;
+  },
   createAIConfig: async (data) => {
     const response = await apiClient.post('/admin/ai-configs', data);
     return response.data;
@@ -181,6 +176,10 @@ export const api = {
   testAIConfig: async (id) => {
     const response = await apiClient.post(`/admin/ai-configs/${id}/test`);
     return response.data;
+  },
+  testAllAIConfigs: async () => {
+    const response = await apiClient.post('/admin/ai-configs/test-all');
+    return response.data; // { "<id>": {status, message} }
   },
   fetchProviderModels: async (provider, api_key, api_type, base_url, config_id) => {
     const response = await apiClient.post('/admin/ai-providers/models', { 
