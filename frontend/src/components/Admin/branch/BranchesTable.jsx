@@ -159,9 +159,10 @@ export default function BranchesTable({
                             <button
                               onClick={(e) => {
                                 const rect = e.currentTarget.getBoundingClientRect();
+                                // position:fixed memakai koordinat viewport — TIDAK ditambah scroll halaman
                                 setDropdownPos({
-                                  top: rect.bottom + window.scrollY,
-                                  left: rect.right - 180 + window.scrollX,
+                                  top: rect.bottom + 2,
+                                  left: rect.right - 180,
                                 });
                                 toggleDropdown();
                               }}

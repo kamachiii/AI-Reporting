@@ -142,6 +142,8 @@ async def create_branch(payload: BranchCreate, user: dict = Depends(require_admi
         return {"message": "Cabang berhasil ditambahkan"}
     except asyncpg.exceptions.UniqueViolationError:
         raise HTTPException(status_code=400, detail="Kode cabang sudah digunakan")
+    except asyncpg.exceptions.ForeignKeyViolationError:
+        raise HTTPException(status_code=400, detail=f"Perusahaan '{payload.company_code}' tidak ditemukan")
     except Exception as e:
         logger.error(f"Error creating branch: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -150,10 +152,15 @@ async def create_branch(payload: BranchCreate, user: dict = Depends(require_admi
 async def update_branch(code: str, payload: BranchUpdate, user: dict = Depends(require_admin_role)):
     try:
         pool = await get_core_pool()
+        exists = await pool.fetchval("SELECT 1 FROM branches WHERE code = $1", code)
+        if not exists:
+            raise HTTPException(status_code=404, detail="Cabang tidak ditemukan")
         await pool.execute("UPDATE branches SET name=$1, address=$2, is_active=$3 WHERE code=$4", payload.name, payload.address, payload.is_active, code)
         return {"message": "Cabang berhasil diperbarui"}
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error updating branch: {e}")
+        logger.error(f"Error updating branch {code}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.put("/branches/{code}/status")
@@ -189,22 +196,5 @@ async def delete_branch(code: str, user: dict = Depends(require_admin_role)):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error deleting branch: {e}")
+        logger.error(f"Error deleting branch {code}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
-
-@router.get("/branches-with-tenants")
-async def get_branches_with_tenants(user: dict = Depends(require_admin_role)):
-    """Branch + metadata tenant (tanpa password) untuk tabel integrasi."""
-    try:
-        pool = await get_core_pool()
-        rows = await pool.fetch("""
-            SELECT
-                b.code, b.name, b.company_code, b.address, b.is_active,
-                t.db_host, t.db_port, t.db_name, t.db_username
-            FROM branches b
-            LEFT JOIN tenants t ON b.code = t.branch_code
-        """)
-        return [{"code": r["code"], "name": r["name"], "company_code": r["company_code"], "address": r["address"], "is_active": r["is_active"], "db_host": r["db_host"], "db_port": r["db_port"], "db_name": r["db_name"], "db_username": r["db_username"]} for r in rows]
-    except Exception as e:
-        logger.error(f"Error fetching branches with tenants: {e}")
-        return []

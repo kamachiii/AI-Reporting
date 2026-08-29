@@ -1,11 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { api } from '../../services/api';
+import { notify } from '../../utils/notification';
 import {
   Plus, X, CheckCircle, XCircle,
   RefreshCw, Trash2, Pencil, Search
 } from 'lucide-react';
-import toast from 'react-hot-toast';
 import EmptyState from './common/EmptyState';
 import ConfirmationDialog from './common/ConfirmationDialog';
 import SkeletonTable from './common/SkeletonTable';
@@ -46,22 +46,32 @@ export default function AIConfigTab() {
       setConfigs(data || []);
       testAllStatus(data || []);
     } catch {
-      toast.error('Gagal memuat konfigurasi AI');
+      notify.error('Gagal memuat konfigurasi AI');
     } finally {
       setLoading(false);
     }
   };
 
-  const testAllStatus = (configList) => {
-    configList.forEach(async (c) => {
-      setStatusMap(prev => ({ ...prev, [c.id]: 'checking' }));
-      try {
-        const result = await api.testAIConfig(c.id);
-        setStatusMap(prev => ({ ...prev, [c.id]: result.status }));
-      } catch {
-        setStatusMap(prev => ({ ...prev, [c.id]: 'disconnected' }));
-      }
+  // SATU request batch untuk semua config (bukan N request saat load)
+  const testAllStatus = async (configList) => {
+    if (!configList.length) return;
+    setStatusMap(prev => {
+      const next = { ...prev };
+      configList.forEach(c => { if (!next[c.id]) next[c.id] = 'checking'; });
+      return next;
     });
+    try {
+      const result = await api.testAllAIConfigs();
+      setStatusMap(prev => {
+        const next = { ...prev };
+        configList.forEach(c => {
+          if (result[String(c.id)]) next[c.id] = result[String(c.id)].status;
+        });
+        return next;
+      });
+    } catch {
+      // diam: biarkan status lama bertahan
+    }
   };
 
   const handleTestSingle = async (id) => {
@@ -69,11 +79,11 @@ export default function AIConfigTab() {
     try {
       const result = await api.testAIConfig(id);
       setStatusMap(prev => ({ ...prev, [id]: result.status }));
-      if (result.status === 'connected') toast.success('Koneksi AI berhasil!');
-      else toast.error(`Koneksi gagal: ${result.message || ''}`);
+      if (result.status === 'connected') notify.success('Koneksi AI berhasil!');
+      else notify.error(`Koneksi gagal: ${result.message || ''}`);
     } catch {
       setStatusMap(prev => ({ ...prev, [id]: 'disconnected' }));
-      toast.error('Gagal melakukan test koneksi');
+      notify.error('Gagal melakukan test koneksi');
     }
   };
 
@@ -82,16 +92,16 @@ export default function AIConfigTab() {
     try {
       if (editing) {
         await api.updateAIConfig(editing.id, payload);
-        toast.success('Konfigurasi AI berhasil diperbarui!');
+        notify.success('Konfigurasi AI berhasil diperbarui!');
       } else {
         await api.createAIConfig(payload);
-        toast.success('Konfigurasi AI berhasil disimpan!');
+        notify.success('Konfigurasi AI berhasil disimpan!');
       }
       setShowModal(false);
       setEditing(null);
       await fetchConfigs();
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'Gagal menyimpan konfigurasi');
+      notify.error(e.response?.data?.detail || 'Gagal menyimpan konfigurasi');
     } finally {
       setSaving(false);
     }
@@ -101,11 +111,11 @@ export default function AIConfigTab() {
     if (!configToDelete) return;
     try {
       await api.deleteAIConfig(configToDelete);
-      toast.success('Konfigurasi berhasil dihapus');
+      notify.success('Konfigurasi berhasil dihapus');
       setConfigToDelete(null);
       await fetchConfigs();
     } catch {
-      toast.error('Gagal menghapus konfigurasi');
+      notify.error('Gagal menghapus konfigurasi');
     }
   };
 

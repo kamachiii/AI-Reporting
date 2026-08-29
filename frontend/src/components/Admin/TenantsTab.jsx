@@ -2,16 +2,14 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   Plus, CheckCircle, XCircle, Search, Loader2,
-  Trash2, Wifi, X, Pencil, Database as DbIcon,
-  Server,
-  Check,
-  RefreshCw} from 'lucide-react';
-import toast from 'react-hot-toast';
+  Trash2, Wifi, X, Pencil, RefreshCw} from 'lucide-react';
+import { notify } from '../../utils/notification';
 import PaginationBar from './common/PaginationBar';
 import EmptyState from './common/EmptyState';
 import ConfirmationDialog from './common/ConfirmationDialog';
 import SkeletonTable from './common/SkeletonTable';
 import DbConnectionModal from './tenants/DbConnectionModal';
+import ConnectDbModal from './tenants/ConnectDbModal';
 import { api } from '../../services/api';
 import useDebounce from '../../hooks/useDebounce';
 import useAdminShortcuts from '../../hooks/useAdminShortcuts';
@@ -32,6 +30,8 @@ export default function TenantsTab() {
   const [connections, setConnections] = useState([]);
   // data tenant (relasi)
   const [tenants, setTenants] = useState([]);
+  // daftar cabang (untuk picker hubungkan: hanya yang belum terhubung)
+  const [branches, setBranches] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -83,16 +83,19 @@ export default function TenantsTab() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [conns, tns] = await Promise.all([api.getDbConnections(), api.getTenants()]);
+      const [conns, tns, brs] = await Promise.all([
+        api.getDbConnections(), api.getTenants(), api.getBranches(),
+      ]);
       setConnections(conns || []);
       setTenants(tns || []);
+      setBranches(brs || []);
       // status awal semua 'checking' sampai batch selesai
       const initial = {};
       (conns || []).forEach(c => { initial[String(c.id)] = { status: 'checking', message: '' }; });
       setDbStatus(initial);
       api.testAllDbConnections().then(r => setDbStatus(r || {})).catch(() => {});
     } catch {
-      toast.error('Gagal memuat data database');
+      notify.error('Gagal memuat data database');
     } finally {
       setLoading(false);
     }
@@ -104,15 +107,14 @@ export default function TenantsTab() {
     try {
       const result = await api.testDbConnection(conn.id);
       result.status === 'connected'
-        ? notifyOk(`Koneksi "${conn.name}" berhasil!`)
-        : toast.error(`Gagal: ${result.message || ''}`);
+        ? notify.success(`Koneksi "${conn.name}" berhasil!`)
+        : notify.error(`Gagal: ${result.message || ''}`);
     } catch {
-      toast.error('Gagal menguji koneksi');
+      notify.error('Gagal menguji koneksi');
     } finally {
       setTestingId(null);
     }
   };
-  const notifyOk = (m) => toast.success(m);
 
   // ---- CRUD registry ----
   const handleSaveDb = async ({ id, ...payload }) => {
@@ -120,16 +122,16 @@ export default function TenantsTab() {
     try {
       if (id) {
         await api.updateDbConnection(id, payload);
-        toast.success('Database berhasil diperbarui');
+        notify.success('Database berhasil diperbarui');
       } else {
         await api.createDbConnection(payload);
-        toast.success('Database berhasil didaftarkan');
+        notify.success('Database berhasil didaftarkan');
       }
       setShowDbModal(false);
       setEditingDb(null);
       await fetchData();
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'Gagal menyimpan database');
+      notify.error(e.response?.data?.detail || 'Gagal menyimpan database');
     } finally {
       setSaving(false);
     }
@@ -143,11 +145,11 @@ export default function TenantsTab() {
         setProcessingKey(`db-${conn.id}`);
         try {
           await api.deleteDbConnection(conn.id);
-          toast.success('Database dihapus dari registry');
+          notify.success('Database dihapus dari registry');
           setConfirmState(null);
           await fetchData();
         } catch (e) {
-          toast.error(e.response?.data?.detail || 'Gagal menghapus database');
+          notify.error(e.response?.data?.detail || 'Gagal menghapus database');
           setConfirmState(null);
         } finally {
           setProcessingKey(null);
@@ -162,15 +164,15 @@ export default function TenantsTab() {
     try {
       if (isChange) {
         await api.updateTenantDb(branch_code, db_connection_id);
-        toast.success('Database cabang berhasil diganti');
+        notify.success('Database cabang berhasil diganti');
       } else {
         await api.createTenant({ branch_code, db_connection_id });
-        toast.success('Database berhasil dihubungkan ke cabang');
+        notify.success('Database berhasil dihubungkan ke cabang');
       }
       setShowConnModal(false);
       await fetchData();
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'Gagal menghubungkan database');
+      notify.error(e.response?.data?.detail || 'Gagal menghubungkan database');
     } finally {
       setSaving(false);
     }
@@ -184,11 +186,11 @@ export default function TenantsTab() {
         setProcessingKey(t.branch_code);
         try {
           await api.deleteTenant(t.branch_code);
-          toast.success(`Koneksi ${t.branch_code} diputus`);
+          notify.success(`Koneksi ${t.branch_code} diputus`);
           setConfirmState(null);
           await fetchData();
         } catch (e) {
-          toast.error(e.response?.data?.detail || 'Gagal memutus koneksi');
+          notify.error(e.response?.data?.detail || 'Gagal memutus koneksi');
           setConfirmState(null);
         } finally {
           setProcessingKey(null);
@@ -423,6 +425,27 @@ export default function TenantsTab() {
                         <td className="p-3 text-sm text-body">{t.db_name_label}</td>
                         <td className="p-3 text-sm text-muted">{t.db_host}:{t.db_port}</td>
                         <td className="p-3">
+                          {(() => {
+                            const st = dbStatus[String(t.db_connection_id)];
+                            if (!st || st.status === 'checking') {
+                              return (
+                                <span className="inline-flex items-center text-muted text-xs">
+                                  <Loader2 size={12} className="mr-1.5 animate-spin" /> Menguji…
+                                </span>
+                              );
+                            }
+                            return st.status === 'connected' ? (
+                              <span className="inline-flex items-center gap-1.5 text-success text-xs font-medium">
+                                <CheckCircle size={13} /> Connected
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 text-error text-xs font-medium">
+                                <XCircle size={13} /> Disconnected
+                              </span>
+                            );
+                          })()}
+                        </td>
+                        <td className="p-3">
                           <div className="flex justify-end gap-0.5">
                             <button onClick={() => handleDisconnect(t)} disabled={processingKey === t.branch_code}
                               title="Putuskan" aria-label={`Putuskan ${t.branch_code}`}
@@ -444,10 +467,12 @@ export default function TenantsTab() {
 
       {/* ===== MODALS ===== */}
       {showConnModal && (
-        <HubungkanPicker
+        <ConnectDbModal
+          key="connect-picker"
+          isOpen
           onClose={() => setShowConnModal(false)}
           onSaved={handleSaveConnect}
-          existingTenants={tenants}
+          branches={branches.filter((b) => !tenants.some((t) => t.branch_code === b.code))}
         />
       )}
 
@@ -471,136 +496,6 @@ export default function TenantsTab() {
           onCancel={() => setConfirmState(null)}
         />
       )}
-    </div>
-  );
-}
-
-/* Picker sederhana: pilih cabang (yang belum terhubung) + database, lalu hubungkan.
-   Menggantikan alur lama yang connect hanya dari halaman cabang. */
-function HubungkanPicker({ onClose, onSaved, existingTenants }) {
-  const [branches, setBranches] = useState([]);
-  const [loadingB, setLoadingB] = useState(true);
-  const [branchCode, setBranchCode] = useState('');
-  const [selectedId, setSelectedId] = useState(null);
-  const [connections, setConnections] = useState([]);
-  const [loadingC, setLoadingC] = useState(true);
-  const [page, setPage] = useState(1);
-  const [saving, setSaving] = useState(false);
-
-  const CARD_PAGE = 6;
-
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([
-      import('../../services/api').then(m => m.api.getBranches()),
-      import('../../services/api').then(m => m.api.getDbConnections()),
-    ]).then(([brs, conns]) => {
-      if (cancelled) return;
-      const connected = new Set(existingTenants.map(t => t.branch_code));
-      setBranches(brs.filter(b => !connected.has(b.code)));
-      setConnections(conns.filter(c => c.is_active));
-    }).catch(() => {}).finally(() => {
-      if (!cancelled) { setLoadingB(false); setLoadingC(false); }
-    });
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const totalPages = Math.max(1, Math.ceil(connections.length / CARD_PAGE));
-
-  const submit = async () => {
-    if (!branchCode || !selectedId) return;
-    setSaving(true);
-    try {
-      await onSaved({ branch_code: branchCode, db_connection_id: Number(selectedId), isChange: false });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <motion.div initial={{ scale: .95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-        className="bg-white rounded-xl p-6 max-w-lg w-full shadow-xl border border-hairline relative">
-        <button onClick={onClose} aria-label="Tutup"
-          className="absolute right-4 top-4 text-muted hover:text-ink"><X size={20} /></button>
-
-        <div className="flex items-center gap-3 mb-4">
-          <span className="w-9 h-9 rounded-lg bg-violet-500/10 border border-violet-500/30 text-violet-500 flex items-center justify-center shrink-0">
-            <DbIcon size={18} />
-          </span>
-          <h3 className="font-serif text-lg text-ink">Hubungkan Cabang ke Database</h3>
-        </div>
-
-        {/* pilih cabang */}
-        <label className="block text-sm font-medium text-ink mb-1">Cabang (belum terhubung)</label>
-        <select value={branchCode} onChange={(e) => setBranchCode(e.target.value)}
-          className="w-full px-3 py-2 border border-hairline rounded-md bg-canvas text-sm mb-4 focus:ring-2 focus:ring-primary/30">
-          <option value="" disabled>— Pilih cabang —</option>
-          {loadingB && <option>Memuat…</option>}
-          {!loadingB && branches.length === 0 && <option value="">Semua cabang sudah terhubung ✓</option>}
-          {branches.map(b => <option key={b.code} value={b.code}>{b.code} — {b.name}</option>)}
-        </select>
-
-        {/* pilih database: grid kartu + paginasi */}
-        <label className="block text-sm font-medium text-ink mb-1">Pilih Database</label>
-        {loadingC ? (
-          <div className="py-8 text-center text-sm text-muted"><Loader2 className="animate-spin inline mr-2" size={16} />Memuat…</div>
-        ) : connections.length === 0 ? (
-          <p className="text-sm text-muted italic py-6 text-center">Belum ada database terdaftar. Daftarkan dulu di sub-tab Database.</p>
-        ) : (
-          <>
-            <div className="grid grid-cols-2 gap-2 min-h-[264px] content-start mt-1 max-h-[300px] overflow-y-auto">
-              {connections.slice((page - 1) * CARD_PAGE, page * CARD_PAGE).map((c) => {
-                const active = c.id === Number(selectedId);
-                return (
-                  <button key={c.id} type="button" onClick={() => setSelectedId(c.id)}
-                    className={`relative flex flex-col items-start gap-1.5 p-3 rounded-lg border text-left transition-all ${
-                      active ? 'border-primary bg-primary/5 ring-1 ring-primary/40'
-                             : 'border-hairline hover:border-muted/40 hover:bg-surface-soft'}`}>
-                    <span className={`w-9 h-9 rounded-lg flex items-center justify-center border ${
-                      c.is_active ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600'
-                                  : 'bg-slate-400/10 border-slate-400/30 text-slate-400'}`}>
-                      <Server size={15} />
-                    </span>
-                    <span className="block text-sm font-medium text-ink truncate w-full">{c.name}</span>
-                    <span className="block text-[11px] text-muted truncate w-full">{c.db_name}</span>
-                    {active && (
-                      <span className="absolute top-2 right-2 w-5 h-5 rounded-full bg-primary text-white flex items-center justify-center">
-                        <Check size={12} strokeWidth={3} />
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-            {connections.length > CARD_PAGE && (
-              <div className="flex items-center justify-between mt-2">
-                <span className="text-[10px] text-muted">
-                  {(page - 1) * CARD_PAGE + 1}–{Math.min(page * CARD_PAGE, connections.length)} dari {connections.length}
-                </span>
-                <span className="flex gap-1.5">
-                  <button type="button" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-                    className="px-2 py-1 border border-hairline rounded text-xs hover:bg-surface-soft disabled:opacity-40">‹</button>
-                  <span className="px-2 py-1 text-xs text-muted">{page} / {totalPages}</span>
-                  <button type="button" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}
-                    className="px-2 py-1 border border-hairline rounded text-xs hover:bg-surface-soft disabled:opacity-40">›</button>
-                </span>
-              </div>
-            )}
-          </>
-        )}
-
-        <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-hairline">
-          <button type="button" onClick={onClose}
-            className="px-4 py-2 border border-hairline rounded-md text-sm hover:bg-surface-soft">Batal</button>
-          <button type="button" onClick={submit} disabled={!branchCode || !selectedId || saving}
-            className="px-4 py-2 bg-primary text-white rounded-md text-sm hover:bg-primary-active disabled:opacity-50 flex items-center gap-2">
-            {saving && <Loader2 size={14} className="animate-spin" />} Hubungkan
-          </button>
-        </div>
-      </motion.div>
     </div>
   );
 }

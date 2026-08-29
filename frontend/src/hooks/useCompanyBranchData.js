@@ -48,7 +48,6 @@ export default function useCompanyBranchData() {
       (tenantsData || []).forEach(t => { tenantsByBranch[t.branch_code] = t; });
       setTenantData(tenantsByBranch);
 
-      const statuses = {};
       const formattedBranches = (branchesData || []).map(b => ({
         code: b.code,
         name: b.name,
@@ -57,21 +56,22 @@ export default function useCompanyBranchData() {
         is_active: b.is_active,
       }));
 
-      Object.keys(tenantsByBranch).forEach(code => { statuses[code] = 'checking'; });
+      const initial = {};
+      Object.keys(tenantsByBranch).forEach(code => { initial[code] = 'checking'; });
 
       setBranches(formattedBranches);
-      // Set awal; hasil tes nyata menimpa per baris di bawah
-      setConnectionStatus(statuses);
+      // Set awal; hasil batch nyata menimpa di bawah
+      setConnectionStatus(initial);
 
-      // Status koneksi NYATA (paralel)
-      Object.keys(tenantsByBranch).forEach(async (code) => {
-        try {
-          const result = await api.testTenantConnection(code);
-          setConnectionStatus(prev => ({ ...prev, [code]: result.status }));
-        } catch {
-          setConnectionStatus(prev => ({ ...prev, [code]: 'disconnected' }));
-        }
+      // Status koneksi NYATA per DATABASE: 1 request batch paralel
+      // (bukan N request per cabang — tiap request membuka koneksi DB nyata)
+      const statusByConn = await api.testAllDbConnections().catch(() => ({}));
+      const statuses = {};
+      Object.entries(tenantsByBranch).forEach(([code, t]) => {
+        const st = statusByConn[String(t.db_connection_id)];
+        statuses[code] = st ? st.status : 'disconnected';
       });
+      setConnectionStatus(prev => ({ ...prev, ...statuses }));
     } catch {
       notify.error('Gagal memuat data perusahaan & cabang');
     } finally {

@@ -20,7 +20,7 @@ export default function UserModal({ isOpen, onClose, onSave, user, branches, isS
       setForm({
         username: user.username,
         email: user.email || '',
-        password: '', // kosong = tidak diubah
+        password: '',
         role: user.role,
         branch_codes: user.branches || [],
       });
@@ -44,7 +44,6 @@ export default function UserModal({ isOpen, onClose, onSave, user, branches, isS
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    // Username tidak boleh diubah saat edit (identitas & FK log)
     if (!isEditMode && form.username.trim().length < 3) {
       setConfirmError('Username minimal 3 karakter.');
       return;

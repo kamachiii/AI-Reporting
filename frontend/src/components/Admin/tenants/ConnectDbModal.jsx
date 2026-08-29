@@ -4,20 +4,24 @@ import {
   X, Loader2, Database, Check, Plus, Server
 } from 'lucide-react';
 import { api } from '../../../services/api';
-import toast from 'react-hot-toast';
+import { notify } from '../../../utils/notification';
 import DbConnectionModal from './DbConnectionModal';
 
 /**
- * Modal hubungkan/ganti database untuk satu cabang.
- * - List kartu bergaya katalog (ikon database berbeda dari list AI).
- * - "Tambah Database" membuka modal form di ATAS modal ini; setelah
- *   tersimpan, database baru LANGSUNG TERHUBUNG ke cabang ini.
- * - Tidak ada uji-koneksi manual: status nyata muncul otomatis
- *   di kolom Database setelah connect.
+ * Modal hubungkan/ganti database untuk satu cabang — dua mode:
+ * - branchCode diberikan  : cabang tetap (dipanggil dari baris cabang), bisa "Ganti Database".
+ * - branches diberikan    : user memilih cabang yang belum terhubung (dipanggil dari tab Koneksi).
+ * List kartu bergaya katalog (pagination dalam modal, 6/page).
+ * "Tambah Database" membuka modal form di ATAS modal ini; setelah tersimpan,
+ * database baru LANGSUNG TERHUBUNG ke cabang terpilih.
  */
 const PAGE_SIZE = 6;
 
-export default function ConnectDbModal({ isOpen, onClose, branchCode, currentConnId, onSaved }) {
+export default function ConnectDbModal({ isOpen, onClose, branchCode, branches = null, currentConnId, onSaved }) {
+  const pickBranch = !branchCode && Array.isArray(branches);
+  const [selectedBranch, setSelectedBranch] = useState('');
+  const activeBranch = branchCode || selectedBranch;
+
   const [connections, setConnections] = useState([]);
   const [selectedId, setSelectedId] = useState(currentConnId || null);
   const [loading, setLoading] = useState(true);
@@ -41,7 +45,7 @@ export default function ConnectDbModal({ isOpen, onClose, branchCode, currentCon
           if (idx >= 0) setPage(Math.floor(idx / PAGE_SIZE) + 1);
         }
       })
-      .catch(() => toast.error('Gagal memuat daftar database'))
+      .catch(() => notify.error('Gagal memuat daftar database'))
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -52,11 +56,11 @@ export default function ConnectDbModal({ isOpen, onClose, branchCode, currentCon
   const isChange = !!currentConnId;
 
   const handleConnect = async () => {
-    if (!selectedId) return;
+    if (!activeBranch || !selectedId) return;
     setSaving(true);
     try {
       await onSaved({
-        branch_code: branchCode,
+        branch_code: activeBranch,
         db_connection_id: Number(selectedId),
         isChange,
       });
@@ -65,17 +69,18 @@ export default function ConnectDbModal({ isOpen, onClose, branchCode, currentCon
     }
   };
 
-  // Setelah tambah DB baru: langsung hubungkan ke cabang ini.
+  // Setelah tambah DB baru: langsung hubungkan ke cabang terpilih.
   const handleNewDatabase = async (payload) => {
+    if (!activeBranch) return;
     try {
       const result = await api.createDbConnection(payload);
       const newId = result?.id;
       if (!newId) throw new Error('id tidak dikembalikan');
-      await onSaved({ branch_code: branchCode, db_connection_id: newId, isChange });
+      await onSaved({ branch_code: activeBranch, db_connection_id: newId, isChange });
       setShowAddModal(false);
     } catch (e) {
       // biarkan parent/interceptor menampilkan detail; jangan tutup modal form
-      toast.error(e.response?.data?.detail || 'Gagal menambahkan database');
+      notify.error(e.response?.data?.detail || 'Gagal menambahkan database');
     }
   };
 
@@ -86,7 +91,6 @@ export default function ConnectDbModal({ isOpen, onClose, branchCode, currentCon
         onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
         <motion.div
           initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-          transition={{ type: 'spring', damping: 20, stiffness: 300 }}
           className="bg-white rounded-xl p-6 max-w-md w-full shadow-xl border border-hairline relative"
         >
           <button onClick={onClose} aria-label="Tutup" className="absolute right-4 top-4 text-muted hover:text-ink">
@@ -101,9 +105,29 @@ export default function ConnectDbModal({ isOpen, onClose, branchCode, currentCon
               <h3 className="font-serif text-lg text-ink leading-tight">
                 {isChange ? 'Ganti Database' : 'Hubungkan Database'}
               </h3>
-              <p className="text-xs text-muted">Cabang <strong className="text-body">{branchCode}</strong></p>
+              <p className="text-xs text-muted">
+                Cabang <strong className="text-body">{activeBranch || '— pilih cabang —'}</strong>
+              </p>
             </div>
           </div>
+
+          {/* PILIH CABANG (mode picker: branchCode tidak diberikan) */}
+          {pickBranch && (
+            <div className="mb-3">
+              <label className="block text-sm font-medium text-ink mb-1">Cabang (belum terhubung)</label>
+              <select
+                value={selectedBranch}
+                onChange={(e) => setSelectedBranch(e.target.value)}
+                className="w-full px-3 py-2 border border-hairline rounded-md bg-canvas text-sm focus:ring-2 focus:ring-primary/30"
+              >
+                <option value="" disabled>— Pilih cabang —</option>
+                {branches.length === 0 && <option value="">Semua cabang sudah terhubung ✓</option>}
+                {branches.map((b) => (
+                  <option key={b.code} value={b.code}>{b.code} — {b.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* LIST KARTU DATABASE — grid fix-size + paginasi */}
           {loading ? (
@@ -179,7 +203,7 @@ export default function ConnectDbModal({ isOpen, onClose, branchCode, currentCon
             <div className="flex gap-2">
               <button type="button" onClick={onClose}
                 className="px-4 py-2 border border-hairline rounded-md text-sm hover:bg-surface-soft">Batal</button>
-              <button type="button" onClick={handleConnect} disabled={!selectedId || saving}
+              <button type="button" onClick={handleConnect} disabled={!activeBranch || !selectedId || saving}
                 className="px-4 py-2 bg-primary text-white rounded-md text-sm hover:bg-primary-active disabled:opacity-50 flex items-center gap-2">
                 {saving && <Loader2 size={14} className="animate-spin" />}
                 Hubungkan

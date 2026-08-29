@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../services/api';
-import toast from 'react-hot-toast';
+import { notify } from '../utils/notification';
 
 export default function LoginModal({ onLoginSuccess }) {
   const [username, setUsername] = useState('');
@@ -17,7 +17,7 @@ export default function LoginModal({ onLoginSuccess }) {
       const data = await api.login(username, password);
       localStorage.setItem('access_token', data.access_token);
       localStorage.setItem('user_data', JSON.stringify(data));
-      toast.success(`Selamat datang, ${data.username}!`);
+      notify.success(`Selamat datang, ${data.username}!`);
       onLoginSuccess(data);
     } catch (err) {
       const msg = err.response?.data?.detail || 'Login gagal. Periksa username & password.';

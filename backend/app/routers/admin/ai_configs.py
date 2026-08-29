@@ -1,6 +1,7 @@
 """Endpoints admin untuk konfigurasi AI provider & model."""
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+import asyncio
 import asyncpg
 import httpx
 import logging
@@ -252,3 +253,38 @@ async def test_ai_config_draft(payload: AIConfigTestDraft, user: dict = Depends(
             return {"status": "disconnected", "message": f"Gagal: {resp.status_code}"}
     except Exception as e:
         return {"status": "disconnected", "message": f"Error: {str(e)}"}
+
+
+async def _probe(row) -> tuple[int, dict]:
+    """Tes satu config AI; tidak pernah raise — selalu return hasil."""
+    try:
+        api_key = decrypt_credential(row["api_key"]) if row["api_key"] else ""
+        if row["api_type"] == "anthropic":
+            return row["id"], {"status": "connected", "message": "Anthropic: test otomatis tidak didukung"}
+        base = (row["base_url"] or "https://api.openai.com/v1").rstrip("/")
+        url = f"{base}/models"
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+        if resp.status_code == 200:
+            return row["id"], {"status": "connected", "message": "Koneksi berhasil"}
+        return row["id"], {"status": "disconnected", "message": f"Gagal: {resp.status_code}"}
+    except Exception as e:
+        return row["id"], {"status": "disconnected", "message": str(e).split("\n")[0][:120]}
+
+
+@router.post("/ai-configs/test-all")
+async def test_all_ai_configs(user: dict = Depends(require_admin_role)):
+    """
+    Tes koneksi SEMUA config AI secara paralel.
+    Return: { "<config_id>": {status, message}, ... }
+    """
+    try:
+        pool = await get_core_pool()
+        rows = await pool.fetch("SELECT id, api_type, base_url, api_key FROM ai_configs")
+        if not rows:
+            return {}
+        results = await asyncio.gather(*(_probe(r) for r in rows))
+        return {str(cid): payload for cid, payload in results}
+    except Exception as e:
+        logger.error(f"ai-configs test-all failed: {e}")
+        return {}
