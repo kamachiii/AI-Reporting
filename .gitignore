@@ -25,9 +25,7 @@ desktop.ini
 
 # Backup lokal & artefak kerja AI/QA
 backup_*/
-.hermes/*
-!.hermes/skills/
-.hermes/skills/**/__pycache__/
+.hermes/
 frontend/qa-toolbar.png
 frontend/test-results/
 frontend/playwright-report/
