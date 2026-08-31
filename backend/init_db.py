@@ -43,6 +43,11 @@ async def run_migrations(conn):
     for fname in sorted(os.listdir(MIGRATIONS_DIR)):
         if not fname.endswith(".sql") or fname in applied:
             continue
+        # File *_rollback.sql hanya dokumentasi rollback manual — TIDAK boleh
+        # ter-apply otomatis, isinya justru membatalkan migration induknya
+        # (mis. 005_knowledge_base_rollback.sql drop kolom buatan 005).
+        if fname.endswith("_rollback.sql"):
+            continue
         path = os.path.join(MIGRATIONS_DIR, fname)
         with open(path, "r", encoding="utf-8") as f:
             sql = f.read().replace("\r\n", "\n")

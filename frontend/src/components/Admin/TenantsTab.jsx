@@ -5,6 +5,7 @@ import ConfirmationDialog from './common/ConfirmationDialog';
 import SkeletonTable from './common/SkeletonTable';
 import DbConnectionModal from './tenants/DbConnectionModal';
 import ConnectDbModal from './tenants/ConnectDbModal';
+import KnowledgeBaseModal from './tenants/KnowledgeBaseModal';
 import DatabaseRegistryTable from './tenants/DatabaseRegistryTable';
 import TenantConnectionsTable from './tenants/TenantConnectionsTable';
 import { api } from '../../services/api';
@@ -48,6 +49,7 @@ export default function TenantsTab() {
   const [showConnModal, setShowConnModal] = useState(false);      // hubungkan cabang
   const [showDbModal, setShowDbModal] = useState(false);          // daftarkan/edit database
   const [editingDb, setEditingDb] = useState(null);
+  const [kbBranch, setKbBranch] = useState(null);                 // kelola Knowledge Base (F2.0)
 
   // pagination
   const [dbPage, setDbPage] = useState(1);
@@ -58,6 +60,7 @@ export default function TenantsTab() {
       if (confirmState) setConfirmState(null);
       else if (showDbModal) setShowDbModal(false);
       else if (showConnModal) setShowConnModal(false);
+      else if (kbBranch) setKbBranch(null);
     },
     isBusy: !!processingKey || !!testingId,
     searchInputId: 'tenant-search',
@@ -303,6 +306,7 @@ export default function TenantsTab() {
           introspecting={introspecting}
           processingKey={processingKey}
           onRefreshSchema={handleRefreshSchema}
+          onManageKb={(t) => setKbBranch(t.branch_code)}
           onDisconnect={handleDisconnect}
         />
       )}
@@ -326,6 +330,15 @@ export default function TenantsTab() {
           onSave={handleSaveDb}
           editing={editingDb}
           isSaving={saving}
+        />
+      )}
+
+      {kbBranch && (
+        <KnowledgeBaseModal
+          key={kbBranch}
+          isOpen
+          branchCode={kbBranch}
+          onClose={() => setKbBranch(null)}
         />
       )}
 

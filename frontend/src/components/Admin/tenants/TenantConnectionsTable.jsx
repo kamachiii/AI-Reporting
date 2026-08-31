@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { CheckCircle, XCircle, Loader2, RefreshCw, Trash2 } from 'lucide-react';
+import { CheckCircle, XCircle, Loader2, RefreshCw, Trash2, BookOpen } from 'lucide-react';
 import PaginationBar from '../common/PaginationBar';
 import EmptyState from '../common/EmptyState';
 
@@ -20,6 +20,7 @@ export default function TenantConnectionsTable({
   introspecting,
   processingKey,
   onRefreshSchema,
+  onManageKb,
   onDisconnect,
 }) {
   const filteredConns = useMemo(() => {
@@ -87,6 +88,11 @@ export default function TenantConnectionsTable({
                 </td>
                 <td className="p-3">
                   <div className="flex justify-end gap-0.5">
+                    <button onClick={() => onManageKb(t)} disabled={processingKey === t.branch_code}
+                      title="Knowledge Base" aria-label={`Knowledge Base ${t.branch_code}`}
+                      className="p-1.5 text-muted hover:text-primary hover:bg-surface-soft rounded-md disabled:opacity-50">
+                      <BookOpen size={15} />
+                    </button>
                     <button onClick={() => onRefreshSchema(t)} disabled={introspecting === t.branch_code}
                       title="Perbarui Skema" aria-label={`Perbarui skema ${t.branch_code}`}
                       className="p-1.5 text-muted hover:text-primary hover:bg-surface-soft rounded-md disabled:opacity-50">

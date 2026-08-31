@@ -133,6 +133,19 @@ export const api = {
     const response = await apiClient.post(`/admin/tenants/${branch_code}/refresh-schema`);
     return response.data; // { message, tables, columns }
   },
+  // Knowledge Base tenant (F2.0) — lapisan semantik untuk AI
+  getTenantKnowledgeBase: async (branchCode) => {
+    const response = await apiClient.get(`/admin/tenants/${branchCode}/knowledge-base`);
+    return response.data; // { branch_code, knowledge_base, updated_at, sumber }
+  },
+  saveTenantKnowledgeBase: async (branchCode, data) => {
+    const response = await apiClient.put(`/admin/tenants/${branchCode}/knowledge-base`, data);
+    return response.data; // { message, knowledge_base, perubahan }
+  },
+  validateTenantKnowledgeBase: async (branchCode, data) => {
+    const response = await apiClient.post(`/admin/tenants/${branchCode}/knowledge-base/validate`, data);
+    return response.data; // { ok, errors } — dry-run, tidak menyimpan
+  },
 
   // ==========================================
   // 3. ADMIN: USERS

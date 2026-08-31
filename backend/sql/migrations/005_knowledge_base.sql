@@ -1,0 +1,35 @@
+-- ============================================================
+-- 005: Knowledge Base tenant (F2.0 — docs/PERANCANGAN-PIPELINE-AI.md §3)
+-- Satu kolom JSONB di tenants (keputusan v1 §7 #3: JSONB dulu, YAGNI).
+-- Kolom berisi lapisan semantik per tenant untuk Context Builder AI:
+-- glossary, catatan kolom, pemetaan nilai, contoh pertanyaan,
+-- dan daftar tabel yang dilarang.
+--
+-- Bentuk isi (jsonc — acuan bentuk data v1 §3, divalidasi ketat oleh
+-- app/services/knowledge_base.py sebelum disimpan):
+-- {
+--   "glossary": [
+--     { "istilah": "omzet",     "arti": "SUM(penjualan.harga_deal)" },
+--     { "istilah": "unit laku", "arti": "COUNT(*) dari penjualan" }
+--   ],
+--   "catatan_kolom": {
+--     "penjualan.harga_deal": "Harga final setelah negosiasi",
+--     "penjualan.uang_muka": "0 artinya tunai"
+--   },
+--   "nilai_map": {
+--     "penjualan.metode_pembayaran": { "cash": "tunai", "credit": "kredit" }
+--   },
+--   "contoh_tanya": [
+--     { "tanya": "omzet bulan ini", "tabel": ["penjualan"],
+--       "agg": "sum(harga_deal)", "time_range": "this_month" }
+--   ],
+--   "tabel_dilarang": ["log_audit_internal"]
+-- }
+--
+-- Catatan: tabel_dilarang saat ini HANYA disimpan (dikelola form admin F2.0) —
+-- integrasinya ke whitelist verifier SQL menyusul di fase verifier (F2.3').
+-- NULL = tenant belum punya KB -> service mengembalikan struktur kosong.
+-- Rollback: lihat 005_knowledge_base_rollback.sql (tidak pernah di-apply otomatis).
+-- ============================================================
+
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS knowledge_base JSONB NULL DEFAULT NULL;
