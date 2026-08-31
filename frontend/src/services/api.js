@@ -67,6 +67,10 @@ export const api = {
     const response = await apiClient.get('/admin/branches');
     return response.data;
   },
+  getBranchesWithTenants: async () => {
+    const response = await apiClient.get('/admin/branches-with-tenants');
+    return response.data;
+  },
   createBranch: async (data) => {
     const response = await apiClient.post('/admin/branches', data);
     return response.data;

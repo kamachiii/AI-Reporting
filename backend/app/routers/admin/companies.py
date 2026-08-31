@@ -198,3 +198,32 @@ async def delete_branch(code: str, user: dict = Depends(require_admin_role)):
     except Exception as e:
         logger.error(f"Error deleting branch {code}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/branches-with-tenants")
+async def get_branches_with_tenants(user: dict = Depends(require_admin_role)):
+    """Branch + metadata tenant (tanpa password) — dipakai TargetPicker scope tenant."""
+    try:
+        pool = await get_core_pool()
+        rows = await pool.fetch("""
+            SELECT
+                b.code, b.name, b.company_code, b.address, b.is_active,
+                t.db_connection_id, d.name AS db_name_label,
+                d.db_host, d.db_port, d.db_name
+            FROM branches b
+            LEFT JOIN tenants t ON t.branch_code = b.code
+            LEFT JOIN db_connections d ON d.id = t.db_connection_id
+            ORDER BY b.code
+        """)
+        return [
+            {
+                "code": r["code"], "name": r["name"],
+                "company_code": r["company_code"], "address": r["address"],
+                "is_active": r["is_active"],
+                "db_connection_id": r["db_connection_id"],
+                "db_name_label": r["db_name_label"],
+                "db_host": r["db_host"], "db_port": r["db_port"], "db_name": r["db_name"],
+            } for r in rows
+        ]
+    except Exception as e:
+        logger.error(f"Error fetching branches with tenants: {e}")
+        return []
