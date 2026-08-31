@@ -8,6 +8,7 @@ venv/
 # Environment & secrets
 .env
 .env.local
+backend/backups/
 
 # Node / Frontend
 node_modules/

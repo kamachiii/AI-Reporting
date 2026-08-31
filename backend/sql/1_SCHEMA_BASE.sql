@@ -1,18 +1,9 @@
--- 1. HAPUS SEMUA TABEL (CASCADE akan menghapus relasi FK)
-DROP TABLE IF EXISTS 
-    companies,
-    users,
-    branches,
-    user_branches,
-    tenants,
-    audit_logs,
-    conversations,
-    messages,
-    ai_configs
-CASCADE;
+-- SKEMA DASAR (9 tabel + db_connections via migration 003).
+-- IDEMPOTENT-SAFE: semua CREATE memakai IF NOT EXISTS — aman dijalankan
+-- pada database yang sudah ada TANPA menghapus data (pelajaran insiden 2026-08-31).
+-- Reset total hanya lewat drop database manual oleh admin.
 
--- 2. BUAT ULANG TABEL DARI AWAL (9 Tabel Sesuai 2_DATABASE_DDL.sql + kolom baru)
-CREATE TABLE companies (
+CREATE TABLE IF NOT EXISTS companies (
     id SERIAL PRIMARY KEY,
     code VARCHAR(50) UNIQUE NOT NULL,
     name VARCHAR(255) NOT NULL,
@@ -22,7 +13,7 @@ CREATE TABLE companies (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     username VARCHAR(100) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
@@ -34,7 +25,7 @@ CREATE TABLE users (
     CONSTRAINT check_role CHECK (role IN ('admin', 'user'))
 );
 
-CREATE TABLE branches (
+CREATE TABLE IF NOT EXISTS branches (
     id SERIAL PRIMARY KEY,
     code VARCHAR(50) UNIQUE NOT NULL,
     name VARCHAR(255) NOT NULL,
@@ -46,7 +37,7 @@ CREATE TABLE branches (
     CONSTRAINT fk_branches_company FOREIGN KEY (company_code) REFERENCES companies(code) ON DELETE RESTRICT
 );
 
-CREATE TABLE user_branches (
+CREATE TABLE IF NOT EXISTS user_branches (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL,
     branches_code VARCHAR(50) NOT NULL,
@@ -56,9 +47,9 @@ CREATE TABLE user_branches (
     CONSTRAINT unique_user_branch UNIQUE (user_id, branches_code)
 );
 
-CREATE TABLE tenants (
+CREATE TABLE IF NOT EXISTS tenants (
     -- CATATAN: tabel ini DIBENTUK ULANG oleh migrations/003_db_connection_registry.sql.
-    -- Kredensial (db_host..db_password) dipindahkan ke tabel db_connections;
+    -- Kredensial (db_host..db_password) dipindahkan ke tabel db_connections,
     -- akhirnya tenants hanya menyimpan db_connection_id (penunjuk ke registry).
     id SERIAL PRIMARY KEY,
     branch_code VARCHAR(50) UNIQUE NOT NULL,
@@ -77,7 +68,7 @@ CREATE TABLE tenants (
     CONSTRAINT fk_tenants_branches FOREIGN KEY (branch_code) REFERENCES branches(code) ON DELETE RESTRICT
 );
 
-CREATE TABLE audit_logs (
+CREATE TABLE IF NOT EXISTS audit_logs (
     id SERIAL PRIMARY KEY,
     -- Nullable: audit log harus tetap tersimpan meski user-nya dihapus
     -- (FK pakai ON DELETE SET NULL, jadi kolom TIDAK boleh NOT NULL)
@@ -93,7 +84,7 @@ CREATE TABLE audit_logs (
     CONSTRAINT fk_audit_users FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
-CREATE TABLE conversations (
+CREATE TABLE IF NOT EXISTS conversations (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL,
     branch_code VARCHAR(50) NOT NULL,
@@ -105,7 +96,7 @@ CREATE TABLE conversations (
     CONSTRAINT fk_conv_users FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
-CREATE TABLE messages (
+CREATE TABLE IF NOT EXISTS messages (
     id SERIAL PRIMARY KEY,
     conversation_id INTEGER NOT NULL,
     role VARCHAR(20) NOT NULL,
@@ -115,7 +106,7 @@ CREATE TABLE messages (
     CONSTRAINT fk_msgs_conv FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );
 
-CREATE TABLE ai_configs (
+CREATE TABLE IF NOT EXISTS ai_configs (
     id SERIAL PRIMARY KEY,
     scope VARCHAR(20) NOT NULL DEFAULT 'global',
     target_id VARCHAR(100),
