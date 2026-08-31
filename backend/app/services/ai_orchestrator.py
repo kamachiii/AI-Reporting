@@ -5,6 +5,23 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+def build_chat_url(ai_config: dict) -> str:
+    """URL endpoint chat sesuai api_type, dengan base_url ternormalisasi.
+
+    Base_url berakhiran '/' menghasilkan double-slash ('/v1//chat/completions')
+    yang ditolak gateway dengan route-matching ketat (mis. B.AI).
+    """
+    api_type = ai_config.get("api_type", "openai")
+    base_url = (ai_config.get("base_url") or "").strip().rstrip("/")
+
+    if api_type == "openai":
+        return f"{base_url}/chat/completions" if base_url else "https://api.openai.com/v1/chat/completions"
+    if api_type == "anthropic":
+        return f"{base_url}/messages" if base_url else "https://api.anthropic.com/v1/messages"
+    raise HTTPException(status_code=400, detail="api_type tidak dikenali. Harus 'openai' atau 'anthropic'.")
+
+
 async def generate_json_filter(user_prompt: str, schema: dict, ai_config: dict):
     """
     Memanggil AI Provider berdasarkan api_type dan base_url yang dikonfigurasi.
@@ -24,7 +41,7 @@ async def generate_json_filter(user_prompt: str, schema: dict, ai_config: dict):
     if api_type == "openai":
         # OpenAI Compatible Gateway
         headers["Authorization"] = f"Bearer {api_key}"
-        url = f"{base_url}/chat/completions" if base_url else "https://api.openai.com/v1/chat/completions"
+        url = build_chat_url(ai_config)
         
         # System Prompt untuk OpenAI
         system_prompt = (
@@ -44,7 +61,7 @@ async def generate_json_filter(user_prompt: str, schema: dict, ai_config: dict):
         # Anthropic / Claude Gateway
         headers["x-api-key"] = api_key
         headers["anthropic-version"] = "2023-06-01"
-        url = f"{base_url}/messages" if base_url else "https://api.anthropic.com/v1/messages"
+        url = build_chat_url(ai_config)
         
         # System Prompt untuk Anthropic
         system_prompt = (

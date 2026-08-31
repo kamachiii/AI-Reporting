@@ -47,6 +47,23 @@ class FetchModelsRequest(BaseModel):
     config_id: int | None = None
 
 
+def _normalize_base(base_url: str | None) -> str:
+    """Rapikan base_url provider: buang whitespace & trailing slash.
+
+    Gateway inference dengan route-matching ketat (mis. B.AI) menolak
+    '/v1//models' (double slash akibat base_url berakhiran '/').
+    """
+    if not base_url:
+        return ""
+    return base_url.strip().rstrip("/")
+
+
+def build_models_url(base_url: str | None, api_type: str) -> str:
+    """URL /models untuk api_type openai; default ke api.openai.com bila kosong."""
+    base = _normalize_base(base_url) or "https://api.openai.com/v1"
+    return f"{base}/models"
+
+
 def get_provider_label(model_id: str, user_provider: str) -> str:
     """Menentukan provider label berdasarkan nama model."""
     first_part = model_id.split('-')[0] if '-' in model_id else model_id
@@ -168,7 +185,7 @@ async def test_ai_config(config_id: int, user: dict = Depends(require_admin_role
     if api_type == "anthropic":
         return {"status": "connected", "message": "Anthropic tidak mendukung test otomatis"}
 
-    url = f"{base_url}/models"
+    url = build_models_url(row["base_url"], api_type="openai")
     headers = {"Authorization": f"Bearer {decrypted_key}"}
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -196,8 +213,7 @@ async def fetch_models_from_provider(payload: FetchModelsRequest, user: dict = D
     url = ""
     if payload.api_type == "openai":
         headers = {"Authorization": f"Bearer {final_api_key}"}
-        base = payload.base_url if payload.base_url else "https://api.openai.com/v1"
-        url = f"{base}/models"
+        url = build_models_url(payload.base_url, api_type="openai")
     elif payload.api_type == "anthropic":
         return {"provider": payload.provider, "models": []}
     else:
@@ -239,7 +255,7 @@ async def test_ai_config_draft(payload: AIConfigTestDraft, user: dict = Depends(
 
     try:
         if payload.api_type == "openai":
-            url = f"{payload.base_url}/models"
+            url = build_models_url(payload.base_url, api_type="openai")
             headers = {"Authorization": f"Bearer {final_api_key}"}
         elif payload.api_type == "anthropic":
             return {"status": "connected", "message": "Koneksi diasumsikan berhasil (manual model)."}
@@ -261,7 +277,7 @@ async def _probe(row) -> tuple[int, dict]:
         api_key = decrypt_credential(row["api_key"]) if row["api_key"] else ""
         if row["api_type"] == "anthropic":
             return row["id"], {"status": "connected", "message": "Anthropic: test otomatis tidak didukung"}
-        base = (row["base_url"] or "https://api.openai.com/v1").rstrip("/")
+        base = _normalize_base(row["base_url"]) or "https://api.openai.com/v1"
         url = f"{base}/models"
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
