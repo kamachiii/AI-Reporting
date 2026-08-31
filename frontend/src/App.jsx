@@ -3,23 +3,9 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { MotionConfig } from 'framer-motion';
 import LoginModal from './components/LoginModal';
 import AdminLayout from './components/Admin/AdminLayout';
+import UserWorkspace from './components/User/UserWorkspace';
 import ErrorBoundary from './components/ErrorBoundary';
 import toast, { Toaster } from 'react-hot-toast';
-
-// Placeholder untuk User Workspace (nanti kita isi)
-const UserWorkspace = ({ user, onLogout }) => (
-  <div className="min-h-screen bg-canvas p-8">
-    <div className="max-w-4xl mx-auto bg-white rounded-xl border border-hairline p-6">
-      <div className="flex justify-between items-center mb-4">
-        <h1 className="font-serif text-xl text-ink">User Workspace</h1>
-        <button onClick={onLogout} className="px-4 py-1.5 border border-hairline rounded-md text-sm hover:bg-surface-soft transition-colors">Logout</button>
-      </div>
-      <p className="text-body">Halo, <strong>{user.username}</strong>! (Role: {user.role})</p>
-      <p className="text-muted text-sm mt-2">Akses cabang: {user.allowed_branches.join(', ')}</p>
-      <p className="text-muted text-sm mt-4">(User Workspace sedang dibangun)</p>
-    </div>
-  </div>
-);
 
 function App() {
   const [user, setUser] = useState(null);
