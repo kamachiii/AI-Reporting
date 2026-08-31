@@ -47,6 +47,27 @@ class FetchModelsRequest(BaseModel):
     config_id: int | None = None
 
 
+def validate_scope_target_shape(scope: str, target_id: str | None) -> str:
+    """Validasi bentuk target_id sesuai scope (murni, tanpa DB).
+
+    Returns target_id yang sudah di-trim. Raise HTTPException 400 bila tidak valid.
+    Pengecekan eksistensi (tenant/user nyata) tetap di endpoint dengan DB.
+    """
+    if scope == "global":
+        return ""
+    tid = (target_id or "").strip()
+    if not tid:
+        raise HTTPException(status_code=400,
+            detail=f"Target ID wajib diisi untuk scope {scope}")
+    if " " in tid:
+        raise HTTPException(status_code=400,
+            detail="Target ID tidak boleh mengandung spasi — pilih dari daftar")
+    if len(tid) > 100:
+        raise HTTPException(status_code=400,
+            detail="Target ID maksimal 100 karakter")
+    return tid
+
+
 def _normalize_base(base_url: str | None) -> str:
     """Rapikan base_url provider: buang whitespace & trailing slash.
 
@@ -107,12 +128,19 @@ async def get_ai_configs(user: dict = Depends(require_admin_role)):
 @router.post("/ai-configs")
 async def create_ai_config(payload: AIConfigCreate, user: dict = Depends(require_admin_role)):
     try:
-        # Validasi: scope selain global wajib punya target_id
-        if payload.scope != "global" and not (payload.target_id and payload.target_id.strip()):
-            raise HTTPException(status_code=400, detail="Target ID wajib diisi untuk scope tenant/user")
+        target_id_val = validate_scope_target_shape(payload.scope, payload.target_id)
         pool = await get_core_pool()
+        if payload.scope != "global":
+            await _ensure_target_exists(pool, payload.scope, target_id_val)
+        if payload.scope == "global":
+            existing = await _get_global_config(pool)
+            if existing:
+                raise HTTPException(status_code=409, detail={
+                    "message": "Sudah ada konfigurasi scope Global",
+                    "existing": existing,
+                    "hint": "Gunakan endpoint PUT pada config tersebut untuk mengganti (update-in-place)",
+                })
         encrypted_key = encrypt_credential(payload.api_key)
-        target_id_val = payload.target_id if payload.target_id else None
         await pool.execute("""
             INSERT INTO ai_configs (scope, target_id, provider, model, api_key, temperature, api_type, base_url)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -129,10 +157,18 @@ async def create_ai_config(payload: AIConfigCreate, user: dict = Depends(require
 @router.put("/ai-configs/{config_id}")
 async def update_ai_config(config_id: int, payload: AIConfigUpdate, user: dict = Depends(require_admin_role)):
     try:
-        if payload.scope != "global" and not (payload.target_id and payload.target_id.strip()):
-            raise HTTPException(status_code=400, detail="Target ID wajib diisi untuk scope tenant/user")
+        target_id_val = validate_scope_target_shape(payload.scope, payload.target_id)
         pool = await get_core_pool()
-        target_id_val = payload.target_id if payload.target_id else None
+        if payload.scope == "global":
+            existing = await _get_global_config(pool)
+            if existing and existing["id"] != config_id:
+                raise HTTPException(status_code=409, detail={
+                    "message": "Sudah ada konfigurasi scope Global",
+                    "existing": existing,
+                    "hint": "Gunakan endpoint PUT pada config tersebut untuk mengganti (update-in-place)",
+                })
+        if payload.scope != "global":
+            await _ensure_target_exists(pool, payload.scope, target_id_val)
 
         if payload.api_key and payload.api_key.strip():
             encrypted_key = encrypt_credential(payload.api_key)
@@ -278,6 +314,30 @@ async def test_ai_config_draft(payload: AIConfigTestDraft, user: dict = Depends(
             return {"status": "disconnected", "message": f"Gagal: {resp.status_code}"}
     except Exception as e:
         return {"status": "disconnected", "message": f"Error: {str(e).splitlines()[0][:120]}"}
+
+
+async def _ensure_target_exists(pool, scope: str, target_id: str) -> None:
+    """Scope tenant/user wajib menunjuk entitas nyata — tolak target hantu (400)."""
+    if scope == "tenant":
+        exists = await pool.fetchval("SELECT 1 FROM tenants WHERE branch_code = $1", target_id)
+        if not exists:
+            raise HTTPException(status_code=400,
+                detail=f"Cabang '{target_id}' tidak terdaftar sebagai tenant (hubungkan database dulu)")
+    elif scope == "user":
+        row = await pool.fetchrow("SELECT role FROM users WHERE username = $1", target_id)
+        if not row:
+            raise HTTPException(status_code=400,
+                detail=f"User '{target_id}' tidak ditemukan")
+        if row["role"] != "user":
+            raise HTTPException(status_code=400,
+                detail="Scope user hanya untuk role 'user' — admin mengatur global")
+
+
+async def _get_global_config(pool) -> dict | None:
+    """Ambil satu-satunya config global (max 1 dijamin index DB). None bila belum ada."""
+    row = await pool.fetchrow(
+        "SELECT id, provider, model FROM ai_configs WHERE scope = 'global' LIMIT 1")
+    return dict(row) if row else None
 
 
 async def _probe(row) -> tuple[int, dict]:

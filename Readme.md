@@ -483,8 +483,19 @@ Setelah menjalankan `init_db.py`, akun berikut tersedia:
 
 | Username | Password | Role | Branch |
 |---|---|---|---|
-| `admin` | `admin123` | Admin | JKT_01, SBY_02 |
+| `admin` | `admin123` | Admin | (tanpa — lihat semantik role) |
 | `user_jkt` | `user123` | User | JKT_01 |
+
+### Semantik Role (keputusan domain — WAJIB dipatuhi)
+
+| Aturan | Penjelasan |
+|---|---|
+| **Admin = orang FBS** | Role admin khusus pengelola sistem (FBS). Dealer/client HANYA role `user` — tidak dimungkinkan menjadi admin. |
+| **Admin tanpa cabang** | Admin mengelola seluruh sistem dan **tidak memiliki penugasan cabang**. Backend menolak (400) dan menghapus otomatis cabang milik admin; UI menyembunyikan bagian cabang untuk admin. |
+| **Admin tanpa akses chat** | Fitur chat AI (F3) hanya untuk role `user`. Admin memantau lewat panel admin + Audit Log. |
+| **Scope AI Global tunggal** | Hanya boleh ada **1** config scope `global` — dijamin partial unique index di database. Membuat global kedua mengembalikan **409**; frontend menawarkan update-in-place. |
+| **Target scope valid** | Scope `tenant`/`user` wajib menunjuk cabang-terhubung/username yang nyata (divalidasi backend; UI berupa autocomplete, bukan input bebas). |
+| **Password minimal 8 karakter** | Untuk akun baru & perubahan password. |
 
 > ⚠️ **Penting:** Ganti password default sebelum deploy ke production!
 

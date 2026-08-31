@@ -18,7 +18,7 @@ VALID_ROLES = ("admin", "user")
 class UserCreate(BaseModel):
     username: str = Field(min_length=3, max_length=100)
     email: EmailStr | None = None
-    password: str = Field(min_length=6)
+    password: str = Field(min_length=8)
     role: str = "user"
     branch_codes: list[str] = []
 
@@ -26,7 +26,7 @@ class UserUpdate(BaseModel):
     email: EmailStr | None = None
     role: str | None = None
     # Password opsional saat update (kosong = tidak diubah)
-    password: str | None = Field(default=None, min_length=6)
+    password: str | None = Field(default=None, min_length=8)
     branch_codes: list[str] | None = None
 
 class UserStatusUpdate(BaseModel):
@@ -39,6 +39,12 @@ class UserStatusUpdate(BaseModel):
 async def _validate_role_and_branches(pool, role: str, branch_codes: list[str]):
     if role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail=f"Role harus salah satu dari: {', '.join(VALID_ROLES)}")
+    # Keputusan domain (2026-08-31): admin = pengatur sistem (orang FBS) —
+    # TIDAK punya penugasan cabang dan tidak punya akses chat AI.
+    if role == "admin" and branch_codes:
+        raise HTTPException(
+            status_code=400,
+            detail="Admin tidak memerlukan penugasan cabang — admin mengelola seluruh sistem.")
     if branch_codes:
         rows = await pool.fetch("SELECT code FROM branches WHERE code = ANY($1)", branch_codes)
         found = {r["code"] for r in rows}
@@ -160,8 +166,12 @@ async def update_user(user_id: int, payload: UserUpdate, user: dict = Depends(re
                     )
 
                 if payload.branch_codes is not None:
-                    await _validate_role_and_branches(pool, new_role or "user", payload.branch_codes)
-                    await _replace_user_branches(conn, user_id, payload.branch_codes)
+                    if (new_role or "user") == "admin" or (new_role is None and current_role == "admin"):
+                        # Safety net promote/demote: admin tidak menyimpan cabang
+                        await conn.execute("DELETE FROM user_branches WHERE user_id = $1", user_id)
+                    else:
+                        await _validate_role_and_branches(pool, new_role or "user", payload.branch_codes)
+                        await _replace_user_branches(conn, user_id, payload.branch_codes)
 
         return {"message": f"User '{target['username']}' berhasil diperbarui"}
     except HTTPException:

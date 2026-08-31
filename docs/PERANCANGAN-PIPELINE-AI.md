@@ -189,6 +189,13 @@ gagal TIDAK boleh mempengaruhi tenant lain (isolasi kegagalan).
 
 ---
 
+### Keputusan yang sudah dijawab (2026-08-31)
+
+> **Siapa boleh chat AI:** hanya role `user`. Admin tidak memiliki akses chat —
+> perannya mengatur sistem & memantau lewat Audit Log. Ini keputusan domain dari
+> pemilik proyek (admin = orang FBS; dealer = user). Isolasi `allowed_branches`
+> di token tetap berlaku untuk user; admin tidak butuh karena tidak chat.
+
 ## 8. Urutan kerja Fase 2 (usulan revisi)
 
 ```

@@ -48,8 +48,8 @@ export default function UserModal({ isOpen, onClose, onSave, user, branches, isS
       setConfirmError('Username minimal 3 karakter.');
       return;
     }
-    if (!isEditMode && form.password.length < 6) {
-      setConfirmError('Password minimal 6 karakter.');
+    if (!isEditMode && form.password.length < 8) {
+      setConfirmError('Password minimal 8 karakter.');
       return;
     }
     setConfirmError('');
@@ -57,7 +57,8 @@ export default function UserModal({ isOpen, onClose, onSave, user, branches, isS
       username: form.username.trim(),
       email: form.email.trim() || null,
       role: form.role,
-      branch_codes: form.branch_codes,
+      // Keputusan domain: admin tidak punya penugasan cabang
+      branch_codes: form.role === 'admin' ? [] : form.branch_codes,
     };
     if (!isEditMode || form.password) payload.password = form.password;
     onSave(payload);
@@ -114,7 +115,7 @@ export default function UserModal({ isOpen, onClose, onSave, user, branches, isS
               <input
                 type={showPass ? 'text' : 'password'} value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
-                required={!isEditMode} minLength={6}
+                required={!isEditMode} minLength={8}
                 className="w-full px-3 py-2 border border-hairline rounded-md bg-canvas focus:ring-2 focus:ring-primary/30 pr-10"
                 placeholder="••••••••"
               />
@@ -142,7 +143,13 @@ export default function UserModal({ isOpen, onClose, onSave, user, branches, isS
             </div>
           </div>
 
-          {/* Branch assignment */}
+          {/* Branch assignment — hanya role user (admin mengelola seluruh sistem) */}
+          {form.role === 'admin' ? (
+            <div className="bg-surface-soft border border-hairline rounded-md p-3 text-sm text-body">
+              <strong className="text-ink">Role Admin.</strong> Admin mengelola seluruh sistem
+              dan tidak memiliki penugasan cabang.
+            </div>
+          ) : (
           <div>
             <label className="block text-sm font-medium text-ink mb-2">Akses Cabang</label>
             {branches.length === 0 ? (
@@ -166,6 +173,7 @@ export default function UserModal({ isOpen, onClose, onSave, user, branches, isS
               </div>
             )}
           </div>
+          )}
 
           {confirmError && (
             <div className="p-3 bg-red-50 border border-red-200 rounded-md text-error text-sm">{confirmError}</div>

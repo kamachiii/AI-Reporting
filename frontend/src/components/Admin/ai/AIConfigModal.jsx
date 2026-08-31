@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { X, CheckCircle, XCircle, Eye, EyeOff, RefreshCw, Loader2, Info, Zap, Cpu, Wifi } from 'lucide-react';
 import ModelPickerModal from './ModelPickerModal';
+import TargetPicker from './TargetPicker';
 import { api } from '../../../services/api';
 import toast from 'react-hot-toast';
 
@@ -42,6 +43,30 @@ export default function AIConfigModal({ isOpen, onClose, onSave, editing }) {
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
+  const [targetOptions, setTargetOptions] = useState([]);
+
+  // Muat opsi TargetPicker sesuai scope (sekali per perubahan scope)
+  useEffect(() => {
+    if (!isOpen || form.scope === 'global') { setTargetOptions([]); return; }
+    let cancelled = false;
+    if (form.scope === 'tenant') {
+      api.getBranchesWithTenants().then((rows) => {
+        if (cancelled) return;
+        setTargetOptions((rows || [])
+          .filter((r) => r.is_active && r.db_host)  // hanya yang ter-hubung database
+          .map((r) => ({ value: r.code, label: `${r.code} — ${r.name}`, sub: `${r.db_name_label || ''}` })));
+      }).catch(() => setTargetOptions([]));
+    } else if (form.scope === 'user') {
+      api.getUsers().then((rows) => {
+        if (cancelled) return;
+        setTargetOptions((rows || [])
+          .filter((u) => u.role === 'user')
+          .map((u) => ({ value: u.username, label: u.username, sub: u.email || '' })));
+      }).catch(() => setTargetOptions([]));
+    }
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, form.scope]);
 
   if (!isOpen) return null;
 
@@ -133,14 +158,25 @@ export default function AIConfigModal({ isOpen, onClose, onSave, editing }) {
             </div>
           </div>
 
-          {/* Target ID */}
+          {/* Target — autocomplete dari data nyata (bukan input bebas) */}
           {form.scope !== 'global' && (
             <div className="pt-1 pb-2">
-              <label className="block text-sm font-medium text-ink mb-1">Target ID</label>
-              <input type="text" required={form.scope !== 'global'} value={form.target_id}
-                onChange={(e) => setForm({ ...form, target_id: e.target.value })}
-                className="w-full px-3 py-2 border border-hairline rounded-md bg-canvas focus:ring-2 focus:ring-primary/30"
-                placeholder="Kode Cabang / Username" />
+              <label className="block text-sm font-medium text-ink mb-1">
+                {form.scope === 'tenant' ? 'Cabang Terhubung' : 'User (role user)'}
+              </label>
+              <TargetPicker
+                value={form.target_id}
+                onChange={(v) => setForm({ ...form, target_id: v })}
+                options={targetOptions}
+                placeholder={form.scope === 'tenant' ? 'Pilih cabang...' : 'Pilih user...'}
+              />
+              {targetOptions.length === 0 && (
+                <p className="text-xs text-muted mt-1">
+                  {form.scope === 'tenant'
+                    ? 'Belum ada cabang terhubung database — hubungkan dulu di menu Database & Tenant.'
+                    : 'Belum ada user role "user" terdaftar.'}
+                </p>
+              )}
             </div>
           )}
 

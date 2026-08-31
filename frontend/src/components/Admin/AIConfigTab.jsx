@@ -23,6 +23,8 @@ export default function AIConfigTab() {
   const [editing, setEditing] = useState(null); // object config saat edit
   const [saving, setSaving] = useState(false);
   const [configToDelete, setConfigToDelete] = useState(null);
+  // Konflik scope global (409): payload draft + info config global existing
+  const [globalConflict, setGlobalConflict] = useState(null);
 
   useEffect(() => {
     fetchConfigs();
@@ -101,7 +103,39 @@ export default function AIConfigTab() {
       setEditing(null);
       await fetchConfigs();
     } catch (e) {
-      notify.error(e.response?.data?.detail || 'Gagal menyimpan konfigurasi');
+      const status = e.response?.status;
+      const detail = e.response?.data?.detail;
+      // 409: scope Global sudah ada → tawarkan update-in-place lewat popup
+      if (status === 409 && detail?.existing) {
+        setGlobalConflict({ payload, existing: detail.existing });
+        setShowModal(false);
+      } else if (typeof detail === 'string') {
+        notify.error(detail);
+      } else {
+        notify.error('Gagal menyimpan konfigurasi');
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Popup "Ganti" → update-in-place pada config global existing
+  const handleReplaceGlobal = async () => {
+    if (!globalConflict) return;
+    setSaving(true);
+    try {
+      await api.updateAIConfig(globalConflict.existing.id, {
+        ...globalConflict.payload,
+        scope: 'global',
+        target_id: '',
+      });
+      notify.success(`Konfigurasi Global diganti ke ${globalConflict.payload.provider || 'config baru'}`);
+      setGlobalConflict(null);
+      setShowModal(false);
+      setEditing(null);
+      await fetchConfigs();
+    } catch (e) {
+      notify.error(e.response?.data?.detail?.message || e.response?.data?.detail || 'Gagal mengganti konfigurasi Global');
     } finally {
       setSaving(false);
     }
@@ -245,6 +279,19 @@ export default function AIConfigTab() {
           title="Hapus Konfigurasi?"
           message="Tindakan ini tidak dapat dibatalkan. Konfigurasi AI akan dihapus dari sistem."
           isLoading={false}
+        />
+      )}
+
+      {/* Popup konflik scope Global (409) */}
+      {globalConflict && (
+        <ConfirmationDialog
+          key="globalConflict"
+          isOpen
+          onClose={() => setGlobalConflict(null)}
+          onConfirm={handleReplaceGlobal}
+          title="Ganti Konfigurasi Global?"
+          message={`Sudah ada konfigurasi scope Global (${globalConflict.existing.provider} · ${globalConflict.existing.model}). Ganti dengan config yang baru dibuat? Config lama akan ditimpa (update-in-place).`}
+          isLoading={saving}
         />
       )}
 
