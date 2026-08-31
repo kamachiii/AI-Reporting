@@ -2,7 +2,7 @@
 
 > Dokumen kontinuitas: dibaca PERTAMA kali oleh AI/engineer yang melanjutkan kerja.
 > Update dokumen ini SETIAP selesai satu fase. Jangan hapus riwayat — tambahkan.
-> Terakhir diperbarui: 2026-08-31 (F2.0 selesai).
+> Terakhir diperbarui: 2026-09-01 (F2.3' selesai).
 
 ## 0. Cara cepat paham konteks (5 menit)
 
@@ -21,8 +21,8 @@
 
 ```
 F2.0  Knowledge base                 ← SELESAI (lihat §3)
-F2.3' Verifier v2 (gerbang #1–#5)    ← BERIKUTNYA
-F2.2  SQL Composer Tier 1
+F2.3' Verifier v2 (gerbang #1–#5)    ← SELESAI (lihat §3b)
+F2.2  SQL Composer Tier 1            ← BERIKUTNYA
 F3    Chat API (Tier 1 + SQL Memory replay)
 F2.5  Generator Tier 2 + SQL Memory tulis + eval harness
 F4    UI chat lengkap (level keyakinan, lihat SQL, feedback)
@@ -37,7 +37,7 @@ F6    Hardening (kuota, Redis rate limit, cache, metrik)
 | UI chat user (mock, data mockChat.js) | ✅ | `0b098fb` | Kontrak `askAssistant()` di `frontend/src/services/mockChat.js` — saat F3 tinggal tukar ke API nyata, UI tidak berubah |
 | Draft desain v2 disetujui | ✅ | `0b098fb` | `docs/PERANCANGAN-PIPELINE-AI-v2.md` |
 | **F2.0 Knowledge Base** | ✅ | (lihat git log) | KB = JSONB `tenants.knowledge_base`; endpoint admin CRUD + dry-run validate; 20 test unit; round-trip HTTP lolos; migration idempotent 2x |
-| F2.3' Verifier v2 | ⬜ belum | — | Perluas `sql_guard.py` + katalog serangan baru |
+| **F2.3' Verifier v2** | ✅ | (lihat git log) | Gerbang #1–#4 offline (`sql_guard.verify_sql`) + #5 EXPLAIN (`query_verifier.verify_query`); 30 kasus positif + 49 kasus serangan; 163 test lulus; `tabel_dilarang` KB terintegrasi |
 | F2.2 Composer | ⬜ belum | — | |
 | F3 Chat API | ⬜ belum | — | Juga: sambungkan `askAssistant` mock → endpoint; pindahkan pipeline stage names |
 | F2.5 Tier 2 + eval | ⬜ belum | — | Jangan mulai sebelum verifier teruji |
@@ -71,6 +71,49 @@ F6    Hardening (kuota, Redis rate limit, cache, metrik)
 - `tabel_dilarang` HANYA disimpan — integrasi ke whitelist verifier adalah bagian F2.3'.
 - Endpoint validate tidak mengecek eksistensi tenant (dry-run murni).
 - `updated_at` yang ditampilkan = `tenants.updated_at` (bukan khusus KB).
+
+## 3b. Detail F2.3' (yang baru selesai) — penting untuk lanjutan
+
+**File kunci:**
+- `backend/app/services/sql_guard.py` — DUA API dalam satu file:
+  - `validate_readonly_query(sql, allowed_tables)` (F2.3 lama) **tidak diubah sama sekali**
+    (kompatibel pemanggil lama; saat ini hanya dipakai test).
+  - `verify_sql(sql, schema_config, kb_forbidden=None, budget=None) -> Verdict`
+    (F2.3') — gerbang offline #1–#4, TANPA DB. Verdict = `{ok, gate, reason, detail}`;
+    `gate` = `"bentuk"|"whitelist"|"profil"|"budget"` (None bila lolos);
+    `detail["final_sql"]` = SQL siap eksekusi (LIMIT 500 dipaksa).
+- `backend/app/services/query_verifier.py` — `verify_query(sql, schema_config,
+  tenant_conn_factory, kb_forbidden=None)` — gerbang #1–#4 lalu #5 EXPLAIN
+  pre-flight (`EXPLAIN (FORMAT JSON)`; cost ≤ 100_000, rows ≤ 500_000;
+  EXPLAIN gagal = TOLAK). TIDAK mengeksekusi query (itu F2.4, gerbang #6).
+- `backend/tests/conftest.py` — fixture `schema_config_dealer` (bentuk
+  `schema_config_json` ala dealer_dummy: 5 tabel + FK), dipakai test verifier tanpa DB.
+- `backend/tests/test_sql_guard.py` — + `TestVerifierV2` (30 positif, 49 serangan).
+- `backend/tests/test_query_verifier.py` — gerbang #5 dengan fake conn factory (11 test).
+
+**Keputusan teknis yang diambil (review bila perlu):**
+- Nama gerbang Verdict pakai bahasa Indonesia: `bentuk`, `whitelist`, `profil`,
+  `budget`, `explain` — nyambung dengan audit log & self-repair (reason = umpan balik).
+- Profil fitur `SQL_FEATURE_PROFILE_V1` (dict publik + `PROFILE_VERSION`):
+  whitelist node AST sqlglot (struktur/agregasi/fungsi string & tanggal umum
+  postgres) + `exp.Anonymous` eksplisit hanya `replace` + denylist eksplisit
+  (pg_sleep, dblink, pg_read_file, pg_ls_dir, lo_import/export, DDL/DML,
+  RECURSIVE, UNION dedup, CROSS JOIN, window function, HAVING, OFFSET, EXISTS).
+  Node AST yang tidak tercantum = tolak (default-deny).
+- Kolom divalidasi per-scope postgres: unquoted = case-insensitive, quoted =
+  case-sensitive. Kolom unqualified ambigu dalam satu scope = tolak (minta
+  kualifikasi). Korrelasi subquery ke scope luar diizinkan; korrelasi MELINTASI
+  batas CTE dihentikan (sesuai semantik postgres).
+- CTE/subquery ber-`SELECT *`: kolom output tidak bisa diinfer → fallback
+  "kolom ada di tabel basis di dalam body-nya"; ambiguitas yang tak pasti
+  diserahkan ke gerbang #5 (EXPLAIN mengecek DB sungguhan, fail-closed).
+- JOIN wajib ON/USING dan kedua sisi harus terhubung FK skema (dua arah);
+  self-join tabel yang sama diizinkan; JOIN dengan CTE/subquery dilewati dari
+  cek FK (biayanya ditangkap gerbang #4/#5).
+- Budget default: kedalaman_ast 12 (semua node termasuk daun — konservatif),
+  join 6, CTE 4, UNION 3; bisa dioverride per panggilan (`budget={...}`).
+- `tenant_conn_factory` = async callable () -> koneksi; verifier TIDAK menutup
+  koneksi (pemilik pool yang mengelola) — kontrak terdokumentasi di docstring.
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
@@ -108,9 +151,11 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 
 ## 6. Yang sedang / belum dikerjakan (jangan lupa)
 
-- [ ] F2.3' Verifier v2: gerbang #2 whitelist AST menyeluruh, #3 profil fitur versioned,
-      #4 budget kompleksitas, #5 EXPLAIN pre-flight — perluas `backend/app/services/sql_guard.py`
-      + `tests/test_sql_guard.py` (katalog serangan). `tabel_dilarang` dari KB masuk di sini.
+- [x] F2.3' Verifier v2: gerbang #2 whitelist AST menyeluruh, #3 profil fitur versioned,
+      #4 budget kompleksitas, #5 EXPLAIN pre-flight — SELESAI (lihat §3b).
+      `tabel_dilarang` dari KB sudah terintegrasi (parameter `kb_forbidden`).
+- [ ] F2.4 Executor: eksekusi terkurung (gerbang #6) memakai
+      `query_verifier.verify_query` — verdict + `detail["final_sql"]` sudah disiapkan.
 - [ ] Keputusan terbuka v2 §11 (ambang eval 95%, normalisasi replay, retensi, number check numerik).
 - [ ] Pembersihan repo (belum tereksekusi): `git rm --cached frontend/test-results/.last-run.json`
       (file ter-track padahal sudah di .gitignore); 3 folder `backup_*` root dipindah ke
