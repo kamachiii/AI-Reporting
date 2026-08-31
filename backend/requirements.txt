@@ -11,4 +11,4 @@ bcrypt==5.0.0
 sqlglot==26.3.0
 email-validator==2.3.0
 httpx==0.28.1
-pytest
+pytest==8.3.4

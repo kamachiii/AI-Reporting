@@ -5,7 +5,7 @@ Model: kredensial database didaftarkan sekali di sini; cabang
 Satu cabang = satu database; satu database boleh dipakai banyak cabang.
 """
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import asyncpg
 import logging
 
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/admin", tags=["Admin - Database Registry"])
 class DbConnectionCreate(BaseModel):
     name: str
     db_host: str
-    db_port: int = 5432
+    db_port: int = Field(default=5432, ge=1, le=65535)
     db_name: str
     db_username: str
     db_password: str

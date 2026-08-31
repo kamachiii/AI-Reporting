@@ -467,6 +467,12 @@ erDiagram
 | `POST` | `/admin/ai-configs/test-draft` | Test draft config |
 | `POST` | `/admin/ai-providers/models` | Fetch daftar model dari provider |
 
+> 💡 **Base URL provider** otomatis dinormalisasi (trailing slash dihapus) sebelum
+> dipakai menghitung URL endpoint (`/models`, `/chat/completions`, `/messages`).
+> Gateway dengan route-matching ketat (mis. B.AI) menolak path double-slash
+> seperti `/v1//models`. Pastikan base_url sudah memuat prefix versi yang benar
+> (mis. `https://api.b.ai/v1`) — host root tanpa `/v1` tetap akan ditolak gateway.
+
 > 📖 Dokumentasi API lengkap tersedia di **http://localhost:8000/docs** (Swagger UI)
 
 ---

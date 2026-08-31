@@ -31,7 +31,7 @@ export default function TenantConnectionsTable({
   }, [tenants, debouncedSearch]);
 
   const connTotalPages = Math.max(1, Math.ceil(filteredConns.length / PAGE_SIZE));
-  useEffect(() => { if (connPage > connTotalPages) setConnPage(connTotalPages); }, [connPage, connTotalPages]);
+  useEffect(() => { if (connPage > connTotalPages) setConnPage(connTotalPages); }, [connPage, connTotalPages, setConnPage]);
   const paginatedConns = useMemo(
     () => filteredConns.slice((connPage - 1) * PAGE_SIZE, connPage * PAGE_SIZE),
     [filteredConns, connPage]);

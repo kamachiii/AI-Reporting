@@ -79,6 +79,7 @@ async def generate_json_filter(user_prompt: str, schema: dict, ai_config: dict):
         raise HTTPException(status_code=400, detail="api_type tidak dikenali. Harus 'openai' atau 'anthropic'.")
 
     # 2. Lakukan panggilan HTTP ke AI Gateway
+    content = ""  # di-init agar handler JSONDecodeError aman walau resp.json() gagal
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(url, headers=headers, json=payload)

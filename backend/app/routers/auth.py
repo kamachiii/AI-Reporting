@@ -37,8 +37,16 @@ async def login(req: LoginRequest, request: Request):
     # --- Cek rate limit sebelum sentuh database ---
     client_ip = request.client.host if request.client else "unknown"
     attempt_key = f"{req.username.lower()}:{client_ip}"
-    attempts = _login_attempts[attempt_key]
     now = time.monotonic()
+
+    # Evict berkala: buang key kadaluarsa & key kosong agar dict tidak tumbuh
+    # tanpa batas (username yang tak pernah login sukses tak pernah ter-reset).
+    if len(_login_attempts) > 1024:
+        for k in [k for k, v in _login_attempts.items()
+                  if not v or now - v[-1] > _LOGIN_WINDOW_SECONDS]:
+            _login_attempts.pop(k, None)
+
+    attempts = _login_attempts[attempt_key]
     while attempts and now - attempts[0] > _LOGIN_WINDOW_SECONDS:
         attempts.popleft()
     if len(attempts) >= _LOGIN_MAX_ATTEMPTS:

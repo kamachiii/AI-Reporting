@@ -53,8 +53,6 @@ export default function TenantsTab() {
   const [dbPage, setDbPage] = useState(1);
   const [connPage, setConnPage] = useState(1);
 
-  useEffect(() => { fetchData(); }, []);
-
   useAdminShortcuts({
     onEscape: () => {
       if (confirmState) setConfirmState(null);
@@ -99,6 +97,8 @@ export default function TenantsTab() {
       setLoading(false);
     }
   };
+
+  useEffect(() => { fetchData(); }, []);
 
   const handleTestRegistry = async (conn) => {
     setTestingId(conn.id);

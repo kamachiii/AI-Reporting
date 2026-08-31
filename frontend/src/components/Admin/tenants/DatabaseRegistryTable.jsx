@@ -34,7 +34,7 @@ export default function DatabaseRegistryTable({
   }, [connections, debouncedSearch]);
 
   const dbTotalPages = Math.max(1, Math.ceil(filteredDbs.length / PAGE_SIZE));
-  useEffect(() => { if (dbPage > dbTotalPages) setDbPage(dbTotalPages); }, [dbPage, dbTotalPages]);
+  useEffect(() => { if (dbPage > dbTotalPages) setDbPage(dbTotalPages); }, [dbPage, dbTotalPages, setDbPage]);
   const paginatedDbs = useMemo(
     () => filteredDbs.slice((dbPage - 1) * PAGE_SIZE, dbPage * PAGE_SIZE),
     [filteredDbs, dbPage]);

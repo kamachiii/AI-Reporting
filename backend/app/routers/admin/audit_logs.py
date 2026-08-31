@@ -36,7 +36,9 @@ async def get_audit_logs(
         params.append(status)
         idx += 1
     if q:
-        like = f"%{q}%"
+        # escape wildcard LIKE agar %/_ dari user tidak mengubah semantik pencarian
+        escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like = f"%{escaped}%"
         where.append(
             f"(u.username ILIKE ${idx} OR al.branch_code ILIKE ${idx} "
             f"OR COALESCE(al.prompt_text, '') ILIKE ${idx})"

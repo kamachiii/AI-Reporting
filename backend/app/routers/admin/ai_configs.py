@@ -179,11 +179,15 @@ async def test_ai_config(config_id: int, user: dict = Depends(require_admin_role
         raise HTTPException(status_code=404, detail="Config tidak ditemukan")
 
     api_type = row["api_type"]
-    base_url = row["base_url"]
-    decrypted_key = decrypt_credential(row["api_key"])
 
     if api_type == "anthropic":
         return {"status": "connected", "message": "Anthropic tidak mendukung test otomatis"}
+
+    try:
+        decrypted_key = decrypt_credential(row["api_key"])
+    except Exception as e:
+        logger.error(f"Decrypt gagal utk config {config_id}: {e}")
+        return {"status": "disconnected", "message": "Kredensial tidak dapat didekripsi (periksa FERNET_KEY)"}
 
     url = build_models_url(row["base_url"], api_type="openai")
     headers = {"Authorization": f"Bearer {decrypted_key}"}
@@ -194,7 +198,7 @@ async def test_ai_config(config_id: int, user: dict = Depends(require_admin_role
                 return {"status": "connected", "message": "Koneksi berhasil"}
             return {"status": "disconnected", "message": f"Gagal: {resp.status_code}"}
     except Exception as e:
-        return {"status": "disconnected", "message": str(e)}
+        return {"status": "disconnected", "message": str(e).splitlines()[0][:120]}
 
 @router.post("/ai-providers/models")
 async def fetch_models_from_provider(payload: FetchModelsRequest, user: dict = Depends(require_admin_role)):
@@ -203,7 +207,10 @@ async def fetch_models_from_provider(payload: FetchModelsRequest, user: dict = D
     if not final_api_key and payload.config_id:
         row = await pool.fetchrow("SELECT api_key FROM ai_configs WHERE id = $1", payload.config_id)
         if row:
-            final_api_key = decrypt_credential(row["api_key"])
+            try:
+                final_api_key = decrypt_credential(row["api_key"])
+            except Exception:
+                raise HTTPException(status_code=500, detail="Kredensial tersimpan tidak dapat didekripsi (periksa FERNET_KEY)")
         else:
             raise HTTPException(status_code=404, detail="Konfigurasi tidak ditemukan")
     elif not final_api_key and not payload.config_id:
@@ -223,7 +230,7 @@ async def fetch_models_from_provider(payload: FetchModelsRequest, user: dict = D
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(url, headers=headers)
             if resp.status_code != 200:
-                raise HTTPException(status_code=resp.status_code, detail=f"Gagal fetch dari provider: {resp.text}")
+                raise HTTPException(status_code=resp.status_code, detail=f"Gagal fetch dari provider: {resp.text[:300]}")
             data = resp.json()
             raw_models = [item["id"] for item in data.get("data", [])]
 
@@ -236,9 +243,11 @@ async def fetch_models_from_provider(payload: FetchModelsRequest, user: dict = D
                 for m in raw_models
             ]
             return {"provider": payload.provider, "models": formatted_models}
+    except HTTPException:
+        raise  # jangan telan status code asli dari provider (mis. 401/403) — dulu jadi 500
     except Exception as e:
         logger.error(f"Error fetching models: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=502, detail="Gagal menghubungi provider AI")
 
 @router.post("/ai-configs/test-draft")
 async def test_ai_config_draft(payload: AIConfigTestDraft, user: dict = Depends(require_admin_role)):
@@ -268,7 +277,7 @@ async def test_ai_config_draft(payload: AIConfigTestDraft, user: dict = Depends(
                 return {"status": "connected", "message": "Koneksi berhasil!"}
             return {"status": "disconnected", "message": f"Gagal: {resp.status_code}"}
     except Exception as e:
-        return {"status": "disconnected", "message": f"Error: {str(e)}"}
+        return {"status": "disconnected", "message": f"Error: {str(e).splitlines()[0][:120]}"}
 
 
 async def _probe(row) -> tuple[int, dict]:

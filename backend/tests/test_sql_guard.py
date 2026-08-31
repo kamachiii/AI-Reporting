@@ -44,3 +44,32 @@ class TestSqlGuard:
     def test_legitimate_pass(self, sql):
         # Tidak melempar exception = valid
         validate_readonly_query(sql, ALLOWED_TABLES)
+
+    # ---- LIMIT policy (docs pipeline §4: paksa LIMIT <= 500) ----
+
+    @pytest.mark.parametrize("sql", [
+        "SELECT merek, COUNT(*) FROM penjualan GROUP BY merek LIMIT 500",
+        "SELECT * FROM kendaraan WHERE tahun > 2020 LIMIT 1",
+    ])
+    def test_limit_within_cap_pass(self, sql):
+        validate_readonly_query(sql, ALLOWED_TABLES)
+
+    @pytest.mark.parametrize("sql", [
+        "SELECT * FROM penjualan LIMIT 501",
+        "SELECT * FROM penjualan LIMIT 10000",
+        "SELECT merek FROM penjualan GROUP BY merek LIMIT 999999999",
+    ])
+    def test_limit_over_cap_rejected(self, sql):
+        with pytest.raises(Exception):
+            validate_readonly_query(sql, ALLOWED_TABLES)
+
+    def test_no_limit_gets_default(self):
+        # Query tanpa LIMIT tidak lagi lolos begitu saja:
+        # guard menambahkan LIMIT 500 secara otomatis dan mengembalikan SQL final.
+        result = validate_readonly_query("SELECT merek FROM penjualan", ALLOWED_TABLES)
+        assert isinstance(result, str)
+        final = result.upper().replace(" ", "")
+        assert "LIMIT500" in final or "LIMIT'500'" in final or "LIMIT500" in final.replace("'", "")
+        # dan SQL final tetap bisa di-parse
+        import sqlglot
+        sqlglot.parse_one(result, read="postgres")

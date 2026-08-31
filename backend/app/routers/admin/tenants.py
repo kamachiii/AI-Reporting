@@ -98,10 +98,14 @@ async def create_tenant(payload: TenantCreate, user: dict = Depends(require_admi
     """Hubungkan cabang ke database registry (pilih dari dropdown)."""
     try:
         pool = await get_core_pool()
-        branch_exists = await pool.fetchval("SELECT 1 FROM branches WHERE code = $1", payload.branch_code)
-        if not branch_exists:
+        branch_row = await pool.fetchrow(
+            "SELECT is_active FROM branches WHERE code = $1", payload.branch_code)
+        if not branch_row:
             raise HTTPException(status_code=404,
                 detail=f"Cabang '{payload.branch_code}' tidak ditemukan.")
+        if not branch_row["is_active"]:
+            raise HTTPException(status_code=400,
+                detail=f"Cabang '{payload.branch_code}' sedang nonaktif — aktifkan dulu sebelum menghubungkan database.")
         conn_row = await pool.fetchrow(
             "SELECT id, is_active FROM db_connections WHERE id = $1", payload.db_connection_id)
         if not conn_row:
