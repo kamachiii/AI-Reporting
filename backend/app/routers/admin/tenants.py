@@ -13,6 +13,7 @@ import logging
 
 from app.core.database import get_core_pool
 from app.core.security import require_admin_role, decrypt_credential
+from app.services.chat_pipeline import tulis_audit
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["Admin - Tenants"])
@@ -72,7 +73,7 @@ async def get_tenants(user: dict = Depends(require_admin_role)):
         rows = await pool.fetch("""
             SELECT t.branch_code, t.db_connection_id,
                    dc.name AS db_name_label, dc.db_host, dc.db_port,
-                   dc.db_name, t.is_active
+                   dc.db_name, t.is_active, t.chat_tier2
             FROM tenants t
             JOIN db_connections dc ON dc.id = t.db_connection_id
             ORDER BY t.branch_code
@@ -86,6 +87,7 @@ async def get_tenants(user: dict = Depends(require_admin_role)):
                 "db_port": r["db_port"],
                 "db_name": r["db_name"],
                 "is_active": r["is_active"],
+                "chat_tier2": r["chat_tier2"],
             } for r in rows
         ]
     except Exception as e:
@@ -262,3 +264,49 @@ async def refresh_tenant_schema(branch_code: str, user: dict = Depends(require_a
         branch_code, json.dumps(skema))
     return {"message": f"Skema '{branch_code}' diperbarui: {n_tabel} tabel / {n_kolom} kolom",
             "tables": n_tabel, "columns": n_kolom}
+
+
+# ===========================================================================
+# F2.6 — toggle Tier 2 (Verified Text2SQL) per tenant
+# ===========================================================================
+class Tier2ToggleRequest(BaseModel):
+    enabled: bool
+
+
+@router.post("/tenants/{branch_code}/tier2")
+async def set_tenant_tier2(branch_code: str, payload: Tier2ToggleRequest,
+                           user: dict = Depends(require_admin_role)):
+    """Aktifkan/matikan jalur Tier 2 (docs v2 §1) untuk satu tenant.
+
+    Flag `tenants.chat_tier2` default FALSE (migration 008) — pipeline chat
+    memakai alur lama (planner -> composer) selama flag mati. Keputusan admin
+    ter-audit ke audit_logs (pola tulis_audit chat_pipeline): sukses maupun
+    percobaan pada cabang yang tidak ada (404) — pensondelan terlihat.
+    """
+    pool = await get_core_pool()
+    try:
+        row = await pool.fetchrow(
+            "SELECT id FROM tenants WHERE branch_code = $1", branch_code)
+        if not row:
+            pesan = f"Tenant untuk cabang '{branch_code}' tidak ditemukan."
+            await tulis_audit(
+                pool, user_id=(user or {}).get("user_id"),
+                branch_code=branch_code,
+                prompt_text=f"[tier2-toggle] {branch_code}",
+                ai_json_filter={"chat_tier2": payload.enabled},
+                generated_sql=None, execution_time_ms=None,
+                status="error", error_message=pesan)
+            raise HTTPException(status_code=404, detail=pesan)
+    except HTTPException:
+        raise
+    await pool.execute(
+        "UPDATE tenants SET chat_tier2 = $2, updated_at = CURRENT_TIMESTAMP "
+        "WHERE branch_code = $1",
+        branch_code, payload.enabled)
+    await tulis_audit(
+        pool, user_id=(user or {}).get("user_id"), branch_code=branch_code,
+        prompt_text=f"[tier2-toggle] {branch_code}",
+        ai_json_filter={"chat_tier2": payload.enabled},
+        generated_sql=None, execution_time_ms=None,
+        status="success", error_message=None)
+    return {"branch_code": branch_code, "chat_tier2": payload.enabled}

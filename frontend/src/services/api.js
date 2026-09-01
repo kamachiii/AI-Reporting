@@ -133,6 +133,11 @@ export const api = {
     const response = await apiClient.post(`/admin/tenants/${branch_code}/refresh-schema`);
     return response.data; // { message, tables, columns }
   },
+  // Toggle Tier 2 (F2.6) per tenant — return { branch_code, chat_tier2 }
+  setTenantTier2: async (branch_code, enabled) => {
+    const response = await apiClient.post(`/admin/tenants/${branch_code}/tier2`, { enabled });
+    return response.data;
+  },
   // Knowledge Base tenant (F2.0) — lapisan semantik untuk AI
   getTenantKnowledgeBase: async (branchCode) => {
     const response = await apiClient.get(`/admin/tenants/${branchCode}/knowledge-base`);

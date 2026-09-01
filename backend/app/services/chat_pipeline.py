@@ -42,6 +42,25 @@ Urutan tahap (milestone perangkuman):
     self-heal sekali bila NULL. Response menambah field {ringkasan, saran,
     metode} — metode: "llm" | "template" | "cache". Kegagalan presenter
     TIDAK PERNAH menggagalkan jawaban (log + lanjut tanpa ringkasan).
+9.  F2.6 Tier 2 (flag `tenants.chat_tier2`, default FALSE — docs v2 §1):
+    - Flag OFF: alur lama apa adanya (planner -> composer), tanpa perubahan.
+    - Flag ON: pada MISS, router+generator (`tier2_generator.generate_sql`,
+      SATU panggilan LLM) dipanggil dulu — generator yang memutuskan tier:
+      hasil tier 1 = compose SUDAH selesai di generator (di-reuse, tidak
+      compose dua kali) lalu lanjut alur lama persis; hasil tier 2 = SQL
+      baru diverifikasi LAGI oleh verify_and_execute (defense-in-depth —
+      verifier murah, keamanan tidak bergantung pada keputusan generator)
+      lalu dieksekusi langsung (mode auto, docs v2 §7): source="tier2",
+      confidence="C", attempts=n, memory pending (sumber="tier2",
+      plan_json={"tier2": true}), presenter seperti biasa, ter-audit.
+    - Tier2Error (self-repair habis, maks 2x) -> fallback ke alur Tier 1
+      lama; fallback juga gagal (Planning/Composer) -> 502 dengan pesan
+      gabungan yang jujur.
+    - Replay entri memory tier2 (plan_json berisi {"tier2": true}): bila SQL
+      tersimpan memuat literal tanggal (regex YYYY-MM-DD — menangkap literal
+      string maupun cast ::date) -> anggap MISS (jangan replay data basi)
+      TAPI baris TIDAK dihapus/di-stale-kan; tanpa literal tanggal -> replay
+      normal (verify ulang tetap jalan).
 
 F4 (tombol UI chat): `ubah_status_memory` menaikkan/menolak entri pending —
 confirm: pending -> approved (approved = no-op sukses); reject: pending ->
@@ -68,6 +87,7 @@ from app.services.query_executor import verify_and_execute
 from app.services.query_planner import AIConfigError, PlanningError, plan_query, \
     resolve_ai_config
 from app.services.sql_composer import SqlComposerError, compose_sql
+from app.services.tier2_generator import Tier2Error, generate_sql
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +98,10 @@ logger = logging.getLogger(__name__)
 _TANDA_BACA_RE = re.compile(r"[^\w\s]", re.UNICODE)
 _SPASI_RE = re.compile(r"\s+")
 _PLACEHOLDER_RE = re.compile(r"\$\d+")
+# Literal tanggal/timestamp ISO pada SQL (menangkap literal string
+# 'YYYY-MM-DD' maupun cast 'YYYY-MM-DD'::date) — penanda data basi untuk
+# replay entri tier2 (jendela waktu beku saat SQL dibuat).
+_TANGGAL_LITERAL_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 
 _STATUS_SUCCESS = "success"
 _STATUS_REJECTED = "rejected"
@@ -85,8 +109,10 @@ _STATUS_ERROR = "error"
 
 _SOURCE_MEMORY = "memory"
 _SOURCE_TIER1 = "tier1"
+_SOURCE_TIER2 = "tier2"
 _CONF_A = "A"
 _CONF_B = "B"
+_CONF_C = "C"
 
 
 # ===========================================================================
@@ -226,7 +252,7 @@ def _siapkan_skema_efektif(schema_config: dict, tabel_dilarang: list[str],
 
 _SQL_TENANT = (
     "SELECT t.id AS tenant_id, t.branch_code, t.schema_config_json, "
-    "       t.knowledge_base, t.is_active AS tenant_aktif, "
+    "       t.knowledge_base, t.is_active AS tenant_aktif, t.chat_tier2, "
     "       dc.id AS db_connection_id, dc.db_host, dc.db_port, dc.db_name, "
     "       dc.db_username, dc.db_password, dc.is_active AS koneksi_aktif "
     "FROM tenants t "
@@ -541,6 +567,45 @@ def _pasang_ringkasan(response: dict, ringkasan, saran, metode) -> None:
     response["metode"] = metode
 
 
+async def _jalur_tier2(core_pool, pool_tenant, *, tenant_id: int, q_norm: str,
+                       question: str, sql: str, attempts: int,
+                       schema_config: dict, kb_forbidden: list,
+                       ai_config: dict, row_cap: int,
+                       llm_call_fn=None) -> tuple:
+    """F2.6 — jalur Tier 2: SQL baru dari generator -> eksekusi (mode auto,
+    docs v2 §7) -> presenter -> memory pending. Mengembalikan TUPLE
+    (response, plan_terpakai, sql, durasi_ms) — kontrak sama dengan jalur
+    tier1 agar audit di proses_pertanyaan seragam.
+
+    Verifier DIJALANKAN LAGI di sini lewat verify_and_execute (gerbang
+    #1–#5 ulang + gerbang #6) — defense-in-depth yang disengaja (docs v2
+    §1): verifier milidetik, keamanan tidak pernah bergantung pada
+    keputusan generator. SQL tier2 literal tanpa placeholder ($n).
+    """
+    hasil = await verify_and_execute(
+        pool_tenant, sql, schema_config, params=None,
+        kb_forbidden=kb_forbidden, row_cap=row_cap)
+    if not hasil["verdict"]["ok"]:
+        raise VerifierDitolak(hasil["verdict"])
+
+    durasi_ms = hasil["result"]["duration_ms"]
+    fingerprint = ",".join(
+        hasil["verdict"]["detail"].get("tabel_direferensikan") or [])
+    # Presenter seperti biasa (fail-open); hasil ikut tersimpan di memory.
+    ringkasan, saran, metode_r = await _ringkasan_tier1(
+        question, hasil["result"], ai_config, llm_call_fn=llm_call_fn)
+    memory_id_baru = await simpan_memory_pending(
+        core_pool, tenant_id, q_norm, sql, {"tier2": True},
+        sumber=_SOURCE_TIER2, fingerprint_tabel=fingerprint,
+        ringkasan=ringkasan, saran=saran)
+    response = _bentuk_response(_SOURCE_TIER2, _CONF_C, sql, None,
+                                hasil["result"], memory_id=memory_id_baru)
+    response["attempts"] = attempts
+    _pasang_ringkasan(response, ringkasan, saran, metode_r)
+    plan_terpakai = {"tier2": True, "attempts": attempts}
+    return response, plan_terpakai, sql, durasi_ms
+
+
 # ===========================================================================
 # Pipeline utama
 # ===========================================================================
@@ -600,6 +665,9 @@ async def proses_pertanyaan(core_pool, tenant_pool_manager, user: dict,
             kb.get("kolom_dikecualikan") or [])
         jumlah_tabel_efektif = len(schema_config["tables"])
         pool_tenant = await tenant_pool_manager.get_pool(tenant)
+        # F2.6: flag Tier 2 per tenant (migration 008, default FALSE).
+        # .get() agar baris tanpa kolom (fake/test lama) tetap flag OFF.
+        chat_tier2_aktif = bool(tenant.get("chat_tier2"))
 
         # ---------- Tahap 3: SQL Memory replay (0 panggilan LLM) ----------
         entri = await cari_memory_approved(core_pool, tenant["tenant_id"],
@@ -608,7 +676,17 @@ async def proses_pertanyaan(core_pool, tenant_pool_manager, user: dict,
             pakai_memory, params = True, None
             plan_tersimpan = _parse_json_mungkin_str(entri["plan_json"])
             sql_tersimpan = entri["sql"]
-            if plan_tersimpan is not None:
+            if isinstance(plan_tersimpan, dict) and plan_tersimpan.get("tier2"):
+                # F2.6 — entri tier2: SQL literal (tanpa plan composer, tanpa
+                # placeholder $n). Bila SQL memuat literal tanggal, replay
+                # akan memakai jendela waktu BEKU saat SQL dibuat (data basi)
+                # -> anggap MISS agar pertanyaan dijawab ulang; baris tetap
+                # disimpan apa adanya (tidak dihapus, tidak di-stale-kan).
+                # Tanpa literal tanggal -> replay normal seperti tier1
+                # (verify ulang tetap jalan di verify_and_execute).
+                if _TANGGAL_LITERAL_RE.search(sql_tersimpan or ""):
+                    pakai_memory = False
+            elif plan_tersimpan is not None:
                 try:
                     composed = compose_sql(plan_tersimpan, schema_config,
                                            now=sekarang)
@@ -648,38 +726,93 @@ async def proses_pertanyaan(core_pool, tenant_pool_manager, user: dict,
                     core_pool, entri, question, hasil["result"],
                     user["username"], branch_code, llm_call_fn=llm_call_fn)))
 
-        # ---------- Tahap 4: MISS -> planner + composer (panggilan #1) -----
+        # ---------- Tahap 4: MISS -> router dua tier (F2.6) / planner lama -
         if entri is None or not pakai_memory:
             ai_config = await resolve_ai_config(core_pool, user["username"],
                                                 branch_code)
-            plan = await plan_query(question, schema_config, kb, ai_config,
-                                    llm_call_fn=llm_call_fn)
-            plan_terpakai = plan
-            composed = compose_sql(plan, schema_config, now=sekarang)
-            sql_final = composed["sql"]
 
-            hasil = await verify_and_execute(
-                pool_tenant, sql_final, schema_config,
-                params=composed["params"], kb_forbidden=kb_forbidden,
-                row_cap=row_cap)
-            if not hasil["verdict"]["ok"]:
-                raise VerifierDitolak(hasil["verdict"])
+            # F2.6: flag ON -> router+generator SATU panggilan LLM dulu
+            # (docs v2 §1/§5); generator yang memutuskan tier 1 atau 2.
+            hasil_router = None
+            pesan_tier2 = None
+            if chat_tier2_aktif:
+                conn = await pool_tenant.acquire()
+                try:
+                    async def _factory():
+                        return conn
+                    try:
+                        hasil_router = await generate_sql(
+                            question, schema_config, kb, ai_config, _factory,
+                            llm_call_fn=llm_call_fn, now=sekarang)
+                    except Tier2Error as e:
+                        # Self-repair habis -> fallback alur Tier 1 lama;
+                        # alasan dibawa agar pesan 502 akhir jujur.
+                        pesan_tier2 = str(e)
+                        logger.warning("chat_pipeline: Tier 2 habis percobaan"
+                                       ", fallback Tier 1: %s", e)
+                finally:
+                    await pool_tenant.release(conn)
 
-            durasi_ms = hasil["result"]["duration_ms"]
-            fingerprint = ",".join(
-                hasil["verdict"]["detail"].get("tabel_direferensikan") or [])
-            # F2.5: ringkasan + saran (LLM #2, fail-open ke template) dibentuk
-            # SEBELUM upsert agar ikut tersimpan di sql_memory.
-            ringkasan, saran, metode_r = await _ringkasan_tier1(
-                question, hasil["result"], ai_config, llm_call_fn=llm_call_fn)
-            memory_id_baru = await simpan_memory_pending(
-                core_pool, tenant["tenant_id"], q_norm, sql_final, plan,
-                sumber=_SOURCE_TIER1, fingerprint_tabel=fingerprint,
-                ringkasan=ringkasan, saran=saran)
-            response = _bentuk_response(_SOURCE_TIER1, _CONF_B, sql_final,
-                                        composed["params"], hasil["result"],
-                                        memory_id=memory_id_baru)
-            _pasang_ringkasan(response, ringkasan, saran, metode_r)
+            if hasil_router is not None and hasil_router["tier"] == 2:
+                response, plan_terpakai, sql_final, durasi_ms = \
+                    await _jalur_tier2(
+                        core_pool, pool_tenant, tenant_id=tenant["tenant_id"],
+                        q_norm=q_norm, question=question,
+                        sql=hasil_router["sql"],
+                        attempts=hasil_router["attempts"],
+                        schema_config=schema_config,
+                        kb_forbidden=kb_forbidden, ai_config=ai_config,
+                        row_cap=row_cap, llm_call_fn=llm_call_fn)
+            else:
+                # ---- Jalur Tier 1: flag OFF, hasil router tier 1, atau
+                # fallback setelah Tier2Error — alur lama persis.
+                if hasil_router is not None:
+                    # Router memilih tier 1: compose SUDAH selesai di
+                    # generator — reuse hasilnya, JANGAN compose dua kali.
+                    plan = hasil_router["plan"]
+                    plan_terpakai = plan
+                    sql_final = hasil_router["sql"]
+                    params_final = hasil_router["params"]
+                else:
+                    try:
+                        plan = await plan_query(
+                            question, schema_config, kb, ai_config,
+                            llm_call_fn=llm_call_fn)
+                        plan_terpakai = plan
+                        composed = compose_sql(plan, schema_config,
+                                               now=sekarang)
+                    except (PlanningError, SqlComposerError) as e:
+                        if pesan_tier2 is None:
+                            raise  # flag OFF — pemetaan lama apa adanya
+                        # 502 jujur: kegagalan Tier 2 + kegagalan fallback.
+                        raise PlanningError(
+                            f"Tier 2 gagal ({pesan_tier2}); fallback Tier 1 "
+                            f"juga gagal: {e}") from e
+                    sql_final = composed["sql"]
+                    params_final = composed["params"]
+
+                hasil = await verify_and_execute(
+                    pool_tenant, sql_final, schema_config,
+                    params=params_final, kb_forbidden=kb_forbidden,
+                    row_cap=row_cap)
+                if not hasil["verdict"]["ok"]:
+                    raise VerifierDitolak(hasil["verdict"])
+
+                durasi_ms = hasil["result"]["duration_ms"]
+                fingerprint = ",".join(
+                    hasil["verdict"]["detail"].get("tabel_direferensikan") or [])
+                # F2.5: ringkasan + saran (LLM #2, fail-open ke template)
+                # dibentuk SEBELUM upsert agar ikut tersimpan di sql_memory.
+                ringkasan, saran, metode_r = await _ringkasan_tier1(
+                    question, hasil["result"], ai_config, llm_call_fn=llm_call_fn)
+                memory_id_baru = await simpan_memory_pending(
+                    core_pool, tenant["tenant_id"], q_norm, sql_final, plan,
+                    sumber=_SOURCE_TIER1, fingerprint_tabel=fingerprint,
+                    ringkasan=ringkasan, saran=saran)
+                response = _bentuk_response(_SOURCE_TIER1, _CONF_B, sql_final,
+                                            params_final, hasil["result"],
+                                            memory_id=memory_id_baru)
+                _pasang_ringkasan(response, ringkasan, saran, metode_r)
 
         # ---------- Tahap 6: percakapan (2 pesan) + audit sukses ----------
         cid = await ambil_atau_buat_conversation(

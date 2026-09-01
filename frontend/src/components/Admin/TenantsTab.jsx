@@ -39,6 +39,7 @@ export default function TenantsTab() {
   const [testingId, setTestingId] = useState(null);
   const [processingKey, setProcessingKey] = useState(null);
   const [introspecting, setIntrospecting] = useState(null);
+  const [tier2Busy, setTier2Busy] = useState(null); // cabang yang sedang toggle Tier 2
   const [confirmState, setConfirmState] = useState(null);
 
   // status koneksi NYATA milik DATABASE (registry): { "<id>": {status, message} }
@@ -157,6 +158,23 @@ export default function TenantsTab() {
         }
       },
     });
+  };
+
+  // ---- Tier 2 (F2.6) — toggle flag chat_tier2 tenant ----
+  // Hasil POST { branch_code, chat_tier2 } langsung direfleksikan ke state
+  // lokal (GET tenants kini menyertakan chat_tier2, jadi tetap benar saat reload).
+  const handleToggleTier2 = async (t) => {
+    setTier2Busy(t.branch_code);
+    try {
+      const r = await api.setTenantTier2(t.branch_code, !t.chat_tier2);
+      setTenants((prev) => prev.map((x) =>
+        x.branch_code === t.branch_code ? { ...x, chat_tier2: r.chat_tier2 } : x));
+      notify.success(`Tier 2 ${r.chat_tier2 ? 'diaktifkan' : 'dinonaktifkan'} untuk ${r.branch_code}`);
+    } catch (e) {
+      notify.error(e.response?.data?.detail || 'Gagal mengubah Tier 2');
+    } finally {
+      setTier2Busy(null);
+    }
   };
 
   // ---- relasi ----
@@ -305,8 +323,10 @@ export default function TenantsTab() {
           dbStatus={dbStatus}
           introspecting={introspecting}
           processingKey={processingKey}
+          tier2Busy={tier2Busy}
           onRefreshSchema={handleRefreshSchema}
           onManageKb={(t) => setKbBranch(t.branch_code)}
+          onToggleTier2={handleToggleTier2}
           onDisconnect={handleDisconnect}
         />
       )}

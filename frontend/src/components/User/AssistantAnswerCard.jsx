@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  AlertTriangle, Check, ChevronDown, ChevronRight, Database, Sparkles, X,
+  AlertTriangle, Check, ChevronDown, ChevronRight, Database, Layers, Sparkles, X,
 } from 'lucide-react';
 
 /** Durasi ms -> teks ringkas ("320 ms" / "1,4 dtk"). */
@@ -24,6 +24,11 @@ function formatSel(nilai) {
  * `saran` (array string) = pertanyaan lanjutan — chip di BAWAH kartu, klik
  * -> onAsk(text); disembunyikan bila jawaban ditolak. History lama tanpa
  * kedua field ini tampil persis seperti sebelumnya.
+ *
+ * `source === "tier2"` (F2.6) = jawaban jalur Verified Text2SQL — badge
+ * "SQL Kompleks (Level C)" bernuansa beige hangat, berbeda dari "Jawaban baru".
+ * `attempts` (int, hanya tier2) = jumlah percobaan self-repair — >1 ditampilkan
+ * di meta baris sebagai transparansi repair loop.
  *
  * `memoryStatus`: 'confirmed' | 'rejected' (hasil feedback user, lokal) —
  * undefined selama belum dinilai. Tombol feedback tampil hanya untuk
@@ -60,6 +65,11 @@ export default function AssistantAnswerCard({
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-soft text-muted text-[11px] font-medium">
               <X size={11} />
               Ditolak
+            </span>
+          ) : answer.source === 'tier2' ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-card text-ink text-[11px] font-medium">
+              <Layers size={11} />
+              SQL Kompleks (Level C)
             </span>
           ) : (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[11px] font-medium">
@@ -146,9 +156,11 @@ export default function AssistantAnswerCard({
           )}
         </div>
 
-        {/* Meta: jumlah baris + durasi eksekusi + waktu jawaban */}
+        {/* Meta: jumlah baris + durasi eksekusi + waktu jawaban.
+            attempts > 1 (F2.6, hanya tier2) = jejak self-repair generator. */}
         <p className="text-[11px] text-muted">
           {answer.row_count} baris{durasi && ` · ${durasi}`}
+          {answer.attempts > 1 && ` · ${answer.attempts} percobaan`}
           {createdAt &&
             ` · ${new Date(createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`}
         </p>

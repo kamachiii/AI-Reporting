@@ -19,8 +19,10 @@ export default function TenantConnectionsTable({
   dbStatus,
   introspecting,
   processingKey,
+  tier2Busy,
   onRefreshSchema,
   onManageKb,
+  onToggleTier2,
   onDisconnect,
 }) {
   const filteredConns = useMemo(() => {
@@ -87,7 +89,22 @@ export default function TenantConnectionsTable({
                   })()}
                 </td>
                 <td className="p-3">
-                  <div className="flex justify-end gap-0.5">
+                  <div className="flex justify-end items-center gap-0.5">
+                    {/* Chip toggle Tier 2 (F2.6) — status dari GET tenants
+                        (chat_tier2), aksi via onToggleTier2 di TenantsTab */}
+                    <button onClick={() => onToggleTier2(t)} disabled={tier2Busy === t.branch_code}
+                      title={t.chat_tier2 ? 'Tier 2 aktif — klik untuk nonaktifkan' : 'Tier 2 nonaktif — klik untuk aktifkan'}
+                      aria-label={`Tier 2 ${t.branch_code} ${t.chat_tier2 ? 'aktif' : 'nonaktif'}`}
+                      className={`inline-flex items-center gap-1 mr-1 px-2 py-1 rounded-md text-[11px] font-medium border transition-colors disabled:opacity-50 ${
+                        t.chat_tier2
+                          ? 'bg-success/10 border-success/20 text-success hover:bg-success/20'
+                          : 'bg-canvas border-hairline text-muted hover:text-ink hover:border-primary/40'
+                      }`}>
+                      {tier2Busy === t.branch_code
+                        ? <Loader2 size={11} className="animate-spin" />
+                        : null}
+                      Tier 2 {t.chat_tier2 ? 'ON' : 'OFF'}
+                    </button>
                     <button onClick={() => onManageKb(t)} disabled={processingKey === t.branch_code}
                       title="Knowledge Base" aria-label={`Knowledge Base ${t.branch_code}`}
                       className="p-1.5 text-muted hover:text-primary hover:bg-surface-soft rounded-md disabled:opacity-50">
