@@ -4,7 +4,8 @@ from contextlib import asynccontextmanager
 import logging
 
 from app.core.database import get_core_pool, close_core_pool, get_redis
-from app.routers import auth, admin
+from app.routers import auth, admin, chat
+from app.services.tenant_pool import get_tenant_pool_manager
 
 logging.basicConfig(level=logging.INFO)
 
@@ -21,6 +22,7 @@ async def lifespan(app: FastAPI):
         logging.warning(f"Redis tidak tersedia, startup lanjut tanpa Redis: {e}")
     yield
     # Shutdown
+    await get_tenant_pool_manager().close_all()  # F2.4: pool tenant LRU
     await close_core_pool()
     logging.info("Shutdown complete.")
 
@@ -42,6 +44,7 @@ app.add_middleware(
 # Register Routers
 app.include_router(auth.router)
 app.include_router(admin.router)
+app.include_router(chat.router)
 
 @app.get("/")
 async def root():

@@ -63,3 +63,39 @@ async def require_admin_role(credentials: HTTPAuthorizationCredentials = Depends
             detail="Akses ditolak: Memerlukan role 'admin'."
         )
     return payload
+
+
+async def require_user_role(credentials: HTTPAuthorizationCredentials = Depends(oauth2_scheme)):
+    # Guard chat (F3): kebalikan require_admin_role — admin TIDAK punya akses
+    # chat (keputusan domain 2026-08-31: admin = pengatur sistem, tanpa cabang).
+    # Pola sama persis: token -> cek user masih ada & aktif di DB.
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+    except ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token sudah kadaluarsa. Silakan login ulang."
+        )
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token tidak valid. Silakan login ulang."
+        )
+
+    user_id = payload.get("user_id")
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token tidak valid.")
+    try:
+        from app.core.database import get_core_pool
+        pool = await get_core_pool()
+        row = await pool.fetchrow("SELECT role, is_active FROM users WHERE id = $1", user_id)
+    except Exception:
+        # DB bermasalah: jangan biarkan request lewat hanya berdasarkan klaim token
+        raise HTTPException(status_code=503, detail="Layanan verifikasi sedang tidak tersedia.")
+    if not row or not row["is_active"] or row["role"] != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Akses ditolak: fitur chat hanya untuk role 'user'."
+        )
+    return payload
