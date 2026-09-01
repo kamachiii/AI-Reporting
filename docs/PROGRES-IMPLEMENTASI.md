@@ -2,7 +2,7 @@
 
 > Dokumen kontinuitas: dibaca PERTAMA kali oleh AI/engineer yang melanjutkan kerja.
 > Update dokumen ini SETIAP selesai satu fase. Jangan hapus riwayat — tambahkan.
-> Terakhir diperbarui: 2026-09-01 (F2.2 selesai).
+> Terakhir diperbarui: 2026-09-01 (F2.4 + F3 selesai).
 
 ## 0. Cara cepat paham konteks (5 menit)
 
@@ -23,7 +23,8 @@
 F2.0  Knowledge base                 ← SELESAI (lihat §3)
 F2.3' Verifier v2 (gerbang #1–#5)    ← SELESAI (lihat §3b)
 F2.2  SQL Composer Tier 1             SELESAI (lihat 3c)
-F3    Chat API (Tier 1 + SQL Memory replay)   <- BERIKUTNYA
+F2.4  Query Executor (gerbang #6)        SELESAI (lihat 3d)
+F3    Chat API (Tier 1 + SQL Memory replay) SELESAI (lihat 3d)
 F2.5  Generator Tier 2 + SQL Memory tulis + eval harness
 F4    UI chat lengkap (level keyakinan, lihat SQL, feedback)
 F5    Mode laporan + export
@@ -39,7 +40,7 @@ F6    Hardening (kuota, Redis rate limit, cache, metrik)
 | **F2.0 Knowledge Base** | ✅ | (lihat git log) | KB = JSONB `tenants.knowledge_base`; endpoint admin CRUD + dry-run validate; 20 test unit; round-trip HTTP lolos; migration idempotent 2x |
 | **F2.3' Verifier v2** | ✅ | (lihat git log) | Gerbang #1–#4 offline (`sql_guard.verify_sql`) + #5 EXPLAIN (`query_verifier.verify_query`); 30 kasus positif + 49 kasus serangan; 163 test lulus; `tabel_dilarang` KB terintegrasi |
 | **F2.2 Composer** | selesai | (lihat git log) | `sql_composer.py`: `validate_plan` + `compose_sql` (deterministik, params $1..$n, auto-join FK path, preset waktu dari `now`, belt-and-suspenders `verify_sql`); 91 test baru (total 254); 4 cacat dari run terputus ditemukan & diperbaiki (lihat 3c) |
-| F3 Chat API | ⬜ belum | — | Juga: sambungkan `askAssistant` mock → endpoint; pindahkan pipeline stage names |
+| **F2.4 + F3 Executor & Chat API** | selesai | `7b09158` | Pipeline end-to-end: planner LLM (retry 1x, config user>tenant>global) -> composer -> verifier -> executor (READ ONLY + timeout 10s + cap 500); POST /chat/query + GET /chat/history (guard user, isolasi allowed_branches, rate limit); sql_memory replay (verifier tetap jalan, auto-stale); 62 test baru (total 316); smoke nyata vs DB tenant (source=memory, rows nyata) |
 | F2.5 Tier 2 + eval | ⬜ belum | — | Jangan mulai sebelum verifier teruji |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
@@ -159,6 +160,50 @@ presentasional tak memengaruhi SQL, urutan params), negatif (skema asing, agg/op
 alias jahat, field asing, FK tak terhubung & tak berarah, preset tanpa now, injection
 masuk params bukan SQL), determinisme byte-per-byte.
 
+## 3d. Detail F2.4 + F3 (yang baru selesai) - penting untuk F4/F2.5
+
+**Alur POST /chat/query** (guard `require_user_role`, admin=403):
+  body {question, branch_code} -> cek allowed_branches token (403) -> rate limit 10/60dtk
+  -> load tenant by branch (join tenants+db_connections; 409 bila tak ada/nonaktif/belum
+  introspeksi) -> resolve ai_config user>tenant>global (503 bila kosong)
+  -> normalisasi pertanyaan (lowercase, tanda baca->spasi, collapse)
+  -> memory HIT (approved): verify_and_execute SQL tersimpan (VERIFIER TETAP JALAN),
+     params dihitung ulang dari plan_json (jendela waktu relatif); komposisi ulang !=
+     SQL tersimpan / verifier menolak -> status stale + lanjut MISS
+  -> MISS: plan_query (LLM #1, injectable llm_call_fn, retry 1x dgn feedback; PlanningError=502)
+     -> compose_sql (now=TZ server) -> verify_and_execute -> upsert sql_memory pending
+  -> conversation per user+branch + 2 pesan (assistant menyimpan SQL+rows JSON)
+  -> audit SELALU (sukses/rejected/error) -> response {source, confidence, sql, params,
+     columns, rows, row_count, truncated, duration_ms}
+
+**Keputusan penting:**
+- SQL berparameter: profil verifier v1 belum kenal node Parameter -> gerbang #1-#5 dijalankan
+  pada teks NULL (ganti_placeholder_null); SEBELUM eksekusi struktur SQL asli dibuktikan
+  identik dgn final_sql (parse, Parameter->Null, bandingkan render) - fail-closed.
+- Konversi JSON: Decimal->float, date/datetime->ISO str, UUID/bytes->str.
+- Row cap: fetch row_cap+1; lebih -> truncated=true (baris ke-501 dibuang).
+- TenantPoolManager: LRU maks 8 pool, max_size=2, idle sweep 600dtk lazy; close_all saat
+  shutdown; kredensial Fernet dari db_connections; interface tunggal (siap deployment B).
+- Memory write: upsert berkunci (tenant, pertanyaan_ternormalisasi, sql); status tidak
+  pernah diturunkan. Konfirmasi pending->approved = F4 (tombol 'Jawaban benar') / admin.
+- Error map: PlanningError 502; verifier tolak 422 (gate+reason); timeout 504; tanpa
+  config 503; tenant bermasalah 409; semua ter-audit.
+
+**Bug yang tertangkap saat integrasi nyata (bukti smoke):**
+1. Komentar migration 006 memuat ';' - jebakan 4.2 (sudah didokumentasi, terulang lagi).
+2. get_pool mencari kunci 'id' vs baris join 'db_connection_id' - diterima keduanya.
+3. _buat_pool KeyError 'id' - cid diresolusi eksplisit.
+4. json.dumps pesan assistant gagal krn params berisi date - konversi sebelum simpan.
+
+**Bukti integrasi nyata**: init_db 2x idempotent (006 ter-apply); uvicorn :8010; login
+user_jkt; seed 1 entri approved; POST /chat/query -> source=memory, confidence=A,
+rows=[[2]] (DB tenant aleza-si); admin 403; history 6 pesan; audit 3 sukses;
+times_used=3; normalisasi tahan kapitalisasi & tanda baca. Jejak smoke dibersihkan.
+
+**Belum dikerjakan (urutan berikutnya)**: F4 UI chat nyata (tukar askAssistant mock ->
+POST /chat/query; tampilkan SQL+confidence; tombol 'Jawaban benar' -> endpoint konfirmasi
+memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval harness.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -202,7 +247,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
       #4 budget kompleksitas, #5 EXPLAIN pre-flight — SELESAI (lihat §3b).
       `tabel_dilarang` dari KB sudah terintegrasi (parameter `kb_forbidden`).
 - [x] F2.2 SQL Composer Tier 1 - SELESAI (lihat 3c).
-- [ ] F2.4 Executor: eksekusi terkurung (gerbang #6) memakai
+- [x] F2.4 Executor: gerbang #6 via `query_executor.verify_and_execute` - SELESAI (lihat 3d).
       `query_verifier.verify_query` — verdict + `detail["final_sql"]` sudah disiapkan.
 - [ ] Keputusan terbuka v2 §11 (ambang eval 95%, normalisasi replay, retensi, number check numerik).
 - [ ] Pembersihan repo (belum tereksekusi): `git rm --cached frontend/test-results/.last-run.json`
