@@ -2,7 +2,7 @@
 
 > Dokumen kontinuitas: dibaca PERTAMA kali oleh AI/engineer yang melanjutkan kerja.
 > Update dokumen ini SETIAP selesai satu fase. Jangan hapus riwayat — tambahkan.
-> Terakhir diperbarui: 2026-09-01 (F2.3' selesai).
+> Terakhir diperbarui: 2026-09-01 (F2.2 selesai).
 
 ## 0. Cara cepat paham konteks (5 menit)
 
@@ -22,8 +22,8 @@
 ```
 F2.0  Knowledge base                 ← SELESAI (lihat §3)
 F2.3' Verifier v2 (gerbang #1–#5)    ← SELESAI (lihat §3b)
-F2.2  SQL Composer Tier 1            ← BERIKUTNYA
-F3    Chat API (Tier 1 + SQL Memory replay)
+F2.2  SQL Composer Tier 1             SELESAI (lihat 3c)
+F3    Chat API (Tier 1 + SQL Memory replay)   <- BERIKUTNYA
 F2.5  Generator Tier 2 + SQL Memory tulis + eval harness
 F4    UI chat lengkap (level keyakinan, lihat SQL, feedback)
 F5    Mode laporan + export
@@ -38,7 +38,7 @@ F6    Hardening (kuota, Redis rate limit, cache, metrik)
 | Draft desain v2 disetujui | ✅ | `0b098fb` | `docs/PERANCANGAN-PIPELINE-AI-v2.md` |
 | **F2.0 Knowledge Base** | ✅ | (lihat git log) | KB = JSONB `tenants.knowledge_base`; endpoint admin CRUD + dry-run validate; 20 test unit; round-trip HTTP lolos; migration idempotent 2x |
 | **F2.3' Verifier v2** | ✅ | (lihat git log) | Gerbang #1–#4 offline (`sql_guard.verify_sql`) + #5 EXPLAIN (`query_verifier.verify_query`); 30 kasus positif + 49 kasus serangan; 163 test lulus; `tabel_dilarang` KB terintegrasi |
-| F2.2 Composer | ⬜ belum | — | |
+| **F2.2 Composer** | selesai | (lihat git log) | `sql_composer.py`: `validate_plan` + `compose_sql` (deterministik, params $1..$n, auto-join FK path, preset waktu dari `now`, belt-and-suspenders `verify_sql`); 91 test baru (total 254); 4 cacat dari run terputus ditemukan & diperbaiki (lihat 3c) |
 | F3 Chat API | ⬜ belum | — | Juga: sambungkan `askAssistant` mock → endpoint; pindahkan pipeline stage names |
 | F2.5 Tier 2 + eval | ⬜ belum | — | Jangan mulai sebelum verifier teruji |
 
@@ -115,6 +115,50 @@ F6    Hardening (kuota, Redis rate limit, cache, metrik)
 - `tenant_conn_factory` = async callable () -> koneksi; verifier TIDAK menutup
   koneksi (pemilik pool yang mengelola) — kontrak terdokumentasi di docstring.
 
+## 3c. Detail F2.2 SQL Composer (yang baru selesai) - penting untuk F3
+
+**Kontrak rencana JSON (dipakai prompt planner F3):**
+```jsonc
+{
+  "tables":   ["penjualan", "kendaraan"],   // >=1; tables[0] utama; sisanya via FK path
+  "columns":  ["penjualan.tanggal", {"agg": "SUM", "column": "penjualan.harga_deal", "alias": "omzet"}],
+  "filters":  [{"column": "penjualan.metode_pembayaran", "op": "eq", "value": "cash"}],
+  "time_range": {"field": "penjualan.tanggal", "preset": "this_month"},  // ATAU {"field", "from", "to"}
+  "group_by": ["kendaraan.merek"],
+  "order_by": [{"by": "omzet", "dir": "DESC"}],  // by = alias SELECT atau kolom tabel
+  "limit": 50,                                // clamp 1..500; default 200
+  "distinct": false
+}
+```
+
+**API:**
+- `validate_plan(plan, schema_config) -> (clean_plan, errors)` - ketat, error per indeks.
+- `compose_sql(plan, schema_config, now=None) -> {"sql", "params", "used_tables", "limit"}`
+  - DETERMINISTIK (plan+now sama -> SQL byte-identik); urutan bagian selalu
+    SELECT->FROM->JOIN->WHERE->GROUP BY->ORDER BY->LIMIT.
+  - SEMUA nilai jadi parameter asyncpg $1..$n (urut: filter lalu time_range) -
+    SQL string TIDAK PERNAH memuat nilai literal (injection via value terbukti aman).
+  - Preset waktu dihitung dari `now` yang DI-INJECT pemanggil (keputusan TZ di pemanggil;
+    preset tanpa now = error). `now` beda -> hanya PARAMS yang berubah, teks SQL sama.
+  - Kolom wajib qualified `tabel.kolom`; tabel perantara auto-join via BFS FK path.
+  - Belt-and-suspenders: hasil wajib lolos `verify_sql()` (sql_guard) - composer yang
+    benar selalu lolos; gagal = raise (bug composer, bukan lubang keamanan).
+  - `ganti_placeholder_null(sql)` HANYA untuk verifikasi offline (node Parameter belum
+    terdaftar profil verifier v1) - JANGAN untuk eksekusi.
+
+**Bug yang ditemukan & diperbaiki saat audit (file dari run terputus):**
+1. `_fk_join_chain`: loop kedalaman meng-unpack entri root `{root: None}` -> TypeError
+   (observed via smoke test). Fix: guard `entri is None`.
+2. Cacat A: `validate_plan` membuang `value` filter di clean plan -> compose selalu gagal.
+3. Cacat B1/B2: `op`/`preset` bertipe unhashable (mis. list) memicu TypeError, bukan
+   error validasi. Fix: guard tipe -> masuk daftar errors.
+
+**Test**: `backend/tests/test_sql_composer.py` - 91 kasus (32 fungsi, sebagian parametrize):
+positif (semua preset, FK chain 3 tabel, auto-join perantara, clamp, distinct, field
+presentasional tak memengaruhi SQL, urutan params), negatif (skema asing, agg/op asing,
+alias jahat, field asing, FK tak terhubung & tak berarah, preset tanpa now, injection
+masuk params bukan SQL), determinisme byte-per-byte.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -132,6 +176,9 @@ F6    Hardening (kuota, Redis rate limit, cache, metrik)
 7. **CI**: frontend lint+build; backend compileall + import app.main + pytest. Playwright e2e
    TIDAK jalan di CI (manual saja). Snapshot visual berbasis win32.
 8. Migration 005 sudah ter-apply ke DB dev docker (`dms_pg`) + teruji idempotent 2x.
+9. File besar dari run AI terputus WAJIB di-smoke-test dini (jangan tunggu semua selesai)
+   - file 700+ baris F2.2 pertama ternyata mengandung 4 bug dan belum pernah dieksekusi.
+   Sisa file probe/debug (`_*.py`) harus dibersihkan sebelum commit.
    Kolom KB di DB dev sengaja dikembalikan NULL setelah round-trip test.
 
 ## 5. Checklist verifikasi standar (jalankan SETIAP selesai fase)
@@ -154,6 +201,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] F2.3' Verifier v2: gerbang #2 whitelist AST menyeluruh, #3 profil fitur versioned,
       #4 budget kompleksitas, #5 EXPLAIN pre-flight — SELESAI (lihat §3b).
       `tabel_dilarang` dari KB sudah terintegrasi (parameter `kb_forbidden`).
+- [x] F2.2 SQL Composer Tier 1 - SELESAI (lihat 3c).
 - [ ] F2.4 Executor: eksekusi terkurung (gerbang #6) memakai
       `query_verifier.verify_query` — verdict + `detail["final_sql"]` sudah disiapkan.
 - [ ] Keputusan terbuka v2 §11 (ambang eval 95%, normalisasi replay, retensi, number check numerik).
