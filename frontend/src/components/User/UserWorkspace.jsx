@@ -132,7 +132,7 @@ function PipelineIndicator({ stageIndex }) {
 }
 
 /** Satu gelembung pesan: pesan user (kanan) atau balasan asisten (kiri). */
-function MessageBubble({ message, feedbackBusy, onFeedback }) {
+function MessageBubble({ message, feedbackBusy, onAsk, onFeedback }) {
   if (message.role === 'user') {
     return (
       <motion.div
@@ -174,6 +174,7 @@ function MessageBubble({ message, feedbackBusy, onFeedback }) {
             createdAt={message.createdAt}
             memoryStatus={message.memoryStatus}
             feedbackBusy={feedbackBusy}
+            onAsk={onAsk}
             onConfirm={() => onFeedback(message.id, 'confirm')}
             onReject={() => onFeedback(message.id, 'reject')}
           />
@@ -348,6 +349,7 @@ export default function UserWorkspace({ user, onLogout }) {
               key={m.id}
               message={m}
               feedbackBusy={feedbackBusy}
+              onAsk={handleSend}
               onFeedback={handleFeedback}
             />
           ))}

@@ -218,14 +218,16 @@ class FakeCorePool:
                 "branch_code": args[1], "title": args[2]})
             return self.next_id
         if "INSERT INTO sql_memory" in sql:
-            tenant_id, q_norm, sql_txt, plan_json, sumber, fingerprint = args
+            tenant_id, q_norm, sql_txt, plan_json, sumber, fingerprint, \
+                ringkasan, saran = args
             self.next_id += 1
             self.sql_memory.append({
                 "id": self.next_id, "tenant_id": tenant_id,
                 "pertanyaan_ternormalisasi": q_norm, "sql": sql_txt,
                 "plan_json": plan_json, "status": "pending", "sumber": sumber,
                 "times_used": 0, "last_used": None,
-                "fingerprint_tabel": fingerprint})
+                "fingerprint_tabel": fingerprint,
+                "ringkasan": ringkasan, "saran": saran})
             return self.next_id
         raise AssertionError(f"fetchval tak dikenal: {sql[:90]}")
 
@@ -243,6 +245,9 @@ class FakeCorePool:
                         row["status"] = args[0]
                     elif "SET plan_json" in sql:
                         row["plan_json"], row["sumber"], row["fingerprint_tabel"] = args[0], args[1], args[2]
+                    elif "SET ringkasan" in sql:
+                        # F2.5 self-heal ringkasan replay
+                        row["ringkasan"], row["saran"] = args[0], args[1]
             return "OK"
         if "INSERT INTO audit_logs" in sql:
             self.audit_logs.append({
@@ -269,14 +274,15 @@ class FakeCorePool:
         raise AssertionError(f"fetch tak dikenal: {sql[:90]}")
 
     def seed_memory(self, *, q_norm, sql, plan_json=None, status="approved",
-                    times_used=0, tenant_id=3):
+                    times_used=0, tenant_id=3, ringkasan=None, saran=None):
         self.next_id += 1
         self.sql_memory.append({
             "id": self.next_id, "tenant_id": tenant_id,
             "pertanyaan_ternormalisasi": q_norm, "sql": sql,
             "plan_json": plan_json, "status": status, "sumber": "tier1",
             "times_used": times_used, "last_used": None,
-            "fingerprint_tabel": "penjualan"})
+            "fingerprint_tabel": "penjualan",
+            "ringkasan": ringkasan, "saran": saran})
         return self.sql_memory[-1]
 
     def seed_config_global(self):

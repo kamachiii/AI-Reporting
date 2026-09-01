@@ -36,6 +36,12 @@ Urutan tahap (milestone perangkuman):
     duration_ms, memory_id} — memory_id = id baris sql_memory PENDING yang
     baru dibuat (hanya jalur tier1; null untuk replay, karena entri replay
     sudah approved dan tidak butuh konfirmasi user).
+8.  F2.5 presenter (ringkasan + saran): tier1 menjalankan buat_ringkasan
+    (LLM #2, fail-open ke template) SEBELUM upsert agar ikut tersimpan di
+    sql_memory; replay memakai ringkasan tersimpan (metode "cache") atau
+    self-heal sekali bila NULL. Response menambah field {ringkasan, saran,
+    metode} — metode: "llm" | "template" | "cache". Kegagalan presenter
+    TIDAK PERNAH menggagalkan jawaban (log + lanjut tanpa ringkasan).
 
 F4 (tombol UI chat): `ubah_status_memory` menaikkan/menolak entri pending —
 confirm: pending -> approved (approved = no-op sukses); reject: pending ->
@@ -57,6 +63,7 @@ import re
 from datetime import datetime
 
 from app.services.knowledge_base import parse_stored_kb
+from app.services.presenter import buat_ringkasan
 from app.services.query_executor import verify_and_execute
 from app.services.query_planner import AIConfigError, PlanningError, plan_query, \
     resolve_ai_config
@@ -242,7 +249,8 @@ async def resolve_tenant(core_pool, branch_code: str) -> dict:
 async def cari_memory_approved(core_pool, tenant_id: int, q_norm: str):
     """Entri sql_memory approved terbaik untuk pertanyaan ini (atau None)."""
     return await core_pool.fetchrow(
-        "SELECT id, sql, plan_json, times_used, fingerprint_tabel "
+        "SELECT id, sql, plan_json, times_used, fingerprint_tabel, "
+        "ringkasan, saran "
         "FROM sql_memory "
         "WHERE tenant_id = $1 AND pertanyaan_ternormalisasi = $2 "
         "  AND status = 'approved' "
@@ -267,14 +275,18 @@ async def tandai_memory_stale(core_pool, memory_id: int) -> None:
 
 async def simpan_memory_pending(core_pool, tenant_id: int, q_norm: str,
                                 sql: str, plan: dict, sumber: str,
-                                fingerprint_tabel: str | None) -> int:
+                                fingerprint_tabel: str | None,
+                                ringkasan: str | None = None,
+                                saran: list | None = None) -> int:
     """Upsert SQL baru (lolos verifier) berstatus 'pending' (mode auto v2 §7).
 
     "Upsert" pada kunci (tenant_id, pertanyaan_ternormalisasi, sql): entri
     yang sudah ada diperbarui plan/fingerprints-nya TANPA menurunkan status
     (approved tetap approved — menaikkan boleh, menurunkan tidak). Entri baru
     -> INSERT status 'pending'; konfirmasi user/admin yang mengangkat ke
-    'approved' (di luar jalur ini).
+    'approved' (di luar jalur ini). F2.5: ringkasan & saran hasil presenter
+    ikut disimpan agar replay tidak memanggil LLM lagi (NULL = self-heal
+    pada replay berikutnya).
     """
     lama = await core_pool.fetchrow(
         "SELECT id FROM sql_memory WHERE tenant_id = $1 AND "
@@ -283,17 +295,21 @@ async def simpan_memory_pending(core_pool, tenant_id: int, q_norm: str,
     if lama:
         await core_pool.execute(
             "UPDATE sql_memory SET plan_json = $1, sumber = $2, "
-            "fingerprint_tabel = $3, updated_at = CURRENT_TIMESTAMP "
-            "WHERE id = $4",
+            "fingerprint_tabel = $3, ringkasan = $4, saran = $5, "
+            "updated_at = CURRENT_TIMESTAMP "
+            "WHERE id = $6",
             json.dumps(plan, ensure_ascii=False), sumber, fingerprint_tabel,
+            ringkasan, json.dumps(saran, ensure_ascii=False)
+            if saran is not None else None,
             lama["id"])
         return lama["id"]
     return await core_pool.fetchval(
         "INSERT INTO sql_memory (tenant_id, pertanyaan_ternormalisasi, sql, "
-        "plan_json, status, sumber, fingerprint_tabel) "
-        "VALUES ($1, $2, $3, $4, 'pending', $5, $6) RETURNING id",
+        "plan_json, status, sumber, fingerprint_tabel, ringkasan, saran) "
+        "VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7, $8) RETURNING id",
         tenant_id, q_norm, sql, json.dumps(plan, ensure_ascii=False), sumber,
-        fingerprint_tabel)
+        fingerprint_tabel, ringkasan,
+        json.dumps(saran, ensure_ascii=False) if saran is not None else None)
 
 
 # --- F4: konfirmasi / penolakan entri pending dari tombol UI chat ----------
@@ -446,6 +462,86 @@ def _bentuk_response(source: str, confidence: str, sql: str, params,
 
 
 # ===========================================================================
+# F2.5 — presenter (ringkasan + saran) pada tier1 & replay
+# ===========================================================================
+def _saring_saran(raw) -> list[str]:
+    """Kolom JSONB `saran` dari DB -> list[str] bersih (maks 3, buang kosong).
+
+    asyncpg pool inti tanpa codec JSON mengembalikan str — pola
+    _parse_json_mungkin_str; bentuk lain/rusak -> [] (tidak menjatuhkan
+    replay hanya karena saran tersimpan rusak)."""
+    data = _parse_json_mungkin_str(raw)
+    if not isinstance(data, list):
+        return []
+    return [s.strip() for s in data if isinstance(s, str) and s.strip()][:3]
+
+
+async def _ringkasan_replay(core_pool, entri, question: str, result: dict,
+                            username: str, branch_code: str,
+                            llm_call_fn=None) -> tuple:
+    """Ringkasan untuk jalur replay (F2.5): (ringkasan, saran, metode).
+
+    - baris memory PUNYA ringkasan -> pakai apa adanya (metode "cache",
+      0 panggilan LLM, 0 resolve config).
+    - ringkasan NULL -> self-heal: presenter dijalankan SEKALI lalu hasilnya
+      di-UPDATE ke baris memory itu (replay berikutnya sudah cache). Resolve
+      ai_config gagal -> tanpa LLM (kasus trivial tetap dapat template,
+      sisanya ringkasan None). Semua kegagalan presenter/log DB hanya
+      di-log — replay tidak pernah gagal karena pelapis presentasi.
+    """
+    tersimpan = entri["ringkasan"]
+    if tersimpan:
+        return tersimpan, _saring_saran(entri["saran"]), "cache"
+
+    ai_config = None
+    try:
+        ai_config = await resolve_ai_config(core_pool, username, branch_code)
+    except Exception as e:  # AIConfigError/dekripsi -> lanjut tanpa LLM
+        logger.warning("chat_pipeline: replay tanpa ai_config: %s", e)
+    try:
+        pres = await buat_ringkasan(
+            question, result["columns"], result["rows"],
+            result["row_count"], ai_config, llm_call_fn=llm_call_fn)
+    except Exception as e:  # belt-and-suspenders: presenter fail-open
+        logger.error("chat_pipeline: presenter replay gagal: %s", e)
+        pres = {"ringkasan": None, "saran": [], "metode": "template"}
+    try:
+        await core_pool.execute(
+            "UPDATE sql_memory SET ringkasan = $1, saran = $2, "
+            "updated_at = CURRENT_TIMESTAMP WHERE id = $3",
+            pres["ringkasan"],
+            json.dumps(pres["saran"], ensure_ascii=False)
+            if pres["saran"] else None,
+            entri["id"])
+    except Exception as e:
+        logger.error("chat_pipeline: gagal self-heal ringkasan memory: %s", e)
+    return pres["ringkasan"], pres["saran"], pres["metode"]
+
+
+async def _ringkasan_tier1(question: str, result: dict, ai_config: dict,
+                           llm_call_fn=None) -> tuple:
+    """Ringkasan untuk jalur tier1 — presenter dengan ai_config ter-resolve;
+    exception apa pun (tidak diharapkan: presenter fail-open) hanya di-log.
+    Mengembalikan TUPLE (ringkasan, saran, metode) — kontrak sama dengan
+    _ringkasan_replay (dict presenter dibongkar di sini, bukan di pemanggil)."""
+    try:
+        pres = await buat_ringkasan(
+            question, result["columns"], result["rows"],
+            result["row_count"], ai_config, llm_call_fn=llm_call_fn)
+        return pres["ringkasan"], pres["saran"], pres["metode"]
+    except Exception as e:
+        logger.error("chat_pipeline: presenter tier1 gagal: %s", e)
+        return None, [], "template"
+
+
+def _pasang_ringkasan(response: dict, ringkasan, saran, metode) -> None:
+    """Tambah field F2.5 ke response (ikut tersimpan di pesan assistant)."""
+    response["ringkasan"] = ringkasan
+    response["saran"] = saran
+    response["metode"] = metode
+
+
+# ===========================================================================
 # Pipeline utama
 # ===========================================================================
 async def proses_pertanyaan(core_pool, tenant_pool_manager, user: dict,
@@ -546,6 +642,11 @@ async def proses_pertanyaan(core_pool, tenant_pool_manager, user: dict,
                 response = _bentuk_response(_SOURCE_MEMORY, _CONF_A,
                                             sql_tersimpan, params,
                                             hasil["result"])
+                # F2.5: ringkasan dari cache memory, atau self-heal sekali
+                # bila masih NULL (lihat _ringkasan_replay).
+                _pasang_ringkasan(response, *(await _ringkasan_replay(
+                    core_pool, entri, question, hasil["result"],
+                    user["username"], branch_code, llm_call_fn=llm_call_fn)))
 
         # ---------- Tahap 4: MISS -> planner + composer (panggilan #1) -----
         if entri is None or not pakai_memory:
@@ -567,12 +668,18 @@ async def proses_pertanyaan(core_pool, tenant_pool_manager, user: dict,
             durasi_ms = hasil["result"]["duration_ms"]
             fingerprint = ",".join(
                 hasil["verdict"]["detail"].get("tabel_direferensikan") or [])
+            # F2.5: ringkasan + saran (LLM #2, fail-open ke template) dibentuk
+            # SEBELUM upsert agar ikut tersimpan di sql_memory.
+            ringkasan, saran, metode_r = await _ringkasan_tier1(
+                question, hasil["result"], ai_config, llm_call_fn=llm_call_fn)
             memory_id_baru = await simpan_memory_pending(
                 core_pool, tenant["tenant_id"], q_norm, sql_final, plan,
-                sumber=_SOURCE_TIER1, fingerprint_tabel=fingerprint)
+                sumber=_SOURCE_TIER1, fingerprint_tabel=fingerprint,
+                ringkasan=ringkasan, saran=saran)
             response = _bentuk_response(_SOURCE_TIER1, _CONF_B, sql_final,
                                         composed["params"], hasil["result"],
                                         memory_id=memory_id_baru)
+            _pasang_ringkasan(response, ringkasan, saran, metode_r)
 
         # ---------- Tahap 6: percakapan (2 pesan) + audit sukses ----------
         cid = await ambil_atau_buat_conversation(
