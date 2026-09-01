@@ -2,7 +2,7 @@
 
 > Dokumen kontinuitas: dibaca PERTAMA kali oleh AI/engineer yang melanjutkan kerja.
 > Update dokumen ini SETIAP selesai satu fase. Jangan hapus riwayat — tambahkan.
-> Terakhir diperbarui: 2026-09-01 (F2.4 + F3 selesai).
+> Terakhir diperbarui: 2026-09-01 (F4 + F2.5 selesai; sistem LIVE).
 
 ## 0. Cara cepat paham konteks (5 menit)
 
@@ -41,6 +41,8 @@ F6    Hardening (kuota, Redis rate limit, cache, metrik)
 | **F2.3' Verifier v2** | ✅ | (lihat git log) | Gerbang #1–#4 offline (`sql_guard.verify_sql`) + #5 EXPLAIN (`query_verifier.verify_query`); 30 kasus positif + 49 kasus serangan; 163 test lulus; `tabel_dilarang` KB terintegrasi |
 | **F2.2 Composer** | selesai | (lihat git log) | `sql_composer.py`: `validate_plan` + `compose_sql` (deterministik, params $1..$n, auto-join FK path, preset waktu dari `now`, belt-and-suspenders `verify_sql`); 91 test baru (total 254); 4 cacat dari run terputus ditemukan & diperbaiki (lihat 3c) |
 | **F2.4 + F3 Executor & Chat API** | selesai | `7b09158` | Pipeline end-to-end: planner LLM (retry 1x, config user>tenant>global) -> composer -> verifier -> executor (READ ONLY + timeout 10s + cap 500); POST /chat/query + GET /chat/history (guard user, isolasi allowed_branches, rate limit); sql_memory replay (verifier tetap jalan, auto-stale); 62 test baru (total 316); smoke nyata vs DB tenant (source=memory, rows nyata) |
+| **F4 UI chat nyata + skema efektif** | selesai | `6961f3a` | UI chat -> POST /chat/query (badge keyakinan, Lihat SQL, Jawaban benar/salah); KB `tabel_diizinkan`+`kolom_dikecualikan` -> skema efektif per tenant (DB 2.387 tabel terkelola); prompt planner dipadatkan 37.648->9.109 chars (lolos TPM); live: Groq/GLM tier1 B + replay memory A |
+| **F2.5 Presenter + Number Check** | selesai | `653ea0c` | `presenter.py`: ringkasan maks 2 kalimat + saran lanjutan; NUMBER CHECK id-ID (ribuan titik/desimal koma/persen) — angka karangan ditolak, 1x retry, fallback template; migration 007 (sql_memory.ringkasan+saran); replay pakai cache = 0 LLM, self-heal bila kosong; UI: paragraf ringkasan + chip saran; 385 test |
 | F2.5 Tier 2 + eval | ⬜ belum | — | Jangan mulai sebelum verifier teruji |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
@@ -203,6 +205,23 @@ times_used=3; normalisasi tahan kapitalisasi & tanda baca. Jejak smoke dibersihk
 **Belum dikerjakan (urutan berikutnya)**: F4 UI chat nyata (tukar askAssistant mock ->
 POST /chat/query; tampilkan SQL+confidence; tombol 'Jawaban benar' -> endpoint konfirmasi
 memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval harness.
+
+## 3e. Detail F2.5 + status LIVE (2026-09-01)
+
+- Sistem LIVE: UI browser -> chat API -> planner (GLM 5.3-flash via B.AI utk tester01;
+  Groq pernah dipakai) -> composer -> verifier -> executor -> presenter -> DB Backup nyata
+  (2.387 tabel). Data & jawaban tervalidasi live.
+- Skema efektif per tenant: KB `tabel_diizinkan` (wajib utk skema besar; >150 tabel tanpa
+  allowlist = 422 gate skema) + `kolom_dikecualikan` (sembunyikan kolom sensitif).
+- Prompt planner padat: kolom `nama:tipe` satu string per tabel + FK `kol -> tabel.kol` +
+  peta tipe singkat; 37.648 -> 9.109 chars (76% hemat) utk 11 tabel x 70 kolom.
+- Presenter: LLM #2 ringkasan maks 2 kalimat + 2-3 saran; NUMBER CHECK mekanis id-ID;
+  karangan -> retry 1x -> fallback template (fail-open, tidak pernah menggagalkan query);
+  ringkasan di-cache di sql_memory (migration 007) -> replay 0 LLM; metode response:
+  llm | template | cache.
+- Konfigurasi AI: user > tenant > global; B.AI rate limit harian bisa 503
+  (activity_cost_limit_reached) — error ter-audit; pemakaian live menyusul konfigurasi
+  admin (UI chat sudah dipakai user nyata untuk pertanyaan pembelian/penjualan/customer).
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
