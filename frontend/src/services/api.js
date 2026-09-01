@@ -209,9 +209,42 @@ export const api = {
     return response.data;
   },
   testAIConfigDraft: async (api_type, base_url, api_key, config_id) => {
-    const response = await apiClient.post('/admin/ai-configs/test-draft', { 
-      api_type, base_url, api_key, config_id 
+    const response = await apiClient.post('/admin/ai-configs/test-draft', {
+      api_type, base_url, api_key, config_id
     });
+    return response.data;
+  },
+
+  // ==========================================
+  // 5. CHAT USER (F4) — pipeline AI nyata
+  // ==========================================
+  // Jawaban: {source, confidence, sql, params, columns, rows, row_count,
+  //           truncated, duration_ms, memory_id}
+  // memory_id hanya terisi untuk jawaban baru (SQL memory pending) —
+  // dipakai tombol feedback "Jawaban benar/salah".
+  askAssistant: async (branchCode, question) => {
+    // Timeout 60 dtk: planner LLM + verifikasi + eksekusi query tenant
+    const response = await apiClient.post('/chat/query',
+      { branch_code: branchCode, question }, { timeout: 60000 });
+    return response.data;
+  },
+  // Riwayat percakapan: {conversation_id, messages: [{role, content,
+  // created_at}]} — content pesan assistant berupa JSON string jawaban.
+  fetchChatHistory: async (branchCode) => {
+    const response = await apiClient.get('/chat/history',
+      { params: { branch_code: branchCode } });
+    return response.data;
+  },
+  // Feedback jawaban (F4): hanya berlaku bila response punya memory_id.
+  // Return {ok, status}; 409 bila transisi status dilarang.
+  confirmMemory: async (branchCode, memoryId) => {
+    const response = await apiClient.post('/chat/confirm-memory',
+      { branch_code: branchCode, memory_id: memoryId });
+    return response.data;
+  },
+  rejectMemory: async (branchCode, memoryId) => {
+    const response = await apiClient.post('/chat/reject-memory',
+      { branch_code: branchCode, memory_id: memoryId });
     return response.data;
   },
 };

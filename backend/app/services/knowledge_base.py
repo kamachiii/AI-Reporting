@@ -6,17 +6,24 @@ Bentuk data mengikuti docs/PERANCANGAN-PIPELINE-AI.md §3 (satu kolom JSONB
 Modul ini murni load/validate/normalize — TIDAK ada eksekusi SQL dinamis;
 semua query memakai parameter asyncpg ($1, $2, ...).
 
-CATATAN `tabel_dilarang`: saat ini HANYA disimpan (dikelola lewat form admin).
-Perilaku sql_guard/verifier BELUM diubah oleh isinya — integrasinya ke
-whitelist verifier SQL menyusul di fase verifier (F2.3' perancangan v2 §10).
+CATATAN `tabel_dilarang` / `tabel_diizinkan` / `kolom_dikecualikan`: isinya
+dipakai pipeline chat (chat_pipeline) — `tabel_dilarang` masuk whitelist
+verifier (kb_forbidden), `tabel_diizinkan` menyaring skema efektif yang
+dilihat planner/composer/verifier (tenant skema raksasa tetap terpakai),
+`kolom_dikecualikan` membuang kolom tak relevan (api key, token, logo, ...)
+dari skema efektif itu. Modul ini sendiri tetap murni
+load/validate/normalize — TIDAK ada eksekusi SQL dinamis; semua query memakai
+parameter asyncpg ($1, $2, ...).
 """
 import json
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
 # Field tingkat atas yang dikenal — field lain = error (validasi ketat).
-KNOWN_KEYS = ("glossary", "catatan_kolom", "nilai_map", "contoh_tanya", "tabel_dilarang")
+KNOWN_KEYS = ("glossary", "catatan_kolom", "nilai_map", "contoh_tanya",
+              "tabel_dilarang", "tabel_diizinkan", "kolom_dikecualikan")
 
 # Struktur kosong default: dipakai saat kolom NULL / tenant belum mengisi KB.
 EMPTY_KB = {
@@ -25,7 +32,19 @@ EMPTY_KB = {
     "nilai_map": {},
     "contoh_tanya": [],
     "tabel_dilarang": [],
+    "tabel_diizinkan": [],
+    "kolom_dikecualikan": [],
 }
+
+# Pola ident aman untuk nama tabel pada tabel_diizinkan (allowlist). Allowlist
+# HANYA menyaring nama tabel hasil introspeksi (tidak pernah membuat entri
+# baru), jadi pola ini lapisan kebersihan data — bukan garis keamanan SQL.
+_IDENT_TABEL_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# Pola `tabel.kolom` untuk kolom_dikecualikan — lapisan kebersihan data yang
+# sama (pemakaian di pipeline hanya membuang kolom dari skema efektif).
+_IDENT_KOLOM_RE = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$")
 
 # Field yang boleh ada di satu entri glossary / contoh_tanya.
 GLOSSARY_FIELDS = ("istilah", "arti")
@@ -204,6 +223,65 @@ def _validate_tabel_dilarang(dilarang, errors: list[str]) -> list | None:
     return [t.strip() for t in dilarang]
 
 
+def _validate_tabel_diizinkan(diizinkan, errors: list[str]) -> list | None:
+    """Validasi bagian tabel_diizinkan (allowlist skema efektif per tenant).
+
+    Wajib array of string non-kosong berpola ident aman
+    ([A-Za-z_][A-Za-z0-9_]*) — error dilaporkan per indeks agar form admin
+    menunjuk entri yang salah. Nama yang tidak ada di skema tenant TIDAK
+    dianggap error di sini (skema bisa berubah; di pipeline nama tsb. cukup
+    diabaikan dengan catatan).
+    """
+    if not isinstance(diizinkan, list) or not all(
+            isinstance(t, str) for t in diizinkan):
+        errors.append("tabel_diizinkan: harus berupa array of string")
+        return None
+    ok = True
+    for i, nama in enumerate(diizinkan):
+        bersih = nama.strip()
+        if not bersih:
+            errors.append(f"tabel_diizinkan[{i}]: nama tabel tidak boleh kosong")
+            ok = False
+        elif not _IDENT_TABEL_RE.match(bersih):
+            errors.append(
+                f"tabel_diizinkan[{i}]: '{bersih}' bukan nama tabel yang valid "
+                "(hanya huruf, angka, underscore; tidak boleh diawali angka)")
+            ok = False
+    if not ok:
+        return None
+    return [t.strip() for t in diizinkan]
+
+
+def _validate_kolom_dikecualikan(dikecualikan, errors: list[str]) -> list | None:
+    """Validasi bagian kolom_dikecualikan (buang kolom dari skema efektif).
+
+    Wajib array of string berpola ident aman 'tabel.kolom'
+    ([A-Za-z_][A-Za-z0-9_]* di kedua sisi titik) — error dilaporkan per
+    indeks agar form admin menunjuk entri yang salah. Entri yang tidak ada
+    di skema tenant TIDAK dianggap error di sini (skema bisa berubah; di
+    pipeline entri tsb. cukup diabaikan).
+    """
+    if not isinstance(dikecualikan, list) or not all(
+            isinstance(t, str) for t in dikecualikan):
+        errors.append("kolom_dikecualikan: harus berupa array of string")
+        return None
+    ok = True
+    for i, entri in enumerate(dikecualikan):
+        bersih = entri.strip()
+        if not bersih:
+            errors.append(f"kolom_dikecualikan[{i}]: entri tidak boleh kosong")
+            ok = False
+        elif not _IDENT_KOLOM_RE.match(bersih):
+            errors.append(
+                f"kolom_dikecualikan[{i}]: '{bersih}' bukan format "
+                "'tabel.kolom' yang valid (hanya huruf, angka, underscore; "
+                "dipisah tepat satu titik)")
+            ok = False
+    if not ok:
+        return None
+    return [t.strip() for t in dikecualikan]
+
+
 # Peta field -> validator bagian; mengembalikan versi bersih bila bagian valid.
 _SECTION_VALIDATORS = {
     "glossary": _validate_glossary,
@@ -211,6 +289,8 @@ _SECTION_VALIDATORS = {
     "nilai_map": _validate_nilai_map,
     "contoh_tanya": _validate_contoh_tanya,
     "tabel_dilarang": _validate_tabel_dilarang,
+    "tabel_diizinkan": _validate_tabel_diizinkan,
+    "kolom_dikecualikan": _validate_kolom_dikecualikan,
 }
 
 
@@ -218,7 +298,7 @@ def validate_kb(payload) -> tuple[dict, list[str]]:
     """Validasi ketat payload KB (dari PUT admin / tombol Validasi).
 
     Returns:
-        (clean, errors) — clean = KB ternormalisasi penuh (5 field selalu ada)
+        (clean, errors) — clean = KB ternormalisasi penuh (7 field selalu ada)
         dan layak disimpan HANYA bila errors == []. Setiap pelanggaran
         dilaporkan per indeks/field agar mudah ditampilkan di form admin.
     """

@@ -1,15 +1,21 @@
-"""F3 — Router chat user: /chat/query + /chat/history.
+"""F3 — Router chat user: /chat/query + /chat/history (+ F4 confirm/reject).
 
 Guard berlapis (urutan eksekusi):
 1. `require_user_role` (app.core.security) — token valid + user role 'user'
    di DB; admin DITOLAK (403) — pola sama dengan require_admin_role.
-2. Rate limit in-memory per user_id (pola auth.py; 10 request / 60 dtk).
+2. Rate limit in-memory per user_id (pola auth.py; 10 request / 60 dtk) —
+   HANYA /chat/query (confirm/reject bersifat jarang & murah).
 3. branch_code WAJIB anggota `allowed_branches` pada token — selain itu 403
    (isolasi antar cabang berlapis dengan isolasi koneksi di pipeline).
 4. Pipeline (chat_pipeline.proses_pertanyaan) + pemetaan exception -> HTTP:
    TenantTidakAda/SkemaTidakTersedia -> 409, AIConfigError -> 503,
    PlanningError/SqlComposerError -> 502, VerifierDitolak -> 422 (gate+reason),
    QueryCanceledError (statement_timeout) -> 504, ExecutorError/sisanya -> 500.
+
+F4 — POST /chat/confirm-memory & /chat/reject-memory {branch_code, memory_id}:
+guard sama (role + allowed_branches), baris wajib milik tenant cabang itu
+(404 bila bukan) & transisi status diatur chat_pipeline.ubah_status_memory
+(status tidak pernah diturunkan; pelanggaran -> 409). Return {ok, status}.
 """
 import logging
 import time
@@ -22,7 +28,8 @@ from pydantic import BaseModel, Field
 from app.core.database import get_core_pool
 from app.core.security import require_user_role
 from app.services.chat_pipeline import (
-    SkemaTidakTersedia, TenantTidakAda, VerifierDitolak, proses_pertanyaan)
+    MemoryTidakDitemukan, SkemaTidakTersedia, StatusMemoryBertentangan,
+    TenantTidakAda, VerifierDitolak, proses_pertanyaan, ubah_status_memory)
 from app.services.query_planner import AIConfigError, PlanningError
 from app.services.query_executor import ExecutorError
 from app.services.sql_composer import SqlComposerError
@@ -149,3 +156,62 @@ async def chat_history(branch_code: str = Query(min_length=1, max_length=50),
     ]
     messages.reverse()  # tampilkan lama -> baru
     return {"conversation_id": conv_id, "messages": messages}
+
+
+# ===========================================================================
+# F4 — tombol feedback UI chat: konfirmasi / penolakan SQL memory pending
+# ===========================================================================
+class MemoryDecisionRequest(BaseModel):
+    branch_code: str = Field(min_length=1, max_length=50)
+    memory_id: int = Field(ge=1)
+
+
+async def _keputusan_memory(payload: MemoryDecisionRequest, user: dict,
+                            aksi: str) -> dict:
+    """Guard + pemetaan exception bersama untuk confirm/reject memory.
+
+    Guard identik dengan endpoint lain (role 'user' + cabang penugasan).
+    Penolakan transisi status -> 409 (pesan jelas dari pipeline), baris
+    bukan milik tenant cabang -> 404 (tidak membocorkan keberadaan).
+    """
+    allowed = user.get("allowed_branches") or []
+    if payload.branch_code not in allowed:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Cabang '{payload.branch_code}' bukan penugasan Anda.")
+
+    core_pool = await get_core_pool()
+    try:
+        return await ubah_status_memory(
+            core_pool, user, payload.branch_code, payload.memory_id, aksi)
+    except TenantTidakAda as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except MemoryTidakDitemukan as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except StatusMemoryBertentangan as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        logger.error("%s_memory error: %s", aksi, e)
+        raise HTTPException(status_code=500,
+                            detail="Terjadi kesalahan internal.")
+
+
+@router.post("/confirm-memory")
+async def chat_confirm_memory(payload: MemoryDecisionRequest,
+                              user: dict = Depends(require_user_role)):
+    """Tandai jawaban "benar": SQL memory pending -> approved (replay level A).
+
+    Sudah approved -> no-op sukses (idempoten); sudah rejected/stale -> 409.
+    """
+    return await _keputusan_memory(payload, user, "confirm")
+
+
+@router.post("/reject-memory")
+async def chat_reject_memory(payload: MemoryDecisionRequest,
+                             user: dict = Depends(require_user_role)):
+    """Tandai jawaban "salah": SQL memory pending -> rejected (tidak di-replay).
+
+    Sudah rejected -> no-op sukses (idempoten); approved TIDAK BOLEH
+    diturunkan menjadi rejected -> 409.
+    """
+    return await _keputusan_memory(payload, user, "reject")

@@ -26,7 +26,9 @@ try:
     from app.core.config import settings
     from app.core.security import encrypt_credential, require_user_role
     from app.services.chat_pipeline import (
-        normalisasi_pertanyaan, proses_pertanyaan)
+        _siapkan_skema_efektif, normalisasi_pertanyaan, proses_pertanyaan)
+    from app.services.knowledge_base import validate_kb
+    from app.services.query_planner import build_user_prompt
     from app.services.sql_composer import compose_sql
     HAS_CHAT = True
 except ImportError:
@@ -44,6 +46,18 @@ RENCANA = {
     "time_range": {"field": "penjualan.tanggal", "preset": "this_month"},
 }
 NOW_TETAP = datetime(2026, 9, 1, 10, 0)
+
+
+def _skema_besar(jumlah_pengisi: int = 200) -> dict:
+    """Skema dealer + tabel pengisi sampai melewati ambang gagal-cepat (150)."""
+    skema = copy.deepcopy(SCHEMA_CONFIG_DEALER)
+    for i in range(jumlah_pengisi):
+        skema["tables"][f"tabel_pengisi_{i}"] = {
+            "columns": [{"name": "id", "type": "integer",
+                         "nullable": True, "default": None}],
+            "primary_key": ["id"], "foreign_keys": [], "sample_rows": [],
+        }
+    return skema
 
 
 # ===========================================================================
@@ -162,6 +176,13 @@ class FakeCorePool:
                     return dict(row)
             return None
         if "FROM sql_memory" in sql:
+            if "WHERE id = $1 AND tenant_id = $2" in sql:
+                # F4 ubah_status_memory: cari entri milik satu tenant
+                memory_id, tenant_id = args
+                for row in self.sql_memory:
+                    if row["id"] == memory_id and row["tenant_id"] == tenant_id:
+                        return row
+                return None
             if "AND sql = $3" in sql:
                 tenant_id, q_norm, sql_tersimpan = args
                 for row in self.sql_memory:
@@ -181,6 +202,10 @@ class FakeCorePool:
         raise AssertionError(f"fetchrow tak dikenal: {sql[:90]}")
 
     async def fetchval(self, sql, *args):
+        if "FROM tenants WHERE branch_code" in sql:
+            # F4 ubah_status_memory: pemetaan branch -> tenant_id
+            return self.tenant["tenant_id"] if (
+                self.tenant and self.tenant["branch_code"] == args[0]) else None
         if "SELECT id FROM conversations" in sql:
             user_id, branch_code = args
             cocok = [c for c in self.conversations
@@ -213,6 +238,9 @@ class FakeCorePool:
                         row["times_used"] += 1
                     elif "status = 'stale'" in sql:
                         row["status"] = "stale"
+                    elif "SET status = $1" in sql:
+                        # F4 ubah_status_memory: pending -> approved/rejected
+                        row["status"] = args[0]
                     elif "SET plan_json" in sql:
                         row["plan_json"], row["sumber"], row["fingerprint_tabel"] = args[0], args[1], args[2]
             return "OK"
@@ -241,10 +269,10 @@ class FakeCorePool:
         raise AssertionError(f"fetch tak dikenal: {sql[:90]}")
 
     def seed_memory(self, *, q_norm, sql, plan_json=None, status="approved",
-                    times_used=0):
+                    times_used=0, tenant_id=3):
         self.next_id += 1
         self.sql_memory.append({
-            "id": self.next_id, "tenant_id": 3,
+            "id": self.next_id, "tenant_id": tenant_id,
             "pertanyaan_ternormalisasi": q_norm, "sql": sql,
             "plan_json": plan_json, "status": status, "sumber": "tier1",
             "times_used": times_used, "last_used": None,
@@ -341,6 +369,8 @@ class TestChatQueryTier1:
         assert mem[0]["sumber"] == "tier1"
         assert mem[0]["fingerprint_tabel"] == "penjualan"
         assert json.loads(mem[0]["plan_json"])["tables"] == ["penjualan"]
+        # F4: id baris pending yang baru dibuat ikut dalam response
+        assert resp.json()["memory_id"] == mem[0]["id"]
         # percakapan: 2 pesan (user + assistant)
         roles = [m["role"] for m in lingkungan.core.messages]
         assert roles == ["user", "assistant"]
@@ -430,6 +460,8 @@ class TestChatQueryMemory:
         assert data["source"] == "memory"
         assert data["confidence"] == "A"
         assert "$1" in data["sql"] or "$2" in data["sql"]
+        # F4: replay tidak membuat entri pending baru -> memory_id null
+        assert data["memory_id"] is None
         # VERIFIER TETAP JALAN pada SQL tersimpan (bukti: EXPLAIN dipanggil)
         assert any(c[0] == "fetch" and "EXPLAIN" in c[1]
                    for c in lingkungan.conn.catatan)
@@ -493,6 +525,367 @@ class TestChatQueryMemory:
         assert resp["source"] == "memory"
         assert [str(p) for p in resp["params"]] == [
             str(p) for p in composed["params"]]
+
+
+@pytest.mark.skipif(not HAS_CHAT, reason="chat pipeline belum ada")
+class TestSkemaEfektifTenant:
+    """Allowlist `tabel_diizinkan` (KB) -> skema efektif untuk SEMUA tahap
+    downstream (planner, composer, verifier); tenant skema raksasa tanpa
+    allowlist gagal cepat 422 (gate "skema")."""
+
+    def test_skema_besar_tanpa_allowlist_gagal_cepat_422(self, lingkungan):
+        # 205 tabel (> ambang 150) tanpa tabel_diizinkan -> tolak SEBELUM
+        # planner LLM / pool tenant disentuh (gagal cepat, hemat token)
+        lingkungan.core.tenant["schema_config_json"] = json.dumps(
+            _skema_besar(200))
+        lingkungan.core.seed_config_global()
+        resp = _post(lingkungan.client)
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["gate"] == "skema"
+        assert "terlalu besar (205 tabel)" in detail["reason"]
+        assert "tabel_diizinkan" in detail["reason"]
+        assert lingkungan.planner_catatan == []
+        assert lingkungan.tpm.dipanggil == 0
+        # ter-audit sebagai rejected dengan pesan yang sama
+        assert lingkungan.core.audit_logs[0]["status"] == "rejected"
+        assert "terlalu besar" in lingkungan.core.audit_logs[0]["error_message"]
+
+    def test_allowlist_3_tabel_planner_hanya_lihat_skema_terfilter(
+            self, lingkungan):
+        lingkungan.core.tenant["schema_config_json"] = json.dumps(
+            _skema_besar(200))
+        lingkungan.core.tenant["knowledge_base"] = json.dumps(
+            {"tabel_diizinkan": ["penjualan", "kendaraan", "pelanggan"]})
+        lingkungan.core.seed_config_global()
+        resp = _post(lingkungan.client)
+        assert resp.status_code == 200
+        assert resp.json()["source"] == "tier1"
+        # planner menerima skema terfilter: HANYA 3 tabel allowlist (bukan 205)
+        skema = lingkungan.planner_catatan[0]["schema"]
+        assert set(skema["tables"]) == {"penjualan", "kendaraan", "pelanggan"}
+        # struktur kolom tabel yang lolos dipertahankan apa adanya
+        kolom = {c["name"] for c in skema["tables"]["penjualan"]["columns"]}
+        assert {"id", "tanggal", "harga_deal"} <= kolom
+        # audit mencatat jumlah tabel efektif yang dipakai
+        catatan = json.loads(lingkungan.core.audit_logs[0]["ai_json_filter"])
+        assert catatan["tables_effective"] == 3
+        assert catatan["plan"]["tables"] == ["penjualan"]
+
+    def test_verify_hanya_menerima_tabel_allowlist(self, lingkungan):
+        # SQL memory approved merujuk tabel skema penuh di LUAR allowlist ->
+        # whitelist verifier otomatis menyempit (tanpa perubahan verifier) ->
+        # verdict tolak -> 422 + invalidasi stale
+        lingkungan.core.tenant["knowledge_base"] = json.dumps(
+            {"tabel_diizinkan": ["penjualan", "kendaraan", "pelanggan"]})
+        lingkungan.core.seed_memory(
+            q_norm=normalisasi_pertanyaan("omzet bulan ini"),
+            sql="SELECT COUNT(*) FROM service_records LIMIT 10", plan_json=None)
+        entri = lingkungan.core.sql_memory[0]
+        resp = _post(lingkungan.client)
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["gate"] == "whitelist"
+        assert "service_records" in detail["reason"]
+        assert entri["status"] == "stale"
+        assert lingkungan.core.audit_logs[0]["status"] == "rejected"
+
+    def test_tabel_dilarang_menang_atas_diizinkan(self, lingkungan):
+        # bentrok: penjualan ada di dua daftar -> tetap dipotong (dilarang
+        # menang atas diizinkan); planner bekerja pada sisa skema efektif
+        lingkungan.core.tenant["schema_config_json"] = json.dumps(
+            _skema_besar(200))
+        lingkungan.core.tenant["knowledge_base"] = json.dumps({
+            "tabel_diizinkan": ["penjualan", "kendaraan", "pelanggan"],
+            "tabel_dilarang": ["penjualan"]})
+        lingkungan.core.seed_config_global()
+        from app.services import chat_pipeline
+        catatan_lokal = []
+
+        async def plan_kendaraan(question, schema_config, kb, ai_config,
+                                 llm_call_fn=None):
+            catatan_lokal.append(schema_config)
+            return {"tables": ["kendaraan"], "columns": ["kendaraan.merek"]}
+
+        old = chat_pipeline.plan_query
+        chat_pipeline.plan_query = plan_kendaraan
+        try:
+            resp = _post(lingkungan.client)
+        finally:
+            chat_pipeline.plan_query = old
+        assert resp.status_code == 200
+        assert set(catatan_lokal[0]["tables"]) == {"kendaraan", "pelanggan"}
+        catatan = json.loads(lingkungan.core.audit_logs[0]["ai_json_filter"])
+        assert catatan["tables_effective"] == 2
+
+    def test_kolom_dikecualikan_hilang_dari_skema_efektif(self, lingkungan):
+        # KB `kolom_dikecualikan` -> kolom dibuang dari skema efektif yang
+        # dilihat planner (tabel & kolom lain tetap utuh)
+        lingkungan.core.tenant["knowledge_base"] = json.dumps(
+            {"kolom_dikecualikan": ["penjualan.catatan"]})
+        lingkungan.core.seed_config_global()
+        resp = _post(lingkungan.client)
+        assert resp.status_code == 200
+        skema = lingkungan.planner_catatan[0]["schema"]
+        kolom = {c["name"] for c in skema["tables"]["penjualan"]["columns"]}
+        assert "catatan" not in kolom          # yang dikecualikan hilang
+        assert {"id", "tanggal", "harga_deal"} <= kolom  # sisanya utuh
+        catatan = json.loads(lingkungan.core.audit_logs[0]["ai_json_filter"])
+        assert catatan["tables_effective"] == 5  # tabel tidak ikut terbuang
+
+    def test_kolom_dikecualikan_ditolak_verifier(self, lingkungan):
+        # SQL memory approved memakai kolom yang sudah dikecualikan -> skema
+        # efektif yang sama dipakai verifier -> whitelist menolak (tanpa
+        # perubahan verifier) -> 422 + invalidasi stale
+        lingkungan.core.tenant["knowledge_base"] = json.dumps(
+            {"kolom_dikecualikan": ["penjualan.nama_sales"]})
+        lingkungan.core.seed_memory(
+            q_norm=normalisasi_pertanyaan("omzet bulan ini"),
+            sql="SELECT nama_sales FROM penjualan LIMIT 10", plan_json=None)
+        entri = lingkungan.core.sql_memory[0]
+        resp = _post(lingkungan.client)
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["gate"] == "whitelist"
+        assert "nama_sales" in detail["reason"]
+        assert entri["status"] == "stale"
+        assert lingkungan.core.audit_logs[0]["status"] == "rejected"
+
+    def test_allowlist_nama_tak_ada_diabaikan_dengan_catatan(self, lingkungan):
+        lingkungan.core.tenant["knowledge_base"] = json.dumps(
+            {"tabel_diizinkan": ["penjualan", "tabel_hantu"]})
+        lingkungan.core.seed_config_global()
+        resp = _post(lingkungan.client)
+        assert resp.status_code == 200
+        assert set(lingkungan.planner_catatan[0]["schema"]["tables"]) == {
+            "penjualan"}
+        catatan = json.loads(lingkungan.core.audit_logs[0]["ai_json_filter"])
+        assert catatan["tables_effective"] == 1
+        assert catatan["tables_ignored"] == ["tabel_hantu"]
+
+    def test_allowlist_tak_cocok_semua_gagal_cepat_422(self, lingkungan):
+        lingkungan.core.tenant["knowledge_base"] = json.dumps(
+            {"tabel_diizinkan": ["tabel_hantu"]})
+        resp = _post(lingkungan.client)
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["gate"] == "skema"
+        assert "tabel_diizinkan" in detail["reason"]
+        assert lingkungan.planner_catatan == []
+
+
+# Nama & tipe realistis khas DB tenant (varchar dominan) — dipakai membangun
+# skema besar untuk benchmark ukuran prompt; distribusi tipe dibobot agar
+# mendekati skema nyata (TST_01: 763 kolom).
+_NAMA_KOLOM_DASAR = [
+    "id", "kode", "nama", "status", "tanggal", "jumlah", "harga", "total",
+    "keterangan", "catatan", "no_dokumen", "tipe", "kategori", "kuantitas",
+    "diskon", "pajak", "subtotal", "berat", "volume", "serial",
+    "no_telepon", "email", "alamat", "kota", "kode_pos", "tanggal_mulai",
+    "tanggal_selesai", "updated_by", "created_at", "is_aktif",
+]
+_TIPE_TERBOBOT = (
+    ["character varying"] * 45 + ["integer"] * 15 + ["bigint"] * 10
+    + ["date"] * 8 + ["timestamp without time zone"] * 10 + ["text"] * 7
+    + ["numeric"] * 3 + ["boolean"] * 2)
+_NAMA_TABEL_DEALER = [
+    "penjualan", "kendaraan", "pelanggan", "detail_penjualan",
+    "service_records", "pembelian", "supplier", "stok_sparepart",
+    "karyawan", "cicilan", "trade_in",
+]
+
+
+def _skema_11x70() -> dict:
+    """Skema 11 tabel × 70 kolom (770 total) dengan nama/tipe realistis."""
+    skema = {"introspected_at": "2026-09-01T00:00:00+00:00", "tables": {}}
+    for t, nama_tabel in enumerate(_NAMA_TABEL_DEALER):
+        kolom = []
+        for i in range(70):
+            dasar = _NAMA_KOLOM_DASAR[i % len(_NAMA_KOLOM_DASAR)]
+            nama = dasar if i < len(_NAMA_KOLOM_DASAR) else f"{dasar}_{i}"
+            kolom.append({"name": nama, "type": _TIPE_TERBOBOT[i % len(_TIPE_TERBOBOT)],
+                          "nullable": True, "default": None})
+        skema["tables"][nama_tabel] = {
+            "columns": kolom, "primary_key": ["id"], "foreign_keys": [],
+            "sample_rows": [],
+        }
+    return skema
+
+
+def _300_kolom_dikecualikan() -> list[str]:
+    """300 entri 'tabel.kolom' valid dari skema 11×70 (baris-mayor)."""
+    entri = []
+    for t, nama_tabel in enumerate(_NAMA_TABEL_DEALER):
+        for i in range(70):
+            if len(entri) >= 300:
+                break
+            dasar = _NAMA_KOLOM_DASAR[i % len(_NAMA_KOLOM_DASAR)]
+            nama = dasar if i < len(_NAMA_KOLOM_DASAR) else f"{dasar}_{i}"
+            entri.append(f"{nama_tabel}.{nama}")
+    return entri
+
+
+@pytest.mark.skipif(not HAS_CHAT, reason="chat pipeline belum ada")
+class TestUkuranPromptPlanner:
+    """Bukti optimasi TPM 8000: prompt planner untuk skema besar (11 tabel ×
+    70 kolom, 300 kolom dikecualikan) harus < 12.000 char (~3.000 token)."""
+
+    def test_prompt_kurang_dari_12ribu_char(self):
+        skema = _skema_11x70()
+        kb, errors = validate_kb(
+            {"kolom_dikecualikan": _300_kolom_dikecualikan()})
+        assert errors == []
+        # alur nyata: KB -> skema efektif (chat_pipeline) -> prompt (planner)
+        skema_efektif, _ = _siapkan_skema_efektif(
+            skema, [], [], kb["kolom_dikecualikan"])
+        prompt = build_user_prompt("omzet bulan ini berapa?", skema_efektif, kb)
+        assert len(prompt) < 12_000, \
+            f"len(user_prompt)={len(prompt)} char — melebihi batas 12.000"
+        # semua kolom yang lolos masih tampil (planner butuh memilih)
+        assert "harga" in prompt and "no_dokumen" in prompt
+
+    def test_skema_efektif_benar_470_kolom(self):
+        skema = _skema_11x70()
+        kb, _ = validate_kb(
+            {"kolom_dikecualikan": _300_kolom_dikecualikan()})
+        skema_efektif, _ = _siapkan_skema_efektif(
+            skema, [], [], kb["kolom_dikecualikan"])
+        total = sum(len(t["columns"])
+                    for t in skema_efektif["tables"].values())
+        assert total == 770 - 300 == 470
+
+
+@pytest.mark.skipif(not HAS_CHAT, reason="chat pipeline belum ada")
+class TestKeputusanMemory:
+    """F4 — endpoint /chat/confirm-memory + /chat/reject-memory."""
+
+    def _keputusan(self, client, aksi, memory_id, branch="JKT_01"):
+        return client.post(f"/chat/{aksi}-memory",
+                           json={"branch_code": branch,
+                                 "memory_id": memory_id})
+
+    def test_confirm_id_dari_response_query(self, lingkungan):
+        # Alur UI nyata: /chat/query tier1 -> memory_id -> tombol "benar"
+        lingkungan.core.seed_config_global()
+        resp = _post(lingkungan.client)
+        assert resp.status_code == 200
+        memory_id = resp.json()["memory_id"]
+        assert isinstance(memory_id, int)
+
+        resp2 = self._keputusan(lingkungan.client, "confirm", memory_id)
+        assert resp2.status_code == 200
+        assert resp2.json() == {"ok": True, "status": "approved"}
+        assert lingkungan.core.sql_memory[0]["status"] == "approved"
+        # audit: query sukses + confirm sukses
+        statuses = [a["status"] for a in lingkungan.core.audit_logs]
+        assert statuses == ["success", "success"]
+        assert "confirm-memory" in lingkungan.core.audit_logs[1]["prompt_text"]
+        # SQL tersimpan tidak berubah oleh confirm (hanya status dinaikkan)
+        assert lingkungan.core.audit_logs[1]["generated_sql"] == \
+            lingkungan.core.audit_logs[0]["generated_sql"]
+
+    def test_confirm_pending_langsung_sukses(self, lingkungan):
+        entri = lingkungan.core.seed_memory(
+            q_norm=normalisasi_pertanyaan("omzet bulan ini"),
+            sql="SELECT 1", status="pending")
+        resp = self._keputusan(lingkungan.client, "confirm", entri["id"])
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True, "status": "approved"}
+        assert entri["status"] == "approved"
+        assert lingkungan.core.audit_logs[0]["status"] == "success"
+
+    def test_reject_pending_sukses(self, lingkungan):
+        entri = lingkungan.core.seed_memory(
+            q_norm=normalisasi_pertanyaan("omzet bulan ini"),
+            sql="SELECT 1", status="pending")
+        resp = self._keputusan(lingkungan.client, "reject", entri["id"])
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True, "status": "rejected"}
+        assert entri["status"] == "rejected"
+        assert lingkungan.core.audit_logs[0]["status"] == "success"
+
+    def test_confirm_approved_noop_sukses(self, lingkungan):
+        entri = lingkungan.core.seed_memory(
+            q_norm=normalisasi_pertanyaan("omzet bulan ini"),
+            sql="SELECT 1", status="approved", times_used=2)
+        resp = self._keputusan(lingkungan.client, "confirm", entri["id"])
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True, "status": "approved"}
+        # no-op: status & metrik tidak berubah, tidak ada baris baru
+        assert entri["status"] == "approved"
+        assert entri["times_used"] == 2
+        assert len(lingkungan.core.sql_memory) == 1
+
+    def test_reject_rejected_noop_sukses(self, lingkungan):
+        entri = lingkungan.core.seed_memory(
+            q_norm=normalisasi_pertanyaan("omzet bulan ini"),
+            sql="SELECT 1", status="rejected")
+        resp = self._keputusan(lingkungan.client, "reject", entri["id"])
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True, "status": "rejected"}
+        assert entri["status"] == "rejected"
+
+    def test_reject_approved_ditolak_409(self, lingkungan):
+        # Status tidak pernah diturunkan: approved TIDAK boleh jadi rejected
+        entri = lingkungan.core.seed_memory(
+            q_norm=normalisasi_pertanyaan("omzet bulan ini"),
+            sql="SELECT 1", status="approved")
+        resp = self._keputusan(lingkungan.client, "reject", entri["id"])
+        assert resp.status_code == 409
+        assert "approved" in resp.json()["detail"]
+        assert entri["status"] == "approved"  # tidak berubah
+        # percobaan yang ditolak tetap ter-audit sebagai error
+        assert lingkungan.core.audit_logs[0]["status"] == "error"
+
+    def test_confirm_rejected_ditolak_409(self, lingkungan):
+        entri = lingkungan.core.seed_memory(
+            q_norm=normalisasi_pertanyaan("omzet bulan ini"),
+            sql="SELECT 1", status="rejected")
+        resp = self._keputusan(lingkungan.client, "confirm", entri["id"])
+        assert resp.status_code == 409
+        assert "ditandai salah" in resp.json()["detail"]
+        assert entri["status"] == "rejected"
+        assert lingkungan.core.audit_logs[0]["status"] == "error"
+
+    def test_confirm_stale_ditolak_409(self, lingkungan):
+        entri = lingkungan.core.seed_memory(
+            q_norm=normalisasi_pertanyaan("omzet bulan ini"),
+            sql="SELECT 1", status="stale")
+        resp = self._keputusan(lingkungan.client, "confirm", entri["id"])
+        assert resp.status_code == 409
+        assert "stale" in resp.json()["detail"]
+        assert entri["status"] == "stale"
+
+    def test_bukan_pemilik_tidak_ada_404(self, lingkungan):
+        # memory_id yang tidak ada -> 404 (bukan 400/500)
+        resp = self._keputusan(lingkungan.client, "confirm", 9999)
+        assert resp.status_code == 404
+        assert "tidak ditemukan" in resp.json()["detail"]
+
+    def test_cross_tenant_404(self, lingkungan):
+        # entri milik tenant lain (999) tidak terlihat dari cabang JKT_01
+        entri = lingkungan.core.seed_memory(
+            q_norm=normalisasi_pertanyaan("omzet bulan ini"),
+            sql="SELECT 1", status="pending", tenant_id=999)
+        resp = self._keputusan(lingkungan.client, "confirm", entri["id"])
+        assert resp.status_code == 404
+        assert entri["status"] == "pending"  # tidak tersentuh
+
+    def test_branch_bukan_penugasan_403(self, lingkungan):
+        from app.core.security import require_user_role
+        from app.main import app
+        payload = {**PAYLOAD_USER, "allowed_branches": ["SBY_02"]}
+        app.dependency_overrides[require_user_role] = lambda: payload
+        resp = self._keputusan(lingkungan.client, "confirm", 1,
+                               branch="JKT_01")
+        assert resp.status_code == 403
+        assert "bukan penugasan" in resp.json()["detail"]
+
+    def test_tenant_tidak_ada_409(self, lingkungan):
+        lingkungan.core.tenant = None  # cabang belum terhubung tenant
+        resp = self._keputusan(lingkungan.client, "confirm", 1)
+        assert resp.status_code == 409
+        assert "belum terhubung" in resp.json()["detail"]
 
 
 @pytest.mark.skipif(not HAS_CHAT, reason="chat pipeline belum ada")

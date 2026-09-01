@@ -186,6 +186,29 @@ class TestUserPrompt:
         assert "berapa omzet?" in prompt
 
     def test_tipe_kolom_masuk_prompt(self):
+        # format padat: "nama:tipe" dalam satu string (tipe umum disingkat)
         prompt = build_user_prompt("x", SCHEMA_CONFIG_DEALER, KB_MIN)
-        assert "harga_deal" in prompt
-        assert "bigint" in prompt
+        assert "harga_deal:int8" in prompt  # 'bigint' disingkat
+        assert "nomor_rangka:varchar" in prompt  # 'character varying' disingkat
+
+    def test_fk_format_padat(self):
+        prompt = build_user_prompt("x", SCHEMA_CONFIG_DEALER, KB_MIN)
+        assert "pelanggan_id -> pelanggan.id" in prompt
+        assert "kendaraan_id -> kendaraan.id" in prompt
+
+    def test_format_padat_bukan_array_of_objects(self):
+        # columns = satu string per tabel, BUKAN array {"name","type"}
+        prompt = build_user_prompt("x", SCHEMA_CONFIG_DEALER, KB_MIN)
+        assert '"columns": "id:int4, nomor_rangka:varchar' in prompt
+        assert '"name"' not in prompt  # bentuk lama tidak ada lagi
+
+    def test_sample_rows_tidak_masuk_prompt(self):
+        # sample_rows/primary_key/nullable dari introspeksi TIDAK diteruskan
+        skema = json.loads(json.dumps(SCHEMA_CONFIG_DEALER))
+        skema["tables"]["penjualan"]["sample_rows"] = [
+            {"id": 1, "harga_deal": 250000000}]
+        prompt = build_user_prompt("x", skema, KB_MIN)
+        assert "sample_rows" not in prompt
+        assert "250000000" not in prompt
+        assert "primary_key" not in prompt
+        assert "nullable" not in prompt

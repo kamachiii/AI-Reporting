@@ -4,7 +4,15 @@ Urutan tahap (milestone perangkuman):
 
 1.  Normalisasi pertanyaan (lowercase + strip tanda baca, v2 §11 #2).
 2.  Load tenant by branch (join tenants+db_connections) — 409 bila belum
-    terhubung / nonaktif / schema_config belum diintrospeksi.
+    terhubung / nonaktif / schema_config belum diintrospeksi. Lalu skema
+    EFEKTIF: `tabel_dilarang` dipotong lebih dulu, bila KB memuat
+    `tabel_diizinkan` skema disempitkan HANYA ke tabel itu (tenant skema
+    raksasa, mis. 2.387 tabel, tetap terpakai), lalu `kolom_dikecualikan`
+    membuang kolom tak relevan (api key, token, logo, ...) — hemat token
+    prompt planner. Allowlist kosong + skema
+    > 150 tabel -> gagal cepat (422, gate "skema") meminta admin menetapkan
+    allowlist. Skema efektif dipakai SEMUA tahap downstream (replay,
+    planner, composer, verifier) — whitelist verifier otomatis menyempit.
 3.  SQL Memory replay: entri `approved` dengan pertanyaan ternormalisasi sama
     -> `verify_and_execute` SQL tersimpan (VERIFIER TETAP JALAN — keamanan
     tidak pernah di-skip) -> source="memory", confidence="A", times_used++.
@@ -25,12 +33,20 @@ Urutan tahap (milestone perangkuman):
     assistant). Gagal tidak menulis pesan (audit sudah mencatat).
 7.  Response selalu menyertakan SQL (kejujuran UI, docs v2 §4):
     {source, confidence, sql, params, columns, rows, row_count, truncated,
-    duration_ms}.
+    duration_ms, memory_id} — memory_id = id baris sql_memory PENDING yang
+    baru dibuat (hanya jalur tier1; null untuk replay, karena entri replay
+    sudah approved dan tidak butuh konfirmasi user).
+
+F4 (tombol UI chat): `ubah_status_memory` menaikkan/menolak entri pending —
+confirm: pending -> approved (approved = no-op sukses); reject: pending ->
+rejected (rejected = no-op). Status TIDAK PERNAH diturunkan (docs v2 §3):
+approved tidak boleh jadi rejected, dst. — ditolak dengan pesan jelas.
 
 Exception service-layer -> router memetakan ke HTTP (lihat routers/chat.py):
 TenantTidakAda/SkemaTidakTersedia -> 409, AIConfigError -> 503,
 PlanningError/SqlComposerError -> 502, VerifierDitolak -> 422,
-QueryCanceledError (timeout #6) -> 504, ExecutorError -> 500.
+QueryCanceledError (timeout #6) -> 504, ExecutorError -> 500,
+MemoryTidakDitemukan -> 404, StatusMemoryBertentangan -> 409.
 
 Semua query core DB parameterized ($1, $2, ...) — tanpa eksepsi (pelajaran
 PROGRES §4). Tidak ada import FastAPI — layer service murni.
@@ -85,6 +101,18 @@ class VerifierDitolak(Exception):
         super().__init__(verdict.get("reason") or "verifier menolak SQL")
 
 
+class MemoryTidakDitemukan(Exception):
+    """Entri sql_memory tidak ada / bukan milik tenant cabang ini (404).
+
+    Milik tenant lain sengaja memakai 404 yang sama — keberadaan entri
+    tenant lain tidak dibocorkan."""
+
+
+class StatusMemoryBertentangan(Exception):
+    """Transisi status memory tidak diizinkan (409) — status tidak pernah
+    diturunkan (docs v2 §3), mis. approved ditolak kembali."""
+
+
 # ===========================================================================
 # Helper murni / pembacaan
 # ===========================================================================
@@ -118,6 +146,75 @@ def _parse_schema_config(raw) -> dict:
             "Skema database tenant belum tersedia. Hubungi administrator "
             "untuk menjalankan introspeksi skema.")
     return data
+
+
+# Ambang gagal-cepat: skema dengan tabel lebih banyak dari ini WAJIB punya
+# allowlist — prompt planner & whitelist verifier tidak realistis untuk skema
+# raksasa (kasus nyata tenant: 2.387 tabel).
+_SKEMA_MAX_TABEL = 150
+
+
+def _siapkan_skema_efektif(schema_config: dict, tabel_dilarang: list[str],
+                           tabel_diizinkan: list[str],
+                           kolom_dikecualikan: list[str]) -> tuple[dict, list[str]]:
+    """Skema penuh tenant -> skema EFEKTIF untuk seluruh tahap downstream.
+
+    Urutan pemotongan (terikat keputusan):
+    1. `tabel_dilarang` SELALU dipotong lebih dulu — DILARANG menang atas
+       DIIZINKAN bila satu tabel masuk dua daftar sekaligus.
+    2. Bila `tabel_diizinkan` terisi, sisa skema disempitkan HANYA ke tabel
+       pada allowlist; struktur kolom/FK tabel yang lolos dipertahankan apa
+       adanya. Nama allowlist yang tidak ada di skema DIABAIKAN dan
+       dikembalikan di `tabel_diabaikan` untuk catatan audit/log.
+    3. `kolom_dikecualikan` membuang kolom (exact match "tabel.kolom") dari
+       sisa tabel — entri yang tidak cocok diabaikan senyap. Skema efektif
+       yang sama dipakai verifier, jadi SQL yang memakai kolom terbuang
+       otomatis ditolak gerbang whitelist tanpa perubahan verifier.
+
+    Bila allowlist kosong dan jumlah tabel melewati _SKEMA_MAX_TABEL — atau
+    allowlist terisi tetapi tidak cocok satu tabel pun — -> VerifierDitolak
+    dengan verdict sintetis gate "skema" (dipetakan 422 oleh router lewat
+    pola error map verifier yang sudah ada; tanpa class error baru).
+    """
+    tables = dict(schema_config.get("tables") or {})
+    for nama in tabel_dilarang or []:
+        tables.pop(nama, None)  # dilarang menang: buang sebelum allowlist
+
+    tabel_diabaikan: list[str] = []
+    if tabel_diizinkan:
+        saring = set(tabel_diizinkan)
+        tabel_diabaikan = sorted({n for n in tabel_diizinkan if n not in tables})
+        tables = {n: t for n, t in tables.items() if n in saring}
+        if not tables:
+            raise VerifierDitolak({
+                "ok": False, "gate": "skema",
+                "reason": "tabel_diizinkan tidak cocok dengan skema tenant "
+                          "(tidak ada nama yang dikenal). Periksa kembali "
+                          "allowlist di Knowledge Base."})
+    elif len(tables) > _SKEMA_MAX_TABEL:
+        raise VerifierDitolak({
+            "ok": False, "gate": "skema",
+            "reason": f"Skema tenant terlalu besar ({len(tables)} tabel). "
+                      "Admin perlu menetapkan tabel_diizinkan di Knowledge "
+                      "Base."})
+
+    # 3. Buang kolom dikecualikan (exact match "tabel.kolom"). Entri tabel
+    #    yang berubah diganti salinan BARU — info dict milik schema_config
+    #    asal jangan dimutasi in-place (pemanggil masih memegang referensi).
+    if kolom_dikecualikan:
+        dibuang = set(kolom_dikecualikan)
+        for nama, info in tables.items():
+            kolom_lama = info.get("columns") or []
+            kolom_baru = [c for c in kolom_lama
+                          if f"{nama}.{c.get('name')}" not in dibuang]
+            if len(kolom_baru) != len(kolom_lama):
+                info_baru = dict(info)
+                info_baru["columns"] = kolom_baru
+                tables[nama] = info_baru
+
+    skema = dict(schema_config)  # pertahankan kunci lain (introspected_at, dll)
+    skema["tables"] = tables
+    return skema, tabel_diabaikan
 
 
 _SQL_TENANT = (
@@ -199,6 +296,100 @@ async def simpan_memory_pending(core_pool, tenant_id: int, q_norm: str,
         fingerprint_tabel)
 
 
+# --- F4: konfirmasi / penolakan entri pending dari tombol UI chat ----------
+# Status TIDAK PERNAH diturunkan (docs v2 §3): confirm hanya menaikkan
+# pending -> approved; reject menurunkan pending -> rejected. Transisi lain:
+# approved kembali ditolak = DITOLAK; no-op untuk kondisi yang sudah sama.
+_TRANSISI_MEMORY = {
+    ("confirm", "pending"): "approved",
+    ("confirm", "approved"): "approved",  # no-op — sudah terverifikasi
+    ("reject", "pending"): "rejected",
+    ("reject", "rejected"): "rejected",   # no-op — sudah ditolak
+}
+
+# Pesan jelas untuk transisi yang dilarang (dikembalikan apa adanya ke UI).
+_PESAN_TRANSISI_TOLAK = {
+    ("confirm", "rejected"):
+        "Jawaban ini sudah ditandai salah sebelumnya dan tidak dapat "
+        "dikonfirmasi. Tanyakan ulang untuk membuat entri baru.",
+    ("confirm", "stale"):
+        "Jawaban ini sudah tidak berlaku (stale) dan tidak dapat "
+        "dikonfirmasi.",
+    ("reject", "approved"):
+        "Jawaban ini sudah terverifikasi (approved) — tidak dapat ditandai "
+        "salah. Status memori tidak pernah diturunkan.",
+    ("reject", "stale"):
+        "Jawaban ini sudah tidak berlaku (stale) — tidak perlu ditolak.",
+}
+
+
+async def ubah_status_memory(core_pool, user, branch_code: str, memory_id: int,
+                             aksi: str) -> dict:
+    """F4 — confirm/reject entri SQL Memory milik cabang user (tombol UI).
+
+    Entri hanya boleh milik tenant cabang tersebut; milik tenant lain /
+    tidak ada -> MemoryTidakDitemukan (404, keberadaan entri orang lain
+    tidak dibocorkan). SQL TIDAK disentuh di sini — SQL tersimpan sudah
+    tervalidasi verifier saat pertama dibuat; fungsi ini hanya menaikkan
+    status. Semua hasil ter-audit (sukses & penolakan).
+
+    Args:
+        aksi: "confirm" (jawaban benar) atau "reject" (jawaban salah).
+        user: payload token (guard role & cabang sudah di router).
+
+    Returns:
+        {"ok": True, "status": "<status final>"} — no-op sukses juga
+        mengembalikan bentuk ini.
+
+    Raises:
+        TenantTidakAda: cabang tidak terdaftar sebagai tenant (409).
+        MemoryTidakDitemukan: entri bukan milik tenant ini / tidak ada (404).
+        StatusMemoryBertentangan: transisi dilarang (409).
+    """
+    prompt_audit = f"[{aksi}-memory #{memory_id}]"
+    sql_audit = None
+    try:
+        tenant_id = await core_pool.fetchval(
+            "SELECT id FROM tenants WHERE branch_code = $1", branch_code)
+        if tenant_id is None:
+            raise TenantTidakAda(
+                f"Cabang '{branch_code}' belum terhubung ke database tenant.")
+        baris = await core_pool.fetchrow(
+            "SELECT id, status, pertanyaan_ternormalisasi, sql "
+            "FROM sql_memory WHERE id = $1 AND tenant_id = $2",
+            memory_id, tenant_id)
+        if baris is None:
+            raise MemoryTidakDitemukan(
+                "Jawaban yang ingin dinilai tidak ditemukan.")
+        prompt_audit = (f"[{aksi}-memory #{memory_id}] "
+                        f"{baris['pertanyaan_ternormalisasi']}")
+        sql_audit = baris["sql"]
+
+        status_lama = baris["status"]
+        status_baru = _TRANSISI_MEMORY.get((aksi, status_lama))
+        if status_baru is None:
+            raise StatusMemoryBertentangan(
+                _PESAN_TRANSISI_TOLAK.get((aksi, status_lama))
+                or f"Status '{status_lama}' tidak dapat diubah oleh '{aksi}'.")
+        if status_baru != status_lama:
+            await core_pool.execute(
+                "UPDATE sql_memory SET status = $1, "
+                "updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+                status_baru, memory_id)
+        await tulis_audit(
+            core_pool, user_id=(user or {}).get("user_id"),
+            branch_code=branch_code, prompt_text=prompt_audit,
+            ai_json_filter=None, generated_sql=sql_audit,
+            execution_time_ms=None, status=_STATUS_SUCCESS, error_message=None)
+        return {"ok": True, "status": status_baru}
+    except (TenantTidakAda, MemoryTidakDitemukan,
+            StatusMemoryBertentangan) as e:
+        # Percobaan yang ditolak TETAP ter-audit (jejak keputusan/pensondelan).
+        await _audit_gagal(core_pool, user, branch_code, prompt_audit, None,
+                           sql_audit, None, _STATUS_ERROR, str(e))
+        raise
+
+
 async def tulis_audit(core_pool, *, user_id, branch_code, prompt_text,
                       ai_json_filter, generated_sql, execution_time_ms,
                       status, error_message) -> None:
@@ -233,8 +424,13 @@ async def simpan_pesan(core_pool, conversation_id: int, role: str,
 
 
 def _bentuk_response(source: str, confidence: str, sql: str, params,
-                     result: dict) -> dict:
-    """Bentuk response API — SQL selalu disertakan (kejujuran, docs v2 §4)."""
+                     result: dict, memory_id: int | None = None) -> dict:
+    """Bentuk response API — SQL selalu disertakan (kejujuran, docs v2 §4).
+
+    memory_id: id baris sql_memory PENDING yang baru dibuat (jalur tier1);
+    None untuk replay — entri yang di-replay sudah approved sehingga tidak
+    butuh tombol konfirmasi user. Field tambahan bersifat backward-compatible.
+    """
     return {
         "source": source,
         "confidence": confidence,
@@ -245,6 +441,7 @@ def _bentuk_response(source: str, confidence: str, sql: str, params,
         "row_count": result["row_count"],
         "truncated": result["truncated"],
         "duration_ms": result["duration_ms"],
+        "memory_id": memory_id,
     }
 
 
@@ -277,7 +474,10 @@ async def proses_pertanyaan(core_pool, tenant_pool_manager, user: dict,
         TenantTidakAda / SkemaTidakTersedia / TenantPoolError / AIConfigError
         / PlanningError / SqlComposerError / VerifierDitolak / ExecutorError
         / asyncpg.QueryCanceledError (timeout) — SEMUA kegagalan tetap
-        ter-audit di blok except di bawah.
+        ter-audit di blok except di bawah. VerifierDitolak juga dipakai
+        gagal-cepat skema efektif (verdict sintetis gate "skema"): skema
+        terlalu besar tanpa tabel_diizinkan, atau allowlist tak cocok sama
+        sekali.
     """
     sekarang = now or datetime.now()  # TZ server — kontrak composer F2.2
     q_norm = normalisasi_pertanyaan(question)
@@ -293,6 +493,16 @@ async def proses_pertanyaan(core_pool, tenant_pool_manager, user: dict,
         schema_config = _parse_schema_config(tenant["schema_config_json"])
         kb = parse_stored_kb(tenant["knowledge_base"])
         kb_forbidden = kb.get("tabel_dilarang") or []
+
+        # ---------- Skema efektif (allowlist tabel_diizinkan KB) ----------
+        # Rebind sekali di sini: replay composer, planner, compose_sql, dan
+        # verify_and_execute semuanya menerima variabel schema_config — tidak
+        # ada tahap downstream yang masih melihat skema penuh (maupun kolom
+        # yang dikecualikan KB).
+        schema_config, tabel_diabaikan = _siapkan_skema_efektif(
+            schema_config, kb_forbidden, kb.get("tabel_diizinkan") or [],
+            kb.get("kolom_dikecualikan") or [])
+        jumlah_tabel_efektif = len(schema_config["tables"])
         pool_tenant = await tenant_pool_manager.get_pool(tenant)
 
         # ---------- Tahap 3: SQL Memory replay (0 panggilan LLM) ----------
@@ -357,11 +567,12 @@ async def proses_pertanyaan(core_pool, tenant_pool_manager, user: dict,
             durasi_ms = hasil["result"]["duration_ms"]
             fingerprint = ",".join(
                 hasil["verdict"]["detail"].get("tabel_direferensikan") or [])
-            await simpan_memory_pending(
+            memory_id_baru = await simpan_memory_pending(
                 core_pool, tenant["tenant_id"], q_norm, sql_final, plan,
                 sumber=_SOURCE_TIER1, fingerprint_tabel=fingerprint)
             response = _bentuk_response(_SOURCE_TIER1, _CONF_B, sql_final,
-                                        composed["params"], hasil["result"])
+                                        composed["params"], hasil["result"],
+                                        memory_id=memory_id_baru)
 
         # ---------- Tahap 6: percakapan (2 pesan) + audit sukses ----------
         cid = await ambil_atau_buat_conversation(
@@ -370,9 +581,17 @@ async def proses_pertanyaan(core_pool, tenant_pool_manager, user: dict,
         # default=str: params berisi date/datetime dari preset waktu composer
         await simpan_pesan(core_pool, cid, "assistant",
                            json.dumps(response, ensure_ascii=False, default=str))
+        # Catatan skema efektif di audit ai_json_filter: jumlah tabel yang
+        # benar-benar dipakai planner/composer/verifier (plan dibungkus agar
+        # audit tetap satu objek JSON; plan asli TIDAK dimutasi — dipakai
+        # ulang untuk replay sql_memory).
+        catatan_ai = {"plan": plan_terpakai,
+                      "tables_effective": jumlah_tabel_efektif}
+        if tabel_diabaikan:
+            catatan_ai["tables_ignored"] = tabel_diabaikan
         await tulis_audit(
             core_pool, user_id=user["user_id"], branch_code=branch_code,
-            prompt_text=question, ai_json_filter=plan_terpakai,
+            prompt_text=question, ai_json_filter=catatan_ai,
             generated_sql=sql_final, execution_time_ms=durasi_ms,
             status=_STATUS_SUCCESS, error_message=None)
         return response

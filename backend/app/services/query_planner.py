@@ -102,22 +102,48 @@ def _system_prompt() -> str:
     )
 
 
+# Singkatan tipe umum Postgres — HANYA untuk tampilan prompt (planner tidak
+# pernah menulis tipe di rencana; validator composer/verifier tetap memakai
+# schema_config penuh, bukan bentuk ringkas ini). Tipe di luar peta dilewatkan
+# apa adanya.
+_TIPE_SINGKAT = {
+    "integer": "int4",
+    "bigint": "int8",
+    "smallint": "int2",
+    "character varying": "varchar",
+    "character": "char",
+    "timestamp without time zone": "timestamp",
+    "timestamp with time zone": "timestamptz",
+    "time without time zone": "time",
+    "double precision": "float8",
+    "real": "float4",
+    "boolean": "bool",
+}
+
+
 def _skema_ringkas(schema_config: dict) -> dict:
-    """Skema tenant -> bentuk ringkas untuk prompt (tanpa sample rows)."""
+    """Skema tenant -> bentuk padat untuk prompt (hemat token, TPM 8000).
+
+    Semua tabel dirender seragam (satu code path):
+    - "columns"      : SATU string "nama:tipe" dipisah koma — bukan array of
+                       objects; hemat ~60-70% karakter pada skema lebar
+                       (763 kolom tenant nyata), planner tetap melihat SEMUA
+                       nama kolom untuk bisa memilih.
+    - "foreign_keys" : array string "kolom -> tabel.kolom".
+    Sample rows / primary_key / nullable TIDAK disertakan — tidak dibutuhkan
+    planner (nilai_map & glossary cukup untuk semantik).
+    """
     ringkas: dict = {}
     for nama, tabel in (schema_config or {}).get("tables", {}).items():
-        ringkas[nama] = {
-            "columns": [
-                {"name": c.get("name"), "type": c.get("type")}
-                for c in tabel.get("columns", [])
-            ],
-            "foreign_keys": [
-                {"column": fk.get("column"),
-                 "references_table": fk.get("references_table"),
-                 "references_column": fk.get("references_column")}
-                for fk in tabel.get("foreign_keys", [])
-            ],
-        }
+        kolom = ", ".join(
+            f"{c.get('name')}:{_TIPE_SINGKAT.get(c.get('type'), c.get('type'))}"
+            for c in tabel.get("columns") or [])
+        fk = [
+            f"{fk.get('column')} -> {fk.get('references_table')}."
+            f"{fk.get('references_column')}"
+            for fk in tabel.get("foreign_keys") or []
+        ]
+        ringkas[nama] = {"columns": kolom, "foreign_keys": fk}
     return ringkas
 
 
@@ -126,7 +152,9 @@ def build_user_prompt(question: str, schema_config: dict, kb: dict) -> str:
 
     KB dibatasi ukurannya secara alami oleh validasi admin (KB disimpan
     terkurasi), jadi disertakan utuh — glossary & contoh_tanya adalah alat
-    utama mencegah salah semantik (docs v2 §4).
+    utama mencegah salah semantik (docs v2 §4). Skema memakai bentuk padat
+    `_skema_ringkas`; keterangan formatnya ditulis di header agar LLM tidak
+    salah baca.
     """
     kb_bagian = {
         "glossary": kb.get("glossary", []),
@@ -135,8 +163,11 @@ def build_user_prompt(question: str, schema_config: dict, kb: dict) -> str:
         "contoh_tanya": kb.get("contoh_tanya", []),
     }
     return (
-        "SKEMA DATABASE (JSON):\n" + json.dumps(_skema_ringkas(schema_config),
-                                                ensure_ascii=False) + "\n\n"
+        "SKEMA DATABASE (JSON padat): per tabel, 'columns' = SATU string "
+        "\"nama:tipe\" dipisah koma; 'foreign_keys' = \"kolom -> "
+        "tabel.kolom\".\n"
+        + json.dumps(_skema_ringkas(schema_config), ensure_ascii=False)
+        + "\n\n"
         "KNOWLEDGE BASE TENANT (makna istilah & contoh pertanyaan):\n"
         + json.dumps(kb_bagian, ensure_ascii=False) + "\n\n"
         "PERTANYAAN USER:\n" + question.strip()

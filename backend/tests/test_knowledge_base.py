@@ -36,6 +36,8 @@ class _StubRow(dict):
 
 
 # Contoh KB penuh — disalin dari docs/PERANCANGAN-PIPELINE-AI.md §3.
+# `tabel_diizinkan` ditambahkan di fase skema efektif (allowlist per tenant);
+# `kolom_dikecualikan` menyusul untuk hemat token prompt planner.
 KB_PENUH = {
     "glossary": [
         {"istilah": "omzet", "arti": "SUM(penjualan.harga_deal)"},
@@ -54,6 +56,8 @@ KB_PENUH = {
          "agg": "sum(harga_deal)", "time_range": "this_month"},
     ],
     "tabel_dilarang": ["log_audit_internal"],
+    "tabel_diizinkan": ["penjualan", "kendaraan"],
+    "kolom_dikecualikan": ["penjualan.api_key", "users.token_hash"],
 }
 
 
@@ -112,6 +116,83 @@ class TestValidateKb:
         _, errors = validate_kb({"tabel_dilarang": ["  "]})
         assert any("tabel_dilarang" in e for e in errors)
 
+    def test_tabel_diizinkan_valid(self):
+        clean, errors = validate_kb(
+            {"tabel_diizinkan": ["penjualan", "kendaraan"]})
+        assert errors == []
+        assert clean["tabel_diizinkan"] == ["penjualan", "kendaraan"]
+        # di-strip; sisanya tetap bentuk normal (6 field)
+        clean, errors = validate_kb({"tabel_diizinkan": [" penjualan "]})
+        assert errors == []
+        assert clean["tabel_diizinkan"] == ["penjualan"]
+        assert set(clean.keys()) == set(EMPTY_KB.keys())
+
+    def test_tabel_diizinkan_salah_tipe_error(self):
+        # string, bukan array
+        _, errors = validate_kb({"tabel_diizinkan": "penjualan"})
+        assert any("tabel_diizinkan" in e for e in errors)
+        # array berisi non-string
+        _, errors = validate_kb({"tabel_diizinkan": ["penjualan", 7]})
+        assert any("tabel_diizinkan" in e for e in errors)
+
+    def test_tabel_diizinkan_entri_kosong_dan_pola_jahat_error(self):
+        # entri kosong -> error per indeks
+        _, errors = validate_kb({"tabel_diizinkan": ["  "]})
+        assert any("tabel_diizinkan[0]" in e for e in errors)
+        # pola jahat (spasi/SQL) -> error
+        _, errors = validate_kb(
+            {"tabel_diizinkan": ["penjualan; DROP TABLE users"]})
+        assert any("tabel_diizinkan[0]" in e for e in errors)
+        # diawali angka / mengandung tanda hubung -> error
+        _, errors = validate_kb({"tabel_diizinkan": ["123tabel"]})
+        assert any("tabel_diizinkan[0]" in e for e in errors)
+        _, errors = validate_kb({"tabel_diizinkan": ["tabel-x"]})
+        assert any("tabel_diizinkan[0]" in e for e in errors)
+        # entri lain yang valid tidak ikut dilaporkan (error per indeks)
+        _, errors = validate_kb({"tabel_diizinkan": ["123tabel", "penjualan"]})
+        assert any("tabel_diizinkan[0]" in e for e in errors)
+        assert not any("tabel_diizinkan[1]" in e for e in errors)
+
+    def test_kolom_dikecualikan_valid(self):
+        clean, errors = validate_kb(
+            {"kolom_dikecualikan": ["penjualan.api_key", "users.token_hash"]})
+        assert errors == []
+        assert clean["kolom_dikecualikan"] == [
+            "penjualan.api_key", "users.token_hash"]
+        # di-strip; sisanya tetap bentuk normal (7 field)
+        clean, errors = validate_kb(
+            {"kolom_dikecualikan": [" penjualan.api_key "]})
+        assert errors == []
+        assert clean["kolom_dikecualikan"] == ["penjualan.api_key"]
+        assert set(clean.keys()) == set(EMPTY_KB.keys())
+
+    def test_kolom_dikecualikan_salah_tipe_error(self):
+        # string, bukan array
+        _, errors = validate_kb({"kolom_dikecualikan": "penjualan.api_key"})
+        assert any("kolom_dikecualikan" in e for e in errors)
+        # array berisi non-string
+        _, errors = validate_kb({"kolom_dikecualikan": ["penjualan.api_key", 7]})
+        assert any("kolom_dikecualikan" in e for e in errors)
+
+    def test_kolom_dikecualikan_format_salah_error_per_indeks(self):
+        # tanpa titik -> error
+        _, errors = validate_kb({"kolom_dikecualikan": ["api_key"]})
+        assert any("kolom_dikecualikan[0]" in e for e in errors)
+        # lebih dari satu titik -> error
+        _, errors = validate_kb({"kolom_dikecualikan": ["a.b.c"]})
+        assert any("kolom_dikecualikan[0]" in e for e in errors)
+        # diawali angka -> error
+        _, errors = validate_kb({"kolom_dikecualikan": ["1tabel.kolom"]})
+        assert any("kolom_dikecualikan[0]" in e for e in errors)
+        # entri kosong -> error
+        _, errors = validate_kb({"kolom_dikecualikan": ["  "]})
+        assert any("kolom_dikecualikan[0]" in e for e in errors)
+        # entri lain yang valid tidak ikut dilaporkan (error per indeks)
+        _, errors = validate_kb(
+            {"kolom_dikecualikan": ["1tabel.kolom", "penjualan.api_key"]})
+        assert any("kolom_dikecualikan[0]" in e for e in errors)
+        assert not any("kolom_dikecualikan[1]" in e for e in errors)
+
     def test_catatan_kolom_salah_tipe_error(self):
         _, errors = validate_kb({"catatan_kolom": ["penjualan.harga_deal"]})
         assert any("catatan_kolom" in e for e in errors)
@@ -161,6 +242,8 @@ class TestParseStoredKb:
         assert kb["glossary"] == [{"istilah": "omzet", "arti": "SUM(x)"}]
         assert kb["catatan_kolom"] == {}
         assert kb["tabel_dilarang"] == []
+        assert kb["tabel_diizinkan"] == []  # default: tidak diset (skema penuh)
+        assert kb["kolom_dikecualikan"] == []  # default: tidak ada yang dibuang
 
 
 class TestLoadKb:
