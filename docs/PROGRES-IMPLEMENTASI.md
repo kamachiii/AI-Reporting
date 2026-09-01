@@ -2,7 +2,7 @@
 
 > Dokumen kontinuitas: dibaca PERTAMA kali oleh AI/engineer yang melanjutkan kerja.
 > Update dokumen ini SETIAP selesai satu fase. Jangan hapus riwayat — tambahkan.
-> Terakhir diperbarui: 2026-09-01 (F4 + F2.5 selesai; sistem LIVE).
+> Terakhir diperbarui: 2026-09-01 (F2.6 Tier 2 selesai — arsitektur v2 KOMPLET).
 
 ## 0. Cara cepat paham konteks (5 menit)
 
@@ -43,6 +43,7 @@ F6    Hardening (kuota, Redis rate limit, cache, metrik)
 | **F2.4 + F3 Executor & Chat API** | selesai | `7b09158` | Pipeline end-to-end: planner LLM (retry 1x, config user>tenant>global) -> composer -> verifier -> executor (READ ONLY + timeout 10s + cap 500); POST /chat/query + GET /chat/history (guard user, isolasi allowed_branches, rate limit); sql_memory replay (verifier tetap jalan, auto-stale); 62 test baru (total 316); smoke nyata vs DB tenant (source=memory, rows nyata) |
 | **F4 UI chat nyata + skema efektif** | selesai | `6961f3a` | UI chat -> POST /chat/query (badge keyakinan, Lihat SQL, Jawaban benar/salah); KB `tabel_diizinkan`+`kolom_dikecualikan` -> skema efektif per tenant (DB 2.387 tabel terkelola); prompt planner dipadatkan 37.648->9.109 chars (lolos TPM); live: Groq/GLM tier1 B + replay memory A |
 | **F2.5 Presenter + Number Check** | selesai | `653ea0c` | `presenter.py`: ringkasan maks 2 kalimat + saran lanjutan; NUMBER CHECK id-ID (ribuan titik/desimal koma/persen) — angka karangan ditolak, 1x retry, fallback template; migration 007 (sql_memory.ringkasan+saran); replay pakai cache = 0 LLM, self-heal bila kosong; UI: paragraf ringkasan + chip saran; 385 test |
+| **F2.6 Tier 2 Verified Text2SQL** | selesai | `238ad2d` | Generator 1-panggilan router tier1/tier2 + self-repair maks 2x (feedback verifier); flag `chat_tier2` per tenant (default OFF, toggle admin UI); tier2 = source tier2/Level C/attempts; replay tier2 dgn literal tanggal = MISS; fallback tier1 otomatis; 410 test |
 | F2.5 Tier 2 + eval | ⬜ belum | — | Jangan mulai sebelum verifier teruji |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
@@ -222,6 +223,23 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
 - Konfigurasi AI: user > tenant > global; B.AI rate limit harian bisa 503
   (activity_cost_limit_reached) — error ter-audit; pemakaian live menyusul konfigurasi
   admin (UI chat sudah dipakai user nyata untuk pertanyaan pembelian/penjualan/customer).
+
+## 3f. Detail F2.6 Tier 2 (arsitektur v2 KOMPLET)
+
+- `tier2_generator.generate_sql`: SATU panggilan LLM -> {"tier":1,"plan":...} atau
+  {"tier":2,"sql":...}; tier2 diverifikasi `verify_query` (EXPLAIN via conn_factory);
+  gagal -> self-repair maks 2x (feedback gate+reason+output lama) -> Tier2Error.
+- Pipeline: flag `tenants.chat_tier2` (default OFF; toggle POST /admin/tenants/{b}/tier2;
+  GET admin tenants menyertakan flag). Flag ON: generator dipanggil dulu; tier1 hasil
+  compose di-reuse (tidak compose 2x); tier2 -> verify_and_execute ULANG (defense in
+  depth) -> source=tier2, confidence=C, attempts=N -> memory pending (sumber=tier2,
+  plan_json={"tier2":true}) -> presenter normal. Tier2Error -> fallback alur tier1 lama;
+  dua2nya gagal -> 502 pesan gabungan.
+- Replay tier2: SQL dengan literal tanggal (regex YYYY-MM-DD / ::date) = MISS tanpa
+  menghapus baris (anti data basi); tanpa literal -> replay normal (verify ulang).
+- UI: chip 'Tier 2 ON/OFF' per tenant (Admin), badge 'SQL Kompleks (Level C)' +
+  'N percobaan' di chat.
+- BELUM: eval harness golden-set (gate aktivasi otomatis), metrik mingguan, kuota token.
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
