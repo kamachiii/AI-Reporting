@@ -266,7 +266,10 @@ async def fetch_models_from_provider(payload: FetchModelsRequest, user: dict = D
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(url, headers=headers)
             if resp.status_code != 200:
-                raise HTTPException(status_code=resp.status_code, detail=f"Gagal fetch dari provider: {resp.text[:300]}")
+                # Status provider TIDAK diteruskan apa adanya: 401/403 dari provider
+                # dicocokkan interceptor frontend sebagai sesi-kadaluarsa -> logout paksa.
+                # Kegagalan provider = gateway error (502); status asli ada di detail.
+                raise HTTPException(status_code=502, detail=f"Gagal fetch dari provider (HTTP {resp.status_code}): {resp.text[:300]}")
             data = resp.json()
             raw_models = [item["id"] for item in data.get("data", [])]
 
