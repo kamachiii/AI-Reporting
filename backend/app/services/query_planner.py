@@ -258,8 +258,15 @@ async def panggil_llm_default(system: str, user: str, ai_config: dict) -> str:
         raise PlanningError(f"AI gateway tidak dapat dihubungi: {e}") from e
 
     if resp.status_code != 200:
-        raise PlanningError(
-            f"AI gateway merespons {resp.status_code}: {resp.text[:200]}")
+        # Pesan RINGKAS utk user (2026-09-02: popup panjang berisi JSON provider
+        # dikomplain user; pola sama dgn perbaikan di admin/ai_configs.py).
+        _reason = {401: "API Key tidak valid untuk provider ini",
+                   403: "API Key tidak punya akses ke model ini",
+                   404: "Base URL atau model salah (endpoint tidak ditemukan)",
+                   429: "Rate limit provider — coba lagi sebentar"}.get(
+            resp.status_code, f"Provider AI merespons HTTP {resp.status_code}")
+        logger.warning("planner: gateway %s: %s", resp.status_code, resp.text[:200])
+        raise PlanningError(_reason)
 
     try:
         data = resp.json()
