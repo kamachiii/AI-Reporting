@@ -268,8 +268,14 @@ async def fetch_models_from_provider(payload: FetchModelsRequest, user: dict = D
             if resp.status_code != 200:
                 # Status provider TIDAK diteruskan apa adanya: 401/403 dari provider
                 # dicocokkan interceptor frontend sebagai sesi-kadaluarsa -> logout paksa.
-                # Kegagalan provider = gateway error (502); status asli ada di detail.
-                raise HTTPException(status_code=502, detail=f"Gagal fetch dari provider (HTTP {resp.status_code}): {resp.text[:300]}")
+                # Kegagalan provider = gateway error (502). Pesan RINGKAS (2026-09-02:
+                # user komplain popup panjang — JSON body provider tidak berguna di UI).
+                _reason = {401: "API Key tidak valid untuk provider ini",
+                           403: "API Key tidak punya akses ke endpoint ini",
+                           404: "Base URL salah (endpoint models tidak ditemukan)",
+                           429: "Rate limit provider — coba lagi nanti"}.get(
+                    resp.status_code, f"Provider merespons HTTP {resp.status_code}")
+                raise HTTPException(status_code=502, detail=_reason)
             data = resp.json()
             raw_models = [item["id"] for item in data.get("data", [])]
 

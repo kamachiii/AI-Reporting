@@ -218,12 +218,8 @@ export default function AIConfigModal({ isOpen, onClose, onSave, editing }) {
             <div>
               <label className="block text-sm font-medium text-ink mb-1">Base URL</label>
               <input type="text" value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })}
-                placeholder="https://provider-kamu.com/v1"
+                placeholder="https://openai.com/v1"
                 className="w-full px-3 py-2 border border-hairline rounded-md bg-canvas focus:ring-2 focus:ring-primary/30 h-9 text-sm" />
-              <p className="text-[11px] text-muted mt-1">
-                Harus cocok dengan provider API key-mu (contoh Groq: <code>https://api.groq.com/openai/v1</code>).
-                Salah kombinasi = gagal test &amp; fetch model.
-              </p>
             </div>
             <div>
               <label className="block text-sm font-medium text-ink mb-1">API Key</label>
