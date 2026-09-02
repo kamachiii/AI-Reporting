@@ -47,16 +47,33 @@ SQL_TIER2_VALID = "SELECT harga_deal FROM penjualan WHERE harga_deal > 100000000
 # Fake infrastruktur tambahan
 # ===========================================================================
 class FakeCorePoolT2(FakeCorePool):
-    """FakeCorePool + kolom tenants.chat_tier2 + endpoint toggle admin."""
+    """FakeCorePool + kolom tenants.chat_tier2 + endpoint toggle admin +
+    eval_runs (F2.7 gate aktivasi Tier 2)."""
 
     def __init__(self):
         super().__init__()
         self.user_role = "admin"        # untuk guard require_admin_role
         self.updated_tier2 = None       # (branch_code, enabled) dari UPDATE
+        self.eval_runs = []             # snapshot eval (gate tier2)
 
     def seed_tenant(self, chat_tier2=False):
         super().seed_tenant()
         self.tenant["chat_tier2"] = chat_tier2
+
+    def seed_eval_run(self, *, pass_rate=1.0, pelanggaran_verifier=0,
+                      total=20, lulus=None, tenant_id=3):
+        """Seed snapshot eval_runs terpenuhi (gate tier2 lulus by default)."""
+        if lulus is None:
+            lulus = total
+        self.next_id += 1
+        from datetime import datetime as _dt
+        self.eval_runs.append({
+            "id": self.next_id, "tenant_id": tenant_id, "total": total,
+            "lulus": lulus, "pelanggaran_verifier": pelanggaran_verifier,
+            "pass_rate": pass_rate, "detail": None,
+            "dijalankan_oleh": "admin",
+            "created_at": _dt(2026, 9, 1, 10, 0)})
+        return self.eval_runs[-1]
 
     async def fetchrow(self, sql, *args):
         if "FROM tenants WHERE branch_code" in sql:
@@ -64,6 +81,12 @@ class FakeCorePoolT2(FakeCorePool):
             if self.tenant and self.tenant["branch_code"] == args[0]:
                 return {"id": self.tenant["tenant_id"]}
             return None
+        if "FROM eval_runs" in sql:
+            # F2.7 gate: snapshot eval terbaru milik tenant (terbaru dulu)
+            tenant_id = args[0]
+            kandidat = [r for r in self.eval_runs
+                        if r["tenant_id"] == tenant_id]
+            return kandidat[-1] if kandidat else None
         if "FROM users WHERE id" in sql:
             return {"role": self.user_role, "is_active": True}
         return await super().fetchrow(sql, *args)
@@ -177,6 +200,9 @@ class TestToggleTier2:
                            json={"enabled": enabled})
 
     def test_toggle_on(self, lingkungan_admin):
+        # F2.7: toggle ON melewati gate eval — seed snapshot lulus dulu.
+        lingkungan_admin.core.seed_eval_run(pass_rate=1.0,
+                                            pelanggaran_verifier=0)
         resp = self._post(lingkungan_admin.client, enabled=True)
         assert resp.status_code == 200
         assert resp.json() == {"branch_code": "JKT_01", "chat_tier2": True}
@@ -190,6 +216,8 @@ class TestToggleTier2:
         assert audit[0]["user_id"] == 1
 
     def test_toggle_off_setelah_on(self, lingkungan_admin):
+        lingkungan_admin.core.seed_eval_run(pass_rate=1.0,
+                                            pelanggaran_verifier=0)
         assert self._post(lingkungan_admin.client, enabled=True).status_code == 200
         resp = self._post(lingkungan_admin.client, enabled=False)
         assert resp.status_code == 200
@@ -197,6 +225,42 @@ class TestToggleTier2:
         assert lingkungan_admin.core.updated_tier2 == ("JKT_01", False)
         statuses = [a["status"] for a in lingkungan_admin.core.audit_logs]
         assert statuses == ["success", "success"]
+
+    # ---------------- F2.7: gate eval pada toggle ON ----------------------
+    def test_toggle_on_ditolak_belum_pernah_eval(self, lingkungan_admin):
+        resp = self._post(lingkungan_admin.client, enabled=True)
+        assert resp.status_code == 400
+        assert "jalankan eval dulu" in resp.json()["detail"]
+        assert lingkungan_admin.core.updated_tier2 is None  # flag tak berubah
+        assert lingkungan_admin.core.tenant["chat_tier2"] is False
+        # percobaan ditolak tetap ter-audit
+        assert lingkungan_admin.core.audit_logs[0]["status"] == "error"
+
+    def test_toggle_on_ditolak_pass_rate_rendah(self, lingkungan_admin):
+        lingkungan_admin.core.seed_eval_run(pass_rate=0.9,
+                                            pelanggaran_verifier=0)
+        resp = self._post(lingkungan_admin.client, enabled=True)
+        assert resp.status_code == 400
+        detail = resp.json()["detail"]
+        assert "pass_rate" in detail and "90%" in detail
+        assert "95%" in detail
+        assert lingkungan_admin.core.updated_tier2 is None
+
+    def test_toggle_on_ditolak_ada_pelanggaran(self, lingkungan_admin):
+        # pass_rate penuh tetap ditolak bila ada pelanggaran verifier
+        lingkungan_admin.core.seed_eval_run(pass_rate=1.0,
+                                            pelanggaran_verifier=2)
+        resp = self._post(lingkungan_admin.client, enabled=True)
+        assert resp.status_code == 400
+        assert "pelanggaran" in resp.json()["detail"]
+        assert lingkungan_admin.core.updated_tier2 is None
+
+    def test_toggle_off_tanpa_eval_tetap_boleh(self, lingkungan_admin):
+        # mematikan flag tidak butuh gate
+        resp = self._post(lingkungan_admin.client, enabled=False)
+        assert resp.status_code == 200
+        assert resp.json()["chat_tier2"] is False
+        assert lingkungan_admin.core.updated_tier2 == ("JKT_01", False)
 
     def test_tenant_tak_ada_404_teraudit(self, lingkungan_admin):
         resp = self._post(lingkungan_admin.client, branch="XXX_99")

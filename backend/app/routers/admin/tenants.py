@@ -14,6 +14,7 @@ import logging
 from app.core.database import get_core_pool
 from app.core.security import require_admin_role, decrypt_credential
 from app.services.chat_pipeline import tulis_audit
+from app.services.eval_runner import ambil_run_terakhir, status_gate
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["Admin - Tenants"])
@@ -279,9 +280,13 @@ async def set_tenant_tier2(branch_code: str, payload: Tier2ToggleRequest,
     """Aktifkan/matikan jalur Tier 2 (docs v2 §1) untuk satu tenant.
 
     Flag `tenants.chat_tier2` default FALSE (migration 008) — pipeline chat
-    memakai alur lama (planner -> composer) selama flag mati. Keputusan admin
-    ter-audit ke audit_logs (pola tulis_audit chat_pipeline): sukses maupun
-    percobaan pada cabang yang tidak ada (404) — pensondelan terlihat.
+    memakai alur lama (planner -> composer) selama flag mati. F2.7 (docs v2
+    §8): mengaktifkan flag (enabled=True) kini MELEWATI GATE eval harness —
+    snapshot eval_runs terakhir tenant harus pass_rate >= 0.95 dengan 0
+    pelanggaran verifier; belum pernah eval -> ditolak ("jalankan eval
+    dulu"). Mematikan flag TIDAK memerlukan gate. Keputusan admin ter-audit
+    ke audit_logs (pola tulis_audit chat_pipeline): sukses maupun percobaan
+    yang ditolak (404/gate) — pensondelan terlihat.
     """
     pool = await get_core_pool()
     try:
@@ -297,6 +302,20 @@ async def set_tenant_tier2(branch_code: str, payload: Tier2ToggleRequest,
                 generated_sql=None, execution_time_ms=None,
                 status="error", error_message=pesan)
             raise HTTPException(status_code=404, detail=pesan)
+        if payload.enabled:
+            # F2.7 gate aktivasi: snapshot eval terakhir menentukan.
+            run_terakhir = await ambil_run_terakhir(pool, row["id"])
+            gate = status_gate({"branch_code": branch_code}, run_terakhir)
+            if not gate["tier2_diizinkan"]:
+                await tulis_audit(
+                    pool, user_id=(user or {}).get("user_id"),
+                    branch_code=branch_code,
+                    prompt_text=f"[tier2-toggle] {branch_code}",
+                    ai_json_filter={"chat_tier2": True,
+                                    "gate_ditolak": gate["alasan"]},
+                    generated_sql=None, execution_time_ms=None,
+                    status="error", error_message=gate["alasan"])
+                raise HTTPException(status_code=400, detail=gate["alasan"])
     except HTTPException:
         raise
     await pool.execute(
