@@ -34,7 +34,7 @@ export default function AIConfigModal({ isOpen, onClose, onSave, editing }) {
           model: '',
           temperature: 0.7,
           api_type: 'openai',
-          base_url: 'https://api.openai.com/v1',
+          base_url: '', // kosong: wajib diisi sesuai provider (default OpenAI menyesatkan utk provider lain)
         }
   );
   const [showPass, setShowPass] = useState(false);
@@ -121,6 +121,12 @@ export default function AIConfigModal({ isOpen, onClose, onSave, editing }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    // Base URL wajib utk api_type openai — default OpenAI menyesatkan utk provider lain
+    // (insiden 2026-09-02: key ByNara + base_url OpenAI = gagal test & fetch model).
+    if (form.api_type === 'openai' && !form.base_url.trim()) {
+      toast.error('Base URL wajib diisi (harus cocok dengan provider API key-mu)');
+      return;
+    }
     // Payload identik dengan skema backend; password/api_key kosong saat edit = tidak diubah
     onSave({ ...form, target_id: form.target_id.trim() });
   };
@@ -212,8 +218,12 @@ export default function AIConfigModal({ isOpen, onClose, onSave, editing }) {
             <div>
               <label className="block text-sm font-medium text-ink mb-1">Base URL</label>
               <input type="text" value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })}
-                placeholder="https://api.agentrouter.com/v1"
+                placeholder="https://provider-kamu.com/v1"
                 className="w-full px-3 py-2 border border-hairline rounded-md bg-canvas focus:ring-2 focus:ring-primary/30 h-9 text-sm" />
+              <p className="text-[11px] text-muted mt-1">
+                Harus cocok dengan provider API key-mu (contoh Groq: <code>https://api.groq.com/openai/v1</code>).
+                Salah kombinasi = gagal test &amp; fetch model.
+              </p>
             </div>
             <div>
               <label className="block text-sm font-medium text-ink mb-1">API Key</label>
