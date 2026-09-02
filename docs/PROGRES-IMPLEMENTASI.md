@@ -2,7 +2,7 @@
 
 > Dokumen kontinuitas: dibaca PERTAMA kali oleh AI/engineer yang melanjutkan kerja.
 > Update dokumen ini SETIAP selesai satu fase. Jangan hapus riwayat — tambahkan.
-> Terakhir diperbarui: 2026-09-01 (F2.6 Tier 2 selesai — arsitektur v2 KOMPLET).
+> Terakhir diperbarui: 2026-09-02 (F2.7 eval harness selesai — janji desain v2 tuntas).
 
 ## 0. Cara cepat paham konteks (5 menit)
 
@@ -44,6 +44,7 @@ F6    Hardening (kuota, Redis rate limit, cache, metrik)
 | **F4 UI chat nyata + skema efektif** | selesai | `6961f3a` | UI chat -> POST /chat/query (badge keyakinan, Lihat SQL, Jawaban benar/salah); KB `tabel_diizinkan`+`kolom_dikecualikan` -> skema efektif per tenant (DB 2.387 tabel terkelola); prompt planner dipadatkan 37.648->9.109 chars (lolos TPM); live: Groq/GLM tier1 B + replay memory A |
 | **F2.5 Presenter + Number Check** | selesai | `653ea0c` | `presenter.py`: ringkasan maks 2 kalimat + saran lanjutan; NUMBER CHECK id-ID (ribuan titik/desimal koma/persen) — angka karangan ditolak, 1x retry, fallback template; migration 007 (sql_memory.ringkasan+saran); replay pakai cache = 0 LLM, self-heal bila kosong; UI: paragraf ringkasan + chip saran; 385 test |
 | **F2.6 Tier 2 Verified Text2SQL** | selesai | `238ad2d` | Generator 1-panggilan router tier1/tier2 + self-repair maks 2x (feedback verifier); flag `chat_tier2` per tenant (default OFF, toggle admin UI); tier2 = source tier2/Level C/attempts; replay tier2 dgn literal tanggal = MISS; fallback tier1 otomatis; 410 test |
+| **F2.7 Eval Harness Golden-Set** | selesai | `2df6c41` | eval_cases (009) + eval_runs (010); jalankan_eval (persis/semantik/pelanggaran), status_gate pass>=95% & 0 pelanggaran; toggle Tier 2 kini wajib lolos gate; admin CRUD eval-cases + eval-run + riwayat; 458 test |
 | F2.5 Tier 2 + eval | ⬜ belum | — | Jangan mulai sebelum verifier teruji |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
@@ -240,6 +241,22 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
 - UI: chip 'Tier 2 ON/OFF' per tenant (Admin), badge 'SQL Kompleks (Level C)' +
   'N percobaan' di chat.
 - BELUM: eval harness golden-set (gate aktivasi otomatis), metrik mingguan, kuota token.
+
+## 3g. Detail F2.7 Eval Harness (2026-09-02)
+
+- Golden set per tenant: tabel `eval_cases` (pertanyaan + sql_harapan; sql_harapan wajib
+  lolos verify_sql saat dibuat/diedit — golden set salah tidak boleh masuk).
+- `POST /admin/tenants/{b}/eval-run`: jalankan_eval memanggil pipeline internal per case
+  (tanpa presenter), bandingkan SQL final vs harapan: `persis` (normalisasi: lowercase,
+  spasi, kutip-ganda, LIMIT implisit) atau `semantik` (eksekusi keduanya, bandingkan hasil
+  maks 20 baris, params dipakai utk SQL pipeline). Pelanggaran verifier dihitung terpisah.
+- Snapshot ke `eval_runs`; `GET eval-runs?limit=5` riwayat.
+- GATE: `status_gate` — Tier 2 hanya boleh diaktifkan bila run terakhir pass_rate>=95%
+  & 0 pelanggaran; toggle menolak 400 + pesan alasan (belum pernah run -> 'jalankan eval
+  dulu'). Ini melaksanakan janji v2 §8 secara mekanis.
+- Alat regresi: eval TIDAK mengubah state (memory tidak di-stale saat eval).
+- Sisa roadmap desain v2: hanya F5 (laporan+export PDF) & F6 (hardening: kuota token,
+  Redis rate limit, cache skema, metrik mingguan) — keduanya peningkatan, bukan fondasi.
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
