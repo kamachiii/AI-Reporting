@@ -140,9 +140,11 @@ async def update_user(user_id: int, payload: UserUpdate, user: dict = Depends(re
 
         async with pool.acquire() as conn:
             async with conn.transaction():
+                # current_role dibutuhkan JUGA oleh safety-net branch (baris bawah)
+                # saat payload tanpa role — ambil SELALU, bukan hanya saat demote.
+                current_role = await conn.fetchval("SELECT role FROM users WHERE id = $1", user_id)
                 # Demote admin terakhir? Tolak.
                 if new_role == "user":
-                    current_role = await conn.fetchval("SELECT role FROM users WHERE id = $1", user_id)
                     if current_role == "admin":
                         active_admins = await _count_active_admins(pool)
                         if active_admins <= 1:

@@ -61,3 +61,21 @@ class TestScopeTargetShape:
     def test_valid_target_ok(self):
         validate_scope_target_shape("tenant", "JKT_01")
         validate_scope_target_shape("user", "tester01")
+
+
+class TestUpdateBranchWithoutRole:
+    """Regresi bug live 2026-09-02: PUT /admin/users/{id} dgn branch_codes saja
+    (tanpa role) -> NameError current_role -> 500. Harus 200."""
+
+    def test_current_role_always_fetched(self):
+        # Verifikasi statis: current_role di-assign SEBELUM blok demote, di luar if.
+        import re
+        src = open(r"D:/Kerja PKL/ai-report-database-mandiri/backend/app/routers/admin/users.py",
+                   encoding="utf-8").read()
+        m = re.search(r"current_role = await conn\.fetchval", src)
+        assert m, "current_role assignment hilang"
+        line_start = src[:m.start()].rfind("\n")
+        indent = src[line_start+1:line_start+1+16]
+        # assignment harus di level body transaksi (16 spasi), bukan di dalam if demote (20 spasi)
+        assert indent.startswith(" " * 16) and not indent.startswith(" " * 20), \
+            f"current_role di-indent {len(indent)-indent.count(' ')} level — harus level transaksi"
