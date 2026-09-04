@@ -1,6 +1,11 @@
 # 🤖 DMS AI Platform — AI-Powered Report & Database Management System
 
-> Platform multi-tenant untuk mengelola database dan menghasilkan laporan berbasis AI. Admin dapat mengkonfigurasi koneksi database per cabang (branch), memilih AI provider (OpenAI / Anthropic), dan user cukup bertanya dalam bahasa natural untuk mendapatkan data.
+> Platform multi-tenant untuk mengelola database dan menghasilkan laporan berbasis AI. Admin dapat mengkonfigurasi koneksi database per cabang (branch), memilih AI provider (OpenAI / Anthropic / ByNara / Ollama), dan user cukup bertanya dalam bahasa natural untuk mendapatkan data.
+
+> [!IMPORTANT]
+> **Struktur Versi & Git Branching:**
+> - **Branch `v2` (Arsitektur Two-Tier)**: Diarsipkan sebagai jaring pengaman sistem. Berisi implementasi penuh Tier 1 (Planner JSON deterministik) dan Tier 2 (LLM query bebas dengan Verifier 6 Gerbang AST default-deny). Dapat diaktifkan kembali sewaktu-waktu dengan `git checkout v2`.
+> - **Branch `master` (Arsitektur Unified Vanna AI + pgvector)**: Versi utama aktif yang mengintegrasikan engine Vanna resmi, basis data vektor terpadu PostgreSQL (`pgvector`), mode ganda embedding (Lokal `all-MiniLM-L6-v2` vs Cloud API), pembungkus multi-tenant asinkron, proteksi timeout 15 detik, dan visualizer grafik interaktif React Plotly (0 token).
 
 ---
 
