@@ -538,6 +538,22 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Frontend: `npm run lint` 0 errors, `npm run build` exit 0 (1.05s).
   - Backend: **527 passed in 39.80s** (tidak ada regresi backend).
 
+### 3q. Pembersihan Emoji & Standarisasi Icon SVG Lucide (commit: 6b87bd3)
+
+- **Masalah**:
+  - Ditemukan beberapa teks tombol dan modal yang masih memuat emoji unicode mentah (`✨`, `✦`, `⏳`, `⚠️`, `ℹ️`, `⌄`, `✓`), yang menyebabkan tampilan tidak konsisten/ganda dengan icon SVG (misal tombol Explain menampilkan icon `<Sparkles>` dan emoji `✨` sekaligus).
+- **Perbaikan**:
+  1. `frontend/src/components/User/AssistantAnswerCard.jsx`: Menghapus emoji `✨` pada label tombol Explain — tombol kini bersih hanya mengandalkan `<Sparkles size={12} />` dari Lucide.
+  2. `frontend/src/components/LoginModal.jsx`: Mengganti simbol `✦` dengan icon resmi `<Sparkles className="w-6 h-6 text-primary" />`.
+  3. `frontend/src/components/Admin/ai/AIConfigModal.jsx`: Mengganti unicode chevron `⌄` dengan `<ChevronDown size={14} />`, dan membersihkan emoji pada notifikasi toast.
+  4. `frontend/src/components/Admin/tenants/ConnectDbModal.jsx`: Menghapus simbol centang unicode `✓` pada teks dropdown.
+  5. `frontend/src/App.jsx`: Menghapus custom emoji `⏳` pada toast sesi expired dan menggantinya dengan `toast.error()`.
+- **Hasil Verifikasi**:
+  - Pemindaian regex unicode di seluruh direktori `frontend/src/`: **0 emoji tersisa**.
+  - Frontend `npm run lint`: **0 errors**.
+  - Frontend `npm run build`: **Exit code 0**.
+  - Backend `pytest tests/ -q`: **527 passed in 35.61s**.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
