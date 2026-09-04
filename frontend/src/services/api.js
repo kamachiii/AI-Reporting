@@ -257,6 +257,23 @@ export const api = {
       { branch_code: branchCode, memory_id: memoryId });
     return response.data;
   },
+  explainChat: async ({ branchCode, question, sql, rows }) => {
+    const response = await apiClient.post('/chat/explain', {
+      branch_code: branchCode,
+      question,
+      sql,
+      rows,
+    });
+    return response.data;
+  },
+  trainVanna: async ({ branchCode, question, sql }) => {
+    const response = await apiClient.post('/admin/vanna/train', {
+      branch_code: branchCode,
+      question,
+      sql,
+    });
+    return response.data;
+  },
 
   // ==========================================
   // 6. ADMIN: GLOBAL KNOWLEDGE BASE (F3/F3.1)

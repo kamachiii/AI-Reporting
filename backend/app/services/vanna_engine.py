@@ -6,6 +6,7 @@ Menggunakan:
 3. Eksekusi langsung ke database tenant tanpa pembatasan gerbang verifier kaku.
 4. Hemat token: Tanpa panggilan presenter kedua, tanpa 'saran pertanyaan lanjutan'.
 """
+import asyncio
 import json
 import logging
 import re
@@ -22,8 +23,12 @@ from app.services.chat_pipeline import (
 )
 from app.services.query_executor import _konversi_nilai
 from app.services.query_planner import AIConfigError, panggil_llm_default, resolve_ai_config
+from app.services.vanna_pgvector import cari_konteks_pgvector
 
 logger = logging.getLogger(__name__)
+
+# Concurrency Semaphore untuk membatasi beban query AI serentak (maksimal 5 serentak)
+VANNA_SEMAPHORE = asyncio.Semaphore(5)
 
 STOPWORDS = {
     'dan', 'di', 'ke', 'dari', 'pada', 'untuk', 'yang', 'ini', 'itu',
@@ -33,8 +38,13 @@ STOPWORDS = {
 }
 
 
-async def ambil_konteks_vanna(core_pool, question: str) -> tuple[str, list[str]]:
-    """Cari tabel dan DDL relevan dari global_knowledge_base menggunakan kata kunci pertanyaan."""
+async def ambil_konteks_vanna(core_pool, question: str, branch_code: str = "GLOBAL") -> tuple[str, list[str]]:
+    """Cari tabel dan DDL relevan menggunakan pgvector semantic search (fallback ke ILIKE jika error)."""
+    try:
+        return await cari_konteks_pgvector(core_pool, branch_code, question, limit=8)
+    except Exception as e:
+        logger.warning("Pencarian pgvector gagal (%s), fallback ke pencarian teks ILIKE...", e)
+
     raw_words = re.findall(r'[a-zA-Z0-9_]+', question.lower())
     words = [w for w in raw_words if len(w) >= 3 and w not in STOPWORDS]
 
@@ -293,32 +303,37 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
 
         ai_config = await resolve_ai_config(core_pool, user.get("username", ""), branch_code)
         
-        # 1. Ambil Konteks dari GKB
-        context_text, _ = await ambil_konteks_vanna(core_pool, question)
-        
-        # 2. Susun Prompt Vanna
-        vanna_prompt = susun_prompt_vanna(question, context_text)
-        
-        # 3. Panggil LLM (Hanya 1 Panggilan Tunggal!)
-        panggil_fn = llm_call_fn or panggil_llm_default
-        system_msg = "You are a Postgres expert. Respond only with SQL code block."
-        raw_output = await panggil_fn(system_msg, vanna_prompt, ai_config)
-        
-        # 4. Ekstrak SQL
-        sql = ekstrak_sql(raw_output)
-        if not sql.lower().startswith("select") and not sql.lower().startswith("with"):
-            raise ValueError(f"AI tidak menghasilkan kueri SELECT yang valid: {raw_output[:200]}")
+        async with VANNA_SEMAPHORE:
+            # 1. Ambil Konteks Semantik Murni dari pgvector (dengan fallback aman)
+            context_text, _ = await ambil_konteks_vanna(core_pool, question, branch_code)
+            
+            # 2. Susun Prompt Vanna
+            vanna_prompt = susun_prompt_vanna(question, context_text)
+            
+            # 3. Panggil LLM (Hanya 1 Panggilan Tunggal!)
+            panggil_fn = llm_call_fn or panggil_llm_default
+            system_msg = "You are a Postgres expert. Respond only with SQL code block."
+            raw_output = await panggil_fn(system_msg, vanna_prompt, ai_config)
+            
+            # 4. Ekstrak SQL
+            sql = ekstrak_sql(raw_output)
+            if not sql.lower().startswith("select") and not sql.lower().startswith("with"):
+                raise ValueError(f"AI tidak menghasilkan kueri SELECT yang valid: {raw_output[:200]}")
 
-        # 5. Eksekusi ke Database Tenant (dengan 1x Auto Self-Repair jika ada Postgres column/syntax error)
-        db_rows = None
-        pool_tenant = await tenant_pool_manager.get_pool(tenant)
-        async with pool_tenant.acquire() as conn:
-            await conn.execute("SET statement_timeout = '30000'")
-            try:
-                db_rows = await conn.fetch(sql)
-            except Exception as sql_err:
-                logger.warning("Vanna SQL gagal di percobaan 1: %s. Menjalankan auto-repair...", sql_err)
-                repair_prompt = f"""You previously generated this SQL:
+            # 5. Eksekusi ke Database Tenant (Timeout 15 detik + 1x Auto Self-Repair)
+            db_rows = None
+            pool_tenant = await tenant_pool_manager.get_pool(tenant)
+            async with pool_tenant.acquire() as conn:
+                await conn.execute("SET statement_timeout = '15000'")
+                try:
+                    db_rows = await conn.fetch(sql)
+                except Exception as sql_err:
+                    err_msg = str(sql_err).lower()
+                    if "timeout" in err_msg or "canceling statement" in err_msg:
+                        raise TimeoutError("Kueri membutuhkan waktu kalkulasi terlalu lama (>15 detik). Silakan persempit filter atau rentang waktu kueri Anda.")
+                    
+                    logger.warning("Vanna SQL gagal di percobaan 1: %s. Menjalankan auto-repair...", sql_err)
+                    repair_prompt = f"""You previously generated this SQL:
 ```sql
 {sql}
 ```
@@ -329,36 +344,60 @@ Please fix the query. Note:
 - Use physical tables like untt_penjualan (with column 'tanggal', 'hjakhir', 'batal') or untt_pembelian if views lack the required date columns.
 - Ensure all referenced columns exist in the table.
 Return ONLY the corrected SQL query in ```sql ... ``` code block."""
-                raw_repair = await panggil_fn(system_msg, repair_prompt, ai_config)
-                repaired_sql = ekstrak_sql(raw_repair)
-                if repaired_sql.lower().startswith("select") or repaired_sql.lower().startswith("with"):
-                    sql = repaired_sql
-                    db_rows = await conn.fetch(sql)
-                else:
-                    raise sql_err
+                    raw_repair = await panggil_fn(system_msg, repair_prompt, ai_config)
+                    repaired_sql = ekstrak_sql(raw_repair)
+                    if repaired_sql.lower().startswith("select") or repaired_sql.lower().startswith("with"):
+                        sql = repaired_sql
+                        db_rows = await conn.fetch(sql)
+                    else:
+                        raise sql_err
 
-        durasi_ms = int((time.monotonic() - t0) * 1000)
+            durasi_ms = int((time.monotonic() - t0) * 1000)
 
-        # 6. Format Hasil
-        columns = [k for k in db_rows[0].keys()] if db_rows else []
-        rows = [[_konversi_nilai_vanna(v) for v in r.values()] for r in db_rows[:500]]
-        ringkasan = _format_ringkasan_otomatis(db_rows[:500], columns)
+            # 6. Format Hasil & Cek Mode Eksekutif vs Operasional
+            columns = [k for k in db_rows[0].keys()] if db_rows else []
+            rows = [[_konversi_nilai_vanna(v) for v in r.values()] for r in db_rows[:500]]
+            
+            # Cek setting narasi (User override atau Tenant default)
+            user_narration = user.get("auto_narration")
+            tenant_narration = tenant.get("auto_narration", False)
+            is_auto_narration = user_narration if user_narration is not None else tenant_narration
+            
+            if is_auto_narration and rows:
+                # Mode Eksekutif: LLM membuat narasi analitik
+                try:
+                    narr_prompt = f"""Data query hasil database:
+Pertanyaan: {question}
+Hasil (maks 5 baris pertama): {json.dumps(rows[:5], default=str)}
+Total data: {len(rows)} baris.
+Berikan ringkasan naratif eksekutif singkat (2-3 kalimat) dalam bahasa Indonesia yang menyorot tren dan angka penting."""
+                    ringkasan = await panggil_fn("You are a business analytics expert. Provide concise Indonesian executive summary.", narr_prompt, ai_config)
+                    allow_explain = False
+                except Exception as e_narr:
+                    logger.warning("Gagal membuat narasi eksekutif: %s", e_narr)
+                    ringkasan = _format_ringkasan_otomatis(db_rows[:500], columns)
+                    allow_explain = True
+            else:
+                # Mode Operasional: Ringkasan lokal cepat (0 token) + Tombol Jelaskan Lebih Dalam aktif
+                ringkasan = _format_ringkasan_otomatis(db_rows[:500], columns)
+                allow_explain = True
 
-        response = {
-            "source": "vanna",
-            "confidence": "A",
-            "sql": sql,
-            "params": [],
-            "columns": columns,
-            "rows": rows,
-            "row_count": len(rows),
-            "truncated": len(db_rows) > 500,
-            "duration_ms": durasi_ms,
-            "memory_id": None,
-            "ringkasan": ringkasan,
-            "saran": [],
-            "metode": "vanna"
-        }
+            response = {
+                "source": "vanna",
+                "confidence": "A",
+                "sql": sql,
+                "params": [],
+                "columns": columns,
+                "rows": rows,
+                "row_count": len(rows),
+                "truncated": len(db_rows) > 500,
+                "duration_ms": durasi_ms,
+                "memory_id": None,
+                "ringkasan": ringkasan,
+                "saran": [],
+                "metode": "vanna",
+                "allow_explain": allow_explain
+            }
 
         # Simpan ke SQL Memory agar pertanyaan yang sama berikutnya bernilai 0 token!
         try:
@@ -409,3 +448,31 @@ Return ONLY the corrected SQL query in ```sql ... ``` code block."""
             error_message=str(e)
         )
         raise
+
+
+async def buat_penjelasan_naratif(
+    core_pool,
+    user: dict,
+    branch_code: str,
+    question: str,
+    sql: str,
+    rows: list
+) -> str:
+    """Buat narasi penjelasan mendalam on-demand saat user mengklik tombol 'Jelaskan Lebih Dalam'."""
+    ai_config = await resolve_ai_config(core_pool, user.get("username", ""), branch_code)
+    panggil_fn = panggil_llm_default
+    narr_prompt = f"""Kueri Data:
+Pertanyaan: {question}
+SQL: {sql}
+Hasil Data (sampel 5 baris pertama):
+{json.dumps(rows[:5], default=str)}
+Total Baris: {len(rows)}
+
+Buatkan analisis naratif mendalam dan profesional dalam bahasa Indonesia mengenai data di atas untuk membantu pengambilan keputusan bisnis dealer."""
+    
+    return await panggil_fn(
+        "You are a senior business data analyst. Provide thorough and insightful business narrative in Indonesian.",
+        narr_prompt,
+        ai_config
+    )
+

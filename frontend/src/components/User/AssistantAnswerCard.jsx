@@ -1,7 +1,13 @@
-import { useState } from 'react';
+import { Component, useState } from 'react';
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight, Database, Layers, Sparkles, X, Zap,
+  BarChart2, Table as TableIcon, Loader2, GraduationCap,
 } from 'lucide-react';
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
+} from 'recharts';
+import { api } from '../../services/api';
+import toast from 'react-hot-toast';
 
 /** Durasi ms -> teks ringkas ("320 ms" / "1,4 dtk"). */
 function formatDurasi(ms) {
@@ -87,27 +93,113 @@ function formatSel(nilai, colName = '') {
   return String(nilai);
 }
 
-/**
- * Kartu jawaban asisten dari Chat API nyata (F4 + presenter F2.5).
- *
- * `answer` = response POST /chat/query: {source, confidence, sql, columns,
- * rows, row_count, truncated, duration_ms, memory_id, ringkasan, saran, metode}.
- * `ringkasan` (string|null) = narasi F2.5 — tampil di atas tabel data.
- * `saran` (array string) = pertanyaan lanjutan — chip di BAWAH kartu, klik
- * -> onAsk(text); disembunyikan bila jawaban ditolak. History lama tanpa
- * kedua field ini tampil persis seperti sebelumnya.
- *
- * `source === "tier2"` (F2.6) = jawaban jalur Verified Text2SQL — badge
- * "SQL Kompleks (Level C)" bernuansa beige hangat, berbeda dari "Jawaban baru".
- * `attempts` (int, hanya tier2) = jumlah percobaan self-repair — >1 ditampilkan
- * di meta baris sebagai transparansi repair loop.
- *
- * `memoryStatus`: 'confirmed' | 'rejected' (hasil feedback user, lokal) —
- * undefined selama belum dinilai. Tombol feedback tampil hanya untuk
- * jawaban yang punya memory_id (entri SQL memory pending).
- */
+/** Deteksi apakah hasil data kueri cocok untuk ditampilkan sebagai grafik (0 token). */
+function deteksiKecocokanGrafik(columns, rows) {
+  if (!columns || !rows || rows.length === 0) return { cocok: false };
+
+  let categoryIdx = -1;
+  const numericIndices = [];
+
+  for (let i = 0; i < columns.length; i += 1) {
+    const colName = String(columns[i]).toLowerCase();
+    const sampleVal = rows[0]?.[i] !== undefined ? rows[0][i] : rows[0]?.[columns[i]];
+    const isNum = typeof sampleVal === 'number' || (!Number.isNaN(Number(sampleVal)) && String(sampleVal).trim() !== '');
+
+    const isPriorityCategory = /tahun|thn|year|bulan|bln|month|periode|cabang|nama|kategori|tipe|model|jenis/i.test(colName);
+
+    if (isPriorityCategory && categoryIdx === -1) {
+      categoryIdx = i;
+    } else if (isNum && !isPriorityCategory) {
+      numericIndices.push(i);
+    } else if (!isNum && categoryIdx === -1) {
+      categoryIdx = i;
+    }
+  }
+
+  if (categoryIdx === -1 && columns.length > 1) {
+    categoryIdx = 0;
+  }
+
+  if (numericIndices.length === 0) {
+    for (let i = 0; i < columns.length; i += 1) {
+      if (i !== categoryIdx) {
+        const sampleVal = rows[0]?.[i] !== undefined ? rows[0][i] : rows[0]?.[columns[i]];
+        if (typeof sampleVal === 'number' || (!Number.isNaN(Number(sampleVal)) && String(sampleVal).trim() !== '')) {
+          numericIndices.push(i);
+        }
+      }
+    }
+  }
+
+  if (categoryIdx === -1 || numericIndices.length === 0) {
+    return { cocok: false };
+  }
+
+  const categoryCol = columns[categoryIdx];
+  const valueCols = numericIndices.map((idx) => columns[idx]);
+
+  const chartData = rows.slice(0, 30).map((r) => {
+    const cells = Array.isArray(r) ? r : Object.values(r || {});
+    const obj = { [categoryCol]: String(cells[categoryIdx] ?? '') };
+    numericIndices.forEach((numIdx) => {
+      const colName = columns[numIdx];
+      const val = Number(cells[numIdx]);
+      obj[colName] = Number.isNaN(val) ? 0 : val;
+    });
+    return obj;
+  });
+
+  return {
+    cocok: true, categoryCol, valueCols, chartData,
+  };
+}
+
+const BAR_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
+
+/** Silent Error Boundary: Cegah error runtime chart agar tidak merusak UI user. */
+class SilentChartErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, info) {
+    console.warn('AutoChart visualizer silent fallback to table:', error, info);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback;
+    }
+    return this.props.children;
+  }
+}
+
+function CustomChartTooltip({ active, payload, label }) {
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-white border border-hairline rounded-lg p-2 shadow-md text-xs">
+        <p className="font-semibold text-ink mb-1">{label}</p>
+        {payload.map((entry, index) => (
+          <p key={index} style={{ color: entry.color }} className="flex justify-between gap-3">
+            <span>{entry.name}:</span>
+            <span className="font-medium">{formatSel(entry.value, entry.name)}</span>
+          </p>
+        ))}
+      </div>
+    );
+  }
+  return null;
+}
+
 export default function AssistantAnswerCard({
   answer,
+  question,
+  branchCode,
   createdAt,
   memoryStatus,
   feedbackBusy,
@@ -116,12 +208,54 @@ export default function AssistantAnswerCard({
   onReject,
 }) {
   const [tampilSql, setTampilSql] = useState(false);
+  const [activeTab, setActiveTab] = useState('table'); // 'table' | 'chart'
+  const [penjelasan, setPenjelasan] = useState(null);
+  const [loadingExplain, setLoadingExplain] = useState(false);
+  const [trainingBusy, setTrainingBusy] = useState(false);
+  const [trained, setTrained] = useState(false);
+
   const durasi = formatDurasi(answer.duration_ms);
   const terverifikasi = answer.source === 'memory' || memoryStatus === 'confirmed';
   const ditolak = memoryStatus === 'rejected';
-  // Chip saran hanya tampil bila ada isinya dan bisa dikirim (onAsk tersedia);
-  // jawaban berstatus ditolak tidak diberi saran lanjutan.
   const saran = !ditolak && onAsk && Array.isArray(answer.saran) ? answer.saran : [];
+
+  const grafikConfig = deteksiKecocokanGrafik(answer.columns, answer.rows);
+
+  const handleExplain = async () => {
+    if (loadingExplain || !branchCode) return;
+    setLoadingExplain(true);
+    try {
+      const res = await api.explainChat({
+        branchCode,
+        question: question || answer.question || '',
+        sql: answer.sql,
+        rows: answer.rows,
+      });
+      setPenjelasan(res.narasi);
+    } catch {
+      toast.error('Gagal memuat penjelasan naratif.');
+    } finally {
+      setLoadingExplain(false);
+    }
+  };
+
+  const handleTrain = async () => {
+    if (trainingBusy || trained || !branchCode) return;
+    setTrainingBusy(true);
+    try {
+      await api.trainVanna({
+        branchCode,
+        question: question || answer.question || '',
+        sql: answer.sql,
+      });
+      setTrained(true);
+      toast.success('Jawaban berhasil dilatih ke AI (pgvector)!');
+    } catch {
+      toast.error('Gagal melatih AI.');
+    } finally {
+      setTrainingBusy(false);
+    }
+  };
 
   return (
     <>
@@ -141,7 +275,7 @@ export default function AssistantAnswerCard({
           ) : answer.source === 'vanna' ? (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-card text-ink border border-hairline text-[11px] font-medium">
               <Zap size={11} className="text-muted" />
-              Mode Vanna
+              Mode Vanna (pgvector)
             </span>
           ) : answer.source === 'tier2' ? (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-card text-ink text-[11px] font-medium">
@@ -159,14 +293,71 @@ export default function AssistantAnswerCard({
           </span>
         </div>
 
-        {/* Ringkasan naratif (F2.5) — di atas tabel data */}
+        {/* Ringkasan naratif / ringkasan otomatis */}
         {answer.ringkasan && (
           <p className="border-l-2 border-primary/40 pl-3 font-serif italic text-[15px] leading-relaxed text-ink">
             {bersihkanRingkasan(answer.ringkasan)}
           </p>
         )}
 
-        {/* Tabel data — atau EmptyState bila query tidak mengembalikan baris */}
+        {/* Tombol On-Demand Explain (Mode Operasional) */}
+        {answer.allow_explain && !penjelasan && (
+          <div className="pt-0.5">
+            <button
+              type="button"
+              onClick={handleExplain}
+              disabled={loadingExplain}
+              className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium border border-primary/30 rounded-lg text-primary bg-primary/5 hover:bg-primary/10 transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              {loadingExplain ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+              {loadingExplain ? 'Menganalisis data mendalam...' : '✨ Jelaskan Lebih Dalam dengan AI'}
+            </button>
+          </div>
+        )}
+
+        {/* Hasil Narasi Analisis Eksekutif On-Demand */}
+        {penjelasan && (
+          <div className="bg-surface-soft border border-hairline rounded-lg p-3 text-xs leading-relaxed text-ink space-y-1.5 animate-fadeIn">
+            <div className="flex items-center gap-1.5 text-primary font-medium text-[11px] uppercase tracking-wider">
+              <Sparkles size={12} />
+              <span>Analisis Eksekutif AI</span>
+            </div>
+            <p className="whitespace-pre-wrap text-body font-sans">{penjelasan}</p>
+          </div>
+        )}
+
+        {/* Switcher Tab: Tabel Data vs Grafik Otomatis (0 token) */}
+        {grafikConfig.cocok && answer.rows.length > 0 && (
+          <div className="flex items-center justify-between pt-1">
+            <div className="flex items-center gap-1 bg-surface-soft p-0.5 rounded-lg border border-hairline">
+              <button
+                type="button"
+                onClick={() => setActiveTab('table')}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                  activeTab === 'table' ? 'bg-white shadow-xs text-ink' : 'text-muted hover:text-ink'
+                }`}
+              >
+                <TableIcon size={12} />
+                Tabel Data
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('chart')}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                  activeTab === 'chart' ? 'bg-white shadow-xs text-ink' : 'text-muted hover:text-ink'
+                }`}
+              >
+                <BarChart2 size={12} />
+                Grafik
+              </button>
+            </div>
+            <span className="text-[11px] text-muted hidden sm:inline">
+              Visualisasi otomatis
+            </span>
+          </div>
+        )}
+
+        {/* Tampilan Konten: Grafik vs Tabel */}
         {answer.rows.length === 0 ? (
           <div className="border border-dashed border-hairline rounded-lg px-4 py-6 text-center">
             <Database size={18} className="mx-auto text-muted/60 mb-1" aria-hidden="true" />
@@ -176,6 +367,36 @@ export default function AssistantAnswerCard({
               coba ubah rentang waktu atau filter pertanyaan.
             </p>
           </div>
+        ) : activeTab === 'chart' && grafikConfig.cocok ? (
+          <SilentChartErrorBoundary
+            fallback={(
+              <p className="text-xs text-muted text-center py-4">
+                Grafik tidak dapat ditampilkan. Beralih ke tabel data.
+              </p>
+            )}
+          >
+            <div className="border border-hairline rounded-lg p-3 bg-surface-soft/20">
+              <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={grafikConfig.chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                    <XAxis dataKey={grafikConfig.categoryCol} tick={{ fontSize: 11 }} />
+                    <YAxis tick={{ fontSize: 11 }} />
+                    <Tooltip content={<CustomChartTooltip />} />
+                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
+                    {grafikConfig.valueCols.map((col, idx) => (
+                      <Bar
+                        key={col}
+                        dataKey={col}
+                        fill={BAR_COLORS[idx % BAR_COLORS.length]}
+                        radius={[4, 4, 0, 0]}
+                      />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </SilentChartErrorBoundary>
         ) : (
           <div className="border border-hairline rounded-lg overflow-x-auto">
             <table className="w-full text-left text-sm">
@@ -218,12 +439,12 @@ export default function AssistantAnswerCard({
           </p>
         )}
 
-        {/* SQL disertakan apa adanya (kejujuran UI) — teks, BUKAN dirender HTML */}
+        {/* SQL disertakan apa adanya (kejujuran UI) */}
         <div>
           <button
             type="button"
             onClick={() => setTampilSql((v) => !v)}
-            className="inline-flex items-center gap-1 text-xs text-muted hover:text-ink transition-colors"
+            className="inline-flex items-center gap-1 text-xs text-muted hover:text-ink transition-colors cursor-pointer"
             aria-expanded={tampilSql}
           >
             {tampilSql ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
@@ -236,8 +457,7 @@ export default function AssistantAnswerCard({
           )}
         </div>
 
-        {/* Meta: jumlah baris + durasi eksekusi + waktu jawaban.
-            attempts > 1 (F2.6, hanya tier2) = jejak self-repair generator. */}
+        {/* Meta info: baris + durasi + jam */}
         <p className="text-[11px] text-muted">
           {answer.row_count} baris{durasi && ` · ${durasi}`}
           {answer.attempts > 1 && ` · ${answer.attempts} percobaan`}
@@ -245,40 +465,58 @@ export default function AssistantAnswerCard({
             ` · ${new Date(createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`}
         </p>
 
-        {/* Feedback (F4): hanya jawaban dengan memory_id & belum dinilai.
-            Setelah diklik tombol hilang — badge berubah via memoryStatus. */}
-        {answer.memory_id && !memoryStatus && (onConfirm || onReject) && (
-          <div className="flex items-center gap-2 pt-2 border-t border-hairline">
-            <span className="text-xs text-muted">Apakah jawaban ini benar?</span>
-            {onConfirm && (
-              <button
-                type="button"
-                onClick={onConfirm}
-                disabled={!!feedbackBusy}
-                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs border border-hairline rounded-md text-success hover:bg-success/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <Check size={13} />
-                Jawaban benar
-              </button>
-            )}
-            {onReject && (
-              <button
-                type="button"
-                onClick={onReject}
-                disabled={!!feedbackBusy}
-                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs border border-hairline rounded-md text-error hover:bg-error/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <X size={13} />
-                Jawaban salah
-              </button>
-            )}
-          </div>
-        )}
+        {/* Feedback & Instant Training (Human-in-the-Loop) */}
+        <div className="flex items-center justify-between gap-2 pt-2 border-t border-hairline flex-wrap">
+          {answer.memory_id && !memoryStatus && (onConfirm || onReject) ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted">Apakah jawaban ini benar?</span>
+              {onConfirm && (
+                <button
+                  type="button"
+                  onClick={onConfirm}
+                  disabled={!!feedbackBusy}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs border border-hairline rounded-md text-success hover:bg-success/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                >
+                  <Check size={13} />
+                  Jawaban benar
+                </button>
+              )}
+              {onReject && (
+                <button
+                  type="button"
+                  onClick={onReject}
+                  disabled={!!feedbackBusy}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs border border-hairline rounded-md text-error hover:bg-error/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                >
+                  <X size={13} />
+                  Jawaban salah
+                </button>
+              )}
+            </div>
+          ) : (
+            <div />
+          )}
+
+          {/* Tombol Latih AI Instan */}
+          {branchCode && answer.sql && (
+            <button
+              type="button"
+              onClick={handleTrain}
+              disabled={trainingBusy || trained}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs border border-hairline rounded-md transition-colors cursor-pointer ${
+                trained
+                  ? 'bg-success/10 text-success border-success/30'
+                  : 'text-muted hover:text-primary hover:bg-primary/5'
+              } disabled:opacity-50`}
+            >
+              {trainingBusy ? <Loader2 size={12} className="animate-spin" /> : <GraduationCap size={12} />}
+              {trained ? 'Telah Dilatih ke AI' : 'Latih Jawaban Ini'}
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Saran pertanyaan lanjutan (F2.5) — di bawah kartu jawaban, bukan
-          area chip global. Sengaja tanpa disabled: tetap bisa diklik walau
-          ada pengiriman lain berjalan (handleSend yang menjaga isProcessing). */}
+      {/* Saran pertanyaan lanjutan */}
       {saran.length > 0 && (
         <div className="flex items-center gap-2 flex-wrap pt-0.5">
           {saran.map((s) => (
@@ -286,7 +524,7 @@ export default function AssistantAnswerCard({
               key={s}
               type="button"
               onClick={() => onAsk(s)}
-              className="px-3 py-1 text-xs border border-hairline rounded-full bg-canvas text-body hover:bg-surface-soft hover:border-primary/40 transition-colors"
+              className="px-3 py-1 text-xs border border-hairline rounded-full bg-canvas text-body hover:bg-surface-soft hover:border-primary/40 transition-colors cursor-pointer"
             >
               {s}
             </button>

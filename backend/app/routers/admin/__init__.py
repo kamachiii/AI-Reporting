@@ -18,6 +18,7 @@ from app.routers.admin.global_kb import router as global_kb_router
 from app.routers.admin.eval import router as eval_router
 from app.routers.admin.ai_configs import router as ai_configs_router
 from app.routers.admin.audit_logs import router as audit_logs_router
+from app.routers.admin.vanna_training import router as vanna_training_router
 
 router = APIRouter()
 router.include_router(companies_router)
@@ -30,3 +31,4 @@ router.include_router(global_kb_router)
 router.include_router(eval_router)
 router.include_router(ai_configs_router)
 router.include_router(audit_logs_router)
+router.include_router(vanna_training_router)

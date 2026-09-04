@@ -53,7 +53,8 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **F3' Few-Shot & KB Global** | selesai | (lihat git log) | KB Global dari Vanna API (~2.407 docs) di-sync ke `global_knowledge_base` (migration 011); `muat_kb_gabungan` (global + per-tenant merge, tenant menang jika konflik); `fewshot_provider` (injeksi approved sql_memory + global examples ke prompt LLM); admin endpoints CRUD/sync global KB; 483 test |
 | **F3.1 Quick Hardening Fondasi** | selesai | (lihat git log) | Strict Operator Normalization (anti-collision komparasi); Schema-Aware Few-Shot Filter (anti-halusinasi tabel asing); Cross-Tenant Isolation Test Suite; Penegakan token quota harian (HTTP 429) + Request Decision Trace di audit; 493 test |
 | **F3.2 Global KB SSOT & Full CRUD** | selesai | (lihat git log) | Snapshot final Vanna (2.407 items tersimpan permanen); Backend CRUD lengkap (`POST /admin/global-kb/items` [extra=forbid], `PUT /items/{id}`, `GET /items/{id}`, `DELETE /items/{id}`); Frontend Admin Modal `GlobalKnowledgeBaseModal.jsx` (List, Search, Filter Kind, Pagination, Tambah, Edit, Hapus, Sync); 498 test |
-| **F3.4 Mode Vanna & Penyatuan Mode AI** | selesai | LIVE | Pure Vanna engine mandiri (`vanna_engine.py`); Hapus saran pertanyaan lanjutan (hemat token 70%); Format mata uang Rp otomatis; Penyatuan kontrol mode per-tenant di Admin Panel (`vanna` / `tier2` / `tier1`) via migrasi 012 (`chat_mode`); UI Chat User bersih; 513 test lulus |
+| **F3.4 Mode Vanna & Penyatuan Mode AI** | selesai | `fc163f1` | Pure Vanna engine mandiri (`vanna_engine.py`); Hapus saran pertanyaan lanjutan (hemat token 70%); Format mata uang Rp otomatis; Penyatuan kontrol mode per-tenant di Admin Panel (`vanna` / `tier2` / `tier1`) via migrasi 012 (`chat_mode`); UI Chat User bersih; 513 test lulus |
+| **Unified Vanna AI + pgvector** | selesai | LIVE | Single DB pgvector (384 dim all-MiniLM-L6-v2), dual-mode narasi (Executive vs 0-token Operasional + on-demand explain), Visualizer React (recharts + silent error boundary), Instant Training API, Timeout 15s + Semaphore(5), branch v2 diarsipkan; 519 test lulus |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -431,6 +432,46 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
     - Query perbandingan penjualan vs pembelian: `jumlah_transaksi` tampil **`350`** dan **`349`** tanpa `Rp`, sedangkan omzet tampil **`Rp 69.825.000.000`**.
     - Query customer penjualan: Berhasil 100% mengeksekusi join `glbm_customer -> untt_pesanankendaraan -> untt_penjualan` menghasilkan data riil 3 customer teratas tanpa error.
     - Modal Global KB: Tombol tampil bersih dengan label **"Sinkronisasi Skema"**.
+
+### 3n. Implementasi Unified Vanna AI Architecture, pgvector, Visualizer Interaktif, dan Instant Training (2026-09-04)
+
+- **Latar Belakang & Keputusan Strategis**:
+  1. **Pengarsipan Branch `v2` (Two-Tier AST Verifier)**: Seluruh implementasi Tier 1 & Tier 2 diamankan di branch `v2` (commit `fc163f1`) sebagai jaring pengaman jika sewaktu-waktu manajemen/atasan meminta perbandingan atau pengembalian sistem. Branch `master` difokuskan menjadi *Unified Vanna AI Platform*.
+  2. **Penyatuan Single-Database (PostgreSQL 15 + `pgvector`)**:
+     - Menolak arsitektur ChromaDB terpisah yang rawan resiko ("40 folder SQLite terisolasi", inkonsistensi backup, dan beban RAM ganda).
+     - Meng-upgrade kontainer database dev/core `dms_pg` ke image `pgvector/pgvector:pg15` tanpa kehilangan data (`postgres_data` volume utuh).
+     - Seluruh data relational DMS, audit log, dan vector RAG embeddings disatukan dalam satu database ACID PostgreSQL di tabel `tenant_vector_kb` dengan indeks HNSW berkecepatan tinggi.
+  3. **Dual-Mode Embedding Standar Vanna (Offline Lokal vs Cloud API)**:
+     - Embedding lokal offline menggunakan model resmi standar Vanna: `sentence-transformers/all-MiniLM-L6-v2` (384 dimensi, ~80MB, inferensi CPU super cepat <50ms tanpa internet & zero-cost).
+     - Seluruh 2.409 kamus DDL skema di `global_knowledge_base` di-vektorisasi secara otomatis ke `tenant_vector_kb` (`branch_code = 'GLOBAL'`).
+  4. **Proteksi Concurrency Semaphore & Statement Timeout**:
+     - `asyncio.Semaphore(5)`: Membatasi inferensi LLM dan vektorisasi konkruen maks 5 request paralel untuk mencegah memory spike/starvation.
+     - `SET statement_timeout = '15000'`: Eksekusi query analitik di database tenant diputus otomatis jika melebihi 15 detik untuk melindungi kestabilan database operasional cabang.
+  5. **Dual-Mode Presentasi (Eksekutif vs Operasional)**:
+     - Mode Eksekutif (`auto_narration: true`): Menghasilkan narasi analisis data menyeluruh secara otomatis.
+     - Mode Operasional (`auto_narration: false`, default): Penghematan token 100% (0 pemanggilan LLM kedua). Dilengkapi ringkasan lokal deterministik + tombol interaktif `[ ✨ Jelaskan Lebih Dalam dengan AI ]` (`POST /chat/explain`) jika user membutuhkan interpretasi lebih detail.
+  6. **Visualizer Interaktif Otomatis & Silent Error Boundary (React + Recharts)**:
+     - Menggunakan `recharts` native React (ringan, 0-token, tidak memerlukan pemanggilan AI untuk sintaks visual).
+     - Algoritma `deteksiKecocokanGrafik` otomatis memindai baris data untuk menentukan apakah hasil layak disajikan dalam grafik batang/garis.
+     - Tab switcher interaktif: `[ 📋 Tabel Data ]` vs `[ 📊 Grafik ]`.
+     - **Silent Error Boundary**: Jika terjadi kegagalan rendering visualizer pada browser user, sistem membungkusnya secara senyap tanpa menampilkan pesan error merah/rusak ke user, dan langsung mem-fallback ke tampilan Tabel Data yang aman.
+  7. **Instant Training API (Human-in-the-Loop)**:
+     - Admin & Pengguna dapat melatih sistem secara instan melalui endpoint `POST /admin/vanna/train` atau tombol `[ 🎓 Latih Jawaban Ini ]` di antarmuka chat.
+     - Pasangan `pertanyaan -> SQL` langsung di-vektorisasi ke pgvector, meningkatkan akurasi retrieval berikutnya seketika tanpa perlu restart service.
+- **Implementasi Komponen & File**:
+  - `docker-compose.yml`: Migrasi image PostgreSQL ke `pgvector/pgvector:pg15` (port 5433).
+  - Migrasi 013 (`backend/sql/migrations/013_pgvector_setup.sql`): Pembuatan tabel `tenant_vector_kb` dan indeks vektor HNSW (`vector_cosine_ops`).
+  - Migrasi 014 (`backend/sql/migrations/014_tenant_narration_mode.sql`): Penambahan flag `auto_narration` di tabel `tenants` dan `users`.
+  - `backend/app/services/vanna_pgvector.py`: Singleton embedder model `all-MiniLM-L6-v2`, fungsi pencarian semantik `cari_konteks_pgvector`, dan instant training `latih_pertanyaan_sql`.
+  - `backend/app/services/vanna_engine.py`: Integrasi retrieval RAG berbasis vektor, Semaphore(5), statement timeout 15s, dual-mode narasi, dan generator narasi on-demand.
+  - `backend/app/routers/chat.py`: Penambahan endpoint `POST /chat/explain`.
+  - `backend/app/routers/admin/vanna_training.py`: Endpoint admin CRUD dan sinkronisasi training pgvector (`/admin/vanna/train`, `/sync-global`, dll).
+  - `frontend/src/components/User/AssistantAnswerCard.jsx`: Deteksi grafik otomatis, Recharts ResponsiveContainer BarChart, Silent Error Boundary, Tab Switcher, On-demand AI Explain, dan Instant Training action.
+- **Hasil Verifikasi**:
+  - Backend: **519 passed in 38.15s**, `compileall app` exit 0.
+  - Frontend: `npm run lint` exit 0 (0 error), `npm run build` exit 0 (build sukses).
+  - Idempotency Database: `init_db.py` sukses teruji 2x berturut-turut tanpa error.
+  - Live Testing: Pengujian kueri penjualan tahun 2025 vs 2026 di cabang `TST_01` (DB riil 2.387 tabel) sukses menghasilkan tabel, grafik batang Recharts, dan penjelasan AI on-demand dalam format bahasa Indonesia profesional.
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 

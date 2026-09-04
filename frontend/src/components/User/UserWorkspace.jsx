@@ -126,7 +126,9 @@ function PipelineIndicator({ stageIndex }) {
 }
 
 /** Satu gelembung pesan: pesan user (kanan) atau balasan asisten (kiri). */
-function MessageBubble({ message, feedbackBusy, onAsk, onFeedback }) {
+function MessageBubble({
+  message, branchCode, feedbackBusy, onAsk, onFeedback,
+}) {
   if (message.role === 'user') {
     return (
       <motion.div
@@ -165,6 +167,8 @@ function MessageBubble({ message, feedbackBusy, onAsk, onFeedback }) {
         <div className="max-w-[85%] min-w-0">
           <AssistantAnswerCard
             answer={message.answer}
+            question={message.question}
+            branchCode={branchCode}
             createdAt={message.createdAt}
             memoryStatus={message.memoryStatus}
             feedbackBusy={feedbackBusy}
@@ -244,7 +248,7 @@ export default function UserWorkspace({ user, onLogout }) {
       const answer = await api.askAssistant(branchCode, trimmed);
       setMessages((prev) => prev.map((m) => (
         m.id === assistantId
-          ? { ...m, status: 'done', answer, createdAt: new Date().toISOString() }
+          ? { ...m, status: 'done', answer, question: trimmed, createdAt: new Date().toISOString() }
           : m
       )));
     } catch (error) {
@@ -342,6 +346,7 @@ export default function UserWorkspace({ user, onLogout }) {
             <MessageBubble
               key={m.id}
               message={m}
+              branchCode={branchCode}
               feedbackBusy={feedbackBusy}
               onAsk={handleSend}
               onFeedback={handleFeedback}

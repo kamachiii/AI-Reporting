@@ -237,3 +237,34 @@ async def chat_reject_memory(payload: MemoryDecisionRequest,
     diturunkan menjadi rejected -> 409.
     """
     return await _keputusan_memory(payload, user, "reject")
+
+
+class ChatExplainRequest(BaseModel):
+    branch_code: str = Field(min_length=1, max_length=50)
+    question: str = Field(min_length=1, max_length=2000)
+    sql: str = Field(min_length=1)
+    rows: list = Field(default_factory=list)
+
+
+@router.post("/explain")
+async def chat_explain(payload: ChatExplainRequest,
+                       user: dict = Depends(require_user_role)):
+    """Buat narasi penjelasan analitik mendalam on-demand (Mode Operasional)."""
+    cek_rate_limit(user["user_id"])
+    allowed = user.get("allowed_branches") or []
+    if payload.branch_code not in allowed:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Cabang '{payload.branch_code}' bukan penugasan Anda.")
+
+    core_pool = await get_core_pool()
+    try:
+        from app.services.vanna_engine import buat_penjelasan_naratif
+        narasi = await buat_penjelasan_naratif(
+            core_pool, user, payload.branch_code, payload.question, payload.sql, payload.rows
+        )
+        return {"narasi": narasi}
+    except Exception as e:
+        logger.error("chat_explain error: %s", e)
+        raise HTTPException(status_code=500, detail=f"Gagal membuat penjelasan naratif: {e}")
+
