@@ -25,11 +25,13 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.core.config import settings
 from app.core.database import get_core_pool
 from app.core.security import require_user_role
 from app.services.chat_pipeline import (
-    MemoryTidakDitemukan, SkemaTidakTersedia, StatusMemoryBertentangan,
-    TenantTidakAda, VerifierDitolak, proses_pertanyaan, ubah_status_memory)
+    KuotaTokenHabis, MemoryTidakDitemukan, SkemaTidakTersedia,
+    StatusMemoryBertentangan, TenantTidakAda, VerifierDitolak,
+    proses_pertanyaan, ubah_status_memory)
 from app.services.query_planner import AIConfigError, PlanningError
 from app.services.query_executor import ExecutorError
 from app.services.sql_composer import SqlComposerError
@@ -38,10 +40,9 @@ from app.services.tenant_pool import TenantPoolError, get_tenant_pool_manager
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
-# --- Rate limit in-memory per user (pola auth.py) — cukup untuk dev/PKL
-# single-instance; Redis dipindahkan di Fase 6 (docs v2 §6 hardening).
-CHAT_MAX_PER_WINDOW = 10
-CHAT_WINDOW_SECONDS = 60
+# --- Rate limit in-memory per user (pola auth.py) — disetel via ENV (default 10 req / 60 dtk)
+CHAT_MAX_PER_WINDOW = settings.chat_rate_limit_max
+CHAT_WINDOW_SECONDS = settings.chat_rate_limit_window
 _chat_calls: dict[int, deque] = defaultdict(deque)
 
 
@@ -73,6 +74,7 @@ def cek_rate_limit(user_id: int, *, max_panggilan: int = CHAT_MAX_PER_WINDOW,
 class ChatQueryRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     branch_code: str = Field(min_length=1, max_length=50)
+    mode: str = Field(default="auto", max_length=20)
 
 
 @router.post("/query")
@@ -89,9 +91,29 @@ async def chat_query(payload: ChatQueryRequest,
 
     core_pool = await get_core_pool()
     try:
+        if payload.mode == "vanna":
+            from app.services.vanna_engine import jalankan_mode_vanna
+            return await jalankan_mode_vanna(
+                core_pool, get_tenant_pool_manager(), user, payload.question,
+                payload.branch_code)
+
+        if payload.mode in ("auto", ""):
+            t_row = await core_pool.fetchrow(
+                "SELECT t.chat_mode, t.chat_tier2 FROM tenants t WHERE t.branch_code = $1",
+                payload.branch_code
+            )
+            mode_tenant = t_row.get("chat_mode") if (t_row and hasattr(t_row, "get")) else None
+            if mode_tenant == "vanna":
+                from app.services.vanna_engine import jalankan_mode_vanna
+                return await jalankan_mode_vanna(
+                    core_pool, get_tenant_pool_manager(), user, payload.question,
+                    payload.branch_code)
+
         return await proses_pertanyaan(
             core_pool, get_tenant_pool_manager(), user, payload.question,
             payload.branch_code)
+    except KuotaTokenHabis as e:
+        raise HTTPException(status_code=429, detail=str(e))
     except TenantTidakAda as e:
         raise HTTPException(status_code=409, detail=str(e))
     except SkemaTidakTersedia as e:

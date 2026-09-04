@@ -17,6 +17,8 @@ async def get_audit_logs(
     q: str | None = Query(None),
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
+    sort_by: str = Query("created_at"),
+    sort_dir: str = Query("desc"),
     user: dict = Depends(require_admin_role),
 ):
     # asyncpg menolak string utk parameter ::date — parse & validasi di sini
@@ -63,6 +65,19 @@ async def get_audit_logs(
     )
     total = await pool.fetchval(count_sql, *params)
 
+    allowed_sorts = {
+        "created_at": "al.created_at",
+        "user_name": "u.username",
+        "branch_code": "al.branch_code",
+        "execution_time_ms": "al.execution_time_ms",
+        "status": "al.status",
+    }
+    col_sql = allowed_sorts.get(sort_by)
+    if not col_sql:
+        raise HTTPException(status_code=400, detail=f"sort_by tidak valid: {sort_by}")
+
+    dir_sql = "ASC" if str(sort_dir).lower() == "asc" else "DESC"
+
     offset = (page - 1) * per_page
     data_sql = f"""
         SELECT al.id, al.user_id, al.branch_code, al.prompt_text,
@@ -72,7 +87,7 @@ async def get_audit_logs(
         FROM audit_logs al
         LEFT JOIN users u ON u.id = al.user_id
         {where_clause}
-        ORDER BY al.created_at DESC
+        ORDER BY {col_sql} {dir_sql}, al.id DESC
         LIMIT ${idx} OFFSET ${idx + 1}
     """
     rows = await pool.fetch(data_sql, *params, per_page, offset)

@@ -1,14 +1,15 @@
-import { useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { CheckCircle, XCircle, Loader2, Wifi, Pencil, Trash2 } from 'lucide-react';
 import PaginationBar from '../common/PaginationBar';
 import EmptyState from '../common/EmptyState';
+import SortIcon from '../common/SortIcon';
 
 const PAGE_SIZE = 10; // sinkron dengan TenantConnectionsTable (ukuran halaman tabel admin)
 
 /**
  * Tabel registry database (sub-tab "Database" di TenantsTab).
- * Presentational: menerima data + callback; filter, pagination, dan
+ * Presentational: menerima data + callback; filter, sorting, pagination, dan
  * render murni ada di sini — CRUD tetap di TenantsTab.
  */
 export default function DatabaseRegistryTable({
@@ -24,6 +25,20 @@ export default function DatabaseRegistryTable({
   onEdit,
   onDelete,
 }) {
+  const [sortConfig, setSortConfig] = useState({ key: 'name', direction: 'asc' });
+
+  const handleSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
+    setSortConfig({ key, direction });
+  };
+
+  const usedByMap = useMemo(() => {
+    const m = {};
+    tenants.forEach(t => { m[t.db_connection_id] = (m[t.db_connection_id] || 0) + 1; });
+    return m;
+  }, [tenants]);
+
   const filteredDbs = useMemo(() => {
     if (!debouncedSearch) return connections;
     const q = debouncedSearch.toLowerCase();
@@ -33,17 +48,41 @@ export default function DatabaseRegistryTable({
       (c.db_name || '').toLowerCase().includes(q));
   }, [connections, debouncedSearch]);
 
-  const dbTotalPages = Math.max(1, Math.ceil(filteredDbs.length / PAGE_SIZE));
+  const sortedDbs = useMemo(() => {
+    const sorted = [...filteredDbs];
+    return sorted.sort((a, b) => {
+      let aVal = a[sortConfig.key] ?? '';
+      let bVal = b[sortConfig.key] ?? '';
+
+      if (sortConfig.key === 'used_by') {
+        aVal = usedByMap[a.id] ?? a.used_by ?? 0;
+        bVal = usedByMap[b.id] ?? b.used_by ?? 0;
+        return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+      if (sortConfig.key === 'is_active') {
+        const av = a.is_active ? 1 : 0;
+        const bv = b.is_active ? 1 : 0;
+        return sortConfig.direction === 'asc' ? av - bv : bv - av;
+      }
+      if (sortConfig.key === 'connection') {
+        aVal = dbStatus[String(a.id)]?.status || '';
+        bVal = dbStatus[String(b.id)]?.status || '';
+      }
+
+      if (typeof aVal === 'string') aVal = aVal.toLowerCase();
+      if (typeof bVal === 'string') bVal = bVal.toLowerCase();
+
+      if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [filteredDbs, sortConfig, usedByMap, dbStatus]);
+
+  const dbTotalPages = Math.max(1, Math.ceil(sortedDbs.length / PAGE_SIZE));
   useEffect(() => { if (dbPage > dbTotalPages) setDbPage(dbTotalPages); }, [dbPage, dbTotalPages, setDbPage]);
   const paginatedDbs = useMemo(
-    () => filteredDbs.slice((dbPage - 1) * PAGE_SIZE, dbPage * PAGE_SIZE),
-    [filteredDbs, dbPage]);
-
-  const usedByMap = useMemo(() => {
-    const m = {};
-    tenants.forEach(t => { m[t.db_connection_id] = (m[t.db_connection_id] || 0) + 1; });
-    return m;
-  }, [tenants]);
+    () => sortedDbs.slice((dbPage - 1) * PAGE_SIZE, dbPage * PAGE_SIZE),
+    [sortedDbs, dbPage]);
 
   if (filteredDbs.length === 0) {
     return (
@@ -59,12 +98,24 @@ export default function DatabaseRegistryTable({
         <table className="w-full text-left">
           <thead className="bg-surface-soft text-sm text-muted sticky top-0 z-10">
             <tr>
-              <th className="p-3">Nama</th>
-              <th className="p-3">Host</th>
-              <th className="p-3">Database</th>
-              <th className="p-3 w-24 text-center">Dipakai</th>
-              <th className="p-3 w-20">Status</th>
-              <th className="p-3 w-28">Koneksi</th>
+              <th className="p-3 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('name')}>
+                Nama <SortIcon columnKey="name" sortConfig={sortConfig} />
+              </th>
+              <th className="p-3 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('db_host')}>
+                Host <SortIcon columnKey="db_host" sortConfig={sortConfig} />
+              </th>
+              <th className="p-3 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('db_name')}>
+                Database <SortIcon columnKey="db_name" sortConfig={sortConfig} />
+              </th>
+              <th className="p-3 w-28 text-center cursor-pointer select-none hover:text-ink" onClick={() => handleSort('used_by')}>
+                Dipakai <SortIcon columnKey="used_by" sortConfig={sortConfig} />
+              </th>
+              <th className="p-3 w-24 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('is_active')}>
+                Status <SortIcon columnKey="is_active" sortConfig={sortConfig} />
+              </th>
+              <th className="p-3 w-32 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('connection')}>
+                Koneksi <SortIcon columnKey="connection" sortConfig={sortConfig} />
+              </th>
               <th className="p-3 w-0 text-center">Aksi</th>
             </tr>
           </thead>

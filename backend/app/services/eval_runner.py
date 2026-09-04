@@ -118,6 +118,9 @@ def verifikasi_sql_harapan(tenant_row: dict, sql_harapan: str) -> dict:
     schema_config, _ = _siapkan_skema_efektif(
         schema_config, kb_forbidden, kb.get("tabel_diizinkan") or [],
         kb.get("kolom_dikecualikan") or [])
+    if kb.get("relasi_tabel"):
+        from app.services.knowledge_base import suntikkan_relasi_ke_skema
+        schema_config = suntikkan_relasi_ke_skema(schema_config, kb["relasi_tabel"])
     return verify_sql(sql_harapan, schema_config, kb_forbidden=kb_forbidden)
 
 
@@ -446,6 +449,9 @@ async def jalankan_eval(core_pool, branch_code: str, username_admin: str,
     schema_config, _ = _siapkan_skema_efektif(
         schema_config, kb_forbidden, kb.get("tabel_diizinkan") or [],
         kb.get("kolom_dikecualikan") or [])
+    if kb.get("relasi_tabel"):
+        from app.services.knowledge_base import suntikkan_relasi_ke_skema
+        schema_config = suntikkan_relasi_ke_skema(schema_config, kb["relasi_tabel"])
     # Flag chat_tier2 diikuti apa adanya (pipeline penuh); .get() agar baris
     # tanpa kolom (fake test lama) tetap flag OFF.
     chat_tier2 = bool(tenant.get("chat_tier2"))

@@ -60,14 +60,15 @@ import sqlglot
 from sqlglot import exp
 from sqlglot.errors import ParseError
 
+from app.core.config import settings
 from app.services.query_verifier import verify_query
 from app.services.sql_composer import ganti_placeholder_null
 
 logger = logging.getLogger(__name__)
 
-# Gerbang #6 — konstanta terkurung (docs v2 §2 baris #6).
-STATEMENT_TIMEOUT = "10s"
-DEFAULT_ROW_CAP = 500
+# Gerbang #6 — konstanta terkurung (docs v2 §2 baris #6) — disetel via ENV
+STATEMENT_TIMEOUT = settings.statement_timeout
+DEFAULT_ROW_CAP = settings.query_row_cap
 
 
 class ExecutorError(Exception):

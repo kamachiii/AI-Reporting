@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>Panduan Presentasi & Ujian Sidang - DMS AI Platform</title>
+<style>
+  @page {
+    size: A4;
+    margin: 18mm 16mm 18mm 16mm;
+  }
+  * {
+    box-sizing: border-box;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #1e293b;
+    line-height: 1.5;
+    font-size: 11pt;
+    margin: 0;
+    padding: 0;
+  }
+  .page-break {
+    page-break-after: always;
+  }
+  .header-card {
+    background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%);
+    color: #ffffff;
+    padding: 24px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+  }
+  .header-card h1 {
+    margin: 0 0 8px 0;
+    font-size: 22pt;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+  }
+  .header-card p {
+    margin: 0;
+    color: #93c5fd;
+    font-size: 12pt;
+  }
+  .badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 9pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    margin-top: 12px;
+  }
+  .badge-green {
+    background: #10b981;
+    color: white;
+  }
+  .badge-blue {
+    background: #3b82f6;
+    color: white;
+  }
+  h2 {
+    color: #0f172a;
+    font-size: 14pt;
+    border-bottom: 2px solid #e2e8f0;
+    padding-bottom: 6px;
+    margin-top: 20px;
+    margin-bottom: 12px;
+  }
+  h3 {
+    color: #1e3a8a;
+    font-size: 11.5pt;
+    margin-top: 14px;
+    margin-bottom: 6px;
+  }
+  .card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 14px;
+    margin-bottom: 12px;
+  }
+  .callout-quote {
+    background: #eff6ff;
+    border-left: 4px solid #2563eb;
+    padding: 12px 14px;
+    border-radius: 0 8px 8px 0;
+    font-style: italic;
+    color: #1e40af;
+    margin: 10px 0;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 9.5pt;
+  }
+  th, td {
+    border: 1px solid #cbd5e1;
+    padding: 7px 10px;
+    text-align: left;
+  }
+  th {
+    background: #f1f5f9;
+    font-weight: 700;
+    color: #334155;
+  }
+  tr:nth-child(even) {
+    background: #f8fafc;
+  }
+  code {
+    background: #f1f5f9;
+    color: #0f172a;
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-family: Consolas, monospace;
+    font-size: 9pt;
+    border: 1px solid #e2e8f0;
+  }
+  pre {
+    background: #0f172a;
+    color: #f8fafc;
+    padding: 12px;
+    border-radius: 8px;
+    font-family: Consolas, monospace;
+    font-size: 8.5pt;
+    overflow-x: auto;
+    margin: 8px 0;
+  }
+  .grid-2 {
+    display: flex;
+    gap: 12px;
+  }
+  .grid-2 > div {
+    flex: 1;
+  }
+  ul, ol {
+    margin: 6px 0;
+    padding-left: 20px;
+  }
+  li {
+    margin-bottom: 4px;
+  }
+</style>
+</head>
+<body>
+
+  <!-- ==================== HALAMAN 1 ==================== -->
+  <div class="header-card">
+    <h1>PANDUAN PRESENTASI & SIDANG</h1>
+    <p>DMS AI Platform — Multi-Tenant Conversational Database Reporting</p>
+    <div style="display:flex; gap:8px;">
+      <span class="badge badge-green">Status: Live & 507 Tests Passed</span>
+      <span class="badge badge-blue">Arsitektur Two-Tier Enterprise</span>
+    </div>
+  </div>
+
+  <h2>1. Ringkasan Cepat: Bicara Apa di 30 Detik Pertama?</h2>
+  <div class="callout-quote">
+    "Selamat pagi/siang Bapak/Ibu penguji. Platform yang saya bangun ini adalah <strong>DMS AI Platform</strong>, yaitu asisten cerdas untuk dealer mobil dan motor. Karyawan dealer sering kesulitan membuat laporan cepat karena database dealer sangat rumit (bisa mencapai 2.300+ tabel) dengan istilah akuntansi yang kompleks (seperti <code>hpdpp</code> dan <code>hpunit</code>).<br><br>
+    Melalui platform ini, karyawan cukup bertanya dalam bahasa Indonesia sehari-hari di chat, dan sistem akan menghasilkan data nyata dari database dealer secara <strong>instan, terverifikasi keamanannya, dan tanpa halusinasi data</strong>."
+  </div>
+
+  <h2>2. Tiga Masalah Nyata di Lapangan & Solusi Kita</h2>
+  <div class="grid-2">
+    <div class="card">
+      <h3 style="color:#b91c1c; margin-top:0;">Tantangan / Masalah Industri</h3>
+      <ul>
+        <li><strong>Database Raksasa:</strong> Satu dealer memiliki lebih dari 2.380 tabel tanpa relasi foreign key fisik.</li>
+        <li><strong>Text-to-SQL Naif Rusak:</strong> AI biasa sering salah sintaks, halusinasi nama tabel, dan query berat bikin server macet.</li>
+        <li><strong>Privasi Data:</strong> Data nasabah dan angka finansial dilarang keluar ke server pihak ketiga.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3 style="color:#047857; margin-top:0;">Solusi di Platform Ini</h3>
+      <ul>
+        <li><strong>Two-Tier Engine:</strong> 90% query memakai rencana JSON terstruktur (Tier 1). Query rumit dijaga Verifier 6 Gerbang (Tier 2).</li>
+        <li><strong>Knowledge Base SSOT:</strong> Kamus istilah terpusat (2.400+ aturan) & Virtual Foreign Key.</li>
+        <li><strong>On-Premises Isolation:</strong> Data mentah dieksekusi lokal di server cabang (data trust model).</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>3. Alur Cerita Saat Melakukan Live Demo (Klik demi Klik)</h2>
+  <div class="card">
+    <ol>
+      <li><strong>Login Panel Admin (<code>admin / admin123</code>):</strong>
+        <ul>
+          <li>Buka tab <em>"Database & Tenant"</em>: Tunjukkan registry database dan koneksi cabang yang terisolasi.</li>
+          <li>Buka tombol <em>"Global KB"</em>: Tunjukkan 2.400+ kamus bisnis permanen (SSOT) agar AI paham singkatan akuntansi dealer.</li>
+          <li>Tunjukkan fitur sortir yang baru: Semua tabel kini dapat diurutkan A-Z / Z-A pada setiap kolom.</li>
+        </ul>
+      </li>
+      <li><strong>Login User Dealer (<code>tester01 / tester123</code>):</strong>
+        <ul>
+          <li>Pilih cabang <code>TST_01</code> (terhubung ke database nyata dealer dengan 2.387 tabel).</li>
+          <li>Ketik prompt andalan ini di chat:<br>
+            <code>"buatkan data pembelian 2026. tampilkan nomor transaksi, nomor rangka, tipe, warna, harga beli sebelum pajak, ppn, dan harga total"</code>
+          </li>
+        </ul>
+      </li>
+      <li><strong>Tunjukkan Hasil yang Memukau di Hadapan Penguji:</strong>
+        <ul>
+          <li><strong>Tabel Data:</strong> Muncul 7 kolom lengkap, termasuk <code>hpunit</code> (Rp 392.672.000 = Rp 350.600.000 DPP + Rp 42.072.000 PPN).</li>
+          <li><strong>Transparansi SQL:</strong> Klik tombol <em>"Lihat SQL"</em>. Tunjukkan bahwa query berparameter aman (<code>$1</code>).</li>
+          <li><strong>Presenter Naratif:</strong> Tunjukkan ringkasan bahasa Indonesia yang angkanya diverifikasi otomatis (Number Check).</li>
+        </ul>
+      </li>
+      <li><strong>Tunjukkan Fitur SQL Memory:</strong>
+        <ul>
+          <li>Klik tombol jempol <em>"Jawaban benar"</em>.</li>
+          <li>Ketik pertanyaan yang sama lagi: Respons muncul <strong>0 ms (Level Keyakinan A)</strong> tanpa memanggil API AI lagi.</li>
+        </ul>
+      </li>
+    </ol>
+  </div>
+
+  <div class="page-break"></div>
+
+  <!-- ==================== HALAMAN 2 ==================== -->
+  <h2>4. Jawaban Tangkas untuk Pertanyaan Pembunuh Penguji (Q&A Defense)</h2>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Q1: "Bagaimana kamu menjamin AI tidak merusak database (seperti DROP / DELETE / UPDATE)?"</h3>
+    <p><strong>Jawaban:</strong><br>
+    "Sistem kami menerapkan <strong>Verifier 6 Gerbang</strong> yang bersifat <em>default-deny</em>. Sebelum query dieksekusi, sistem memeriksa bahwa perintah wajib <code>SELECT</code> tunggal, memvalidasi pohon sintaks (AST) dengan <code>sqlglot</code>, membatasi kompleksitas (maks 5 join, budget limit), dan saat dieksekusi di database cabang, kami mengunci transaksinya secara fisik dengan <code>SET TRANSACTION READ ONLY</code> serta membatasi waktu maksimal 10 detik."</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Q2: "Apakah data pelanggan atau angka transaksi dealer dikirim ke OpenAI / Anthropic?"</h3>
+    <p><strong>Jawaban:</strong><br>
+    "<strong>Sama sekali tidak.</strong> Kami menerapkan <em>On-Premises Data Trust Model</em>. Yang dikirim ke model AI hanyalah nama-nama kolom dan kamus istilah (Knowledge Base) untuk merancang logika query. Hasil data riil pelanggan dan uang dieksekusi dan diproses 100% di server lokal kami."</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Q3: "Banyak database lama tidak punya relasi Foreign Key fisik. Bagaimana AI bisa menggabungkan tabel?"</h3>
+    <p><strong>Jawaban:</strong><br>
+    "Kami mengembangkan fitur <strong>Virtual Foreign Key</strong> pada modul Knowledge Base. Relasi antar-kolom (misal <code>untt_pembelian.norangka</code> ke <code>untt_datakendaraan.norangka</code>) didaftarkan di tingkat aplikasi, lalu disuntikkan secara dinamis ke skema memori saat runtime tanpa perlu mengubah DDL fisik database klien (Zero DDL Impact)."</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Q4: "Bagaimana cara kerja Number Check pada Presenter? Apa gunanya?"</h3>
+    <p><strong>Jawaban:</strong><br>
+    "LLM sering berhalusinasi saat membuat kalimat ringkasan. Di sistem kami, modul <code>presenter.py</code> mengekstrak seluruh angka dari teks ringkasan AI, lalu memvalidasi secara mekanis apakah angka tersebut benar-benar ada di baris tabel hasil query. Jika AI mengarang angka yang tidak ada, ringkasan dibatalkan dan sistem otomatis memakai template deterministik yang pasti benar."</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Q5: "Apa itu tombol Tier 2 di tabel Koneksi? Mengapa ada tombol itu?"</h3>
+    <p><strong>Jawaban:</strong><br>
+    "Itu adalah <strong>Safety Switch per cabang</strong>. Secara default, cabang menggunakan Tier 1 (mode JSON deterministik). Tier 2 (SQL bebas) hanya boleh dibuka jika cabang tersebut sudah lulus pengujian <strong>Golden-Set Benchmark</strong> dengan akurasi $\ge 95\%$ dan 0 pelanggaran keamanan. Di database kita, cabang <code>TST_01</code> sudah lulus 100% sehingga bisa diaktifkan, sedangkan cabang <code>JKT_01</code> belum pernah diuji sehingga tombol otomatis menolak aktivasi."</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Q6: "Kok bisa kamu membangun sistem sebesar ini? Bagaimana metodologinya?"</h3>
+    <p><strong>Jawaban:</strong><br>
+    "Saya menggunakan pendekatan <strong>Spec-Driven Development</strong> dan <strong>Test-Driven Development (TDD)</strong> dengan bantuan AI Agentic Coding. Saya tidak langsung koding, melainkan merancang arsitektur Two-Tier dan gerbang keamanan terlebih dahulu di dokumen spesifikasi, membuat 507 unit tests untuk katalog serangan SQL, lalu membagi implementasi per fase terverifikasi dengan standar gate CI (0 error linter dan exit code 0)."</p>
+  </div>
+
+  <div class="page-break"></div>
+
+  <!-- ==================== HALAMAN 3 ==================== -->
+  <h2>5. Peta Kode & Lokasi File (Jika Penguji Minta Buka Kodingan)</h2>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 25%;">Modul / File</th>
+        <th style="width: 30%;">Lokasi Berkas</th>
+        <th>Fungsi Utama yang Perlu Dijelaskan</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Orchestrator Pipeline</strong></td>
+        <td><code>backend/app/services/chat_pipeline.py</code></td>
+        <td>Mengatur alur utama: cek rate limit, resolve tenant, replay SQL Memory, eksekusi, presenter, hingga audit log.</td>
+      </tr>
+      <tr>
+        <td><strong>Tier 1 Planner</strong></td>
+        <td><code>backend/app/services/query_planner.py</code></td>
+        <td>Meminta LLM menyusun rencana JSON terstruktur (bukan SQL) dan normalisasi toleransi filter tanggal/tipe data.</td>
+      </tr>
+      <tr>
+        <td><strong>SQL Composer</strong></td>
+        <td><code>backend/app/services/sql_composer.py</code></td>
+        <td>Mengubah rencana JSON menjadi SQL berparameter (<code>$1, $2</code>) secara deterministik dan join otomatis.</td>
+      </tr>
+      <tr>
+        <td><strong>Tier 2 Generator</strong></td>
+        <td><code>backend/app/services/tier2_generator.py</code></td>
+        <td>Router LLM untuk SQL bebas + loop self-repair (maks 2x) dan fallback otomatis ke Tier 1 jika gagal.</td>
+      </tr>
+      <tr>
+        <td><strong>Security Verifier</strong></td>
+        <td><code>backend/app/services/sql_guard.py</code> &amp; <code>query_verifier.py</code></td>
+        <td>Verifier 6 Gerbang: AST parsing (sqlglot), whitelist fitur versioned, budget complexity, dan EXPLAIN pre-flight.</td>
+      </tr>
+      <tr>
+        <td><strong>Confinement Executor</strong></td>
+        <td><code>backend/app/services/query_executor.py</code></td>
+        <td>Gerbang #6: Mengeksekusi SQL di DB tenant dalam transaksi <code>READ ONLY</code>, timeout 10 detik, dan limit 500 baris.</td>
+      </tr>
+      <tr>
+        <td><strong>Presenter &amp; Guard</strong></td>
+        <td><code>backend/app/services/presenter.py</code></td>
+        <td>Membuat ringkasan bahasa Indonesia + validasi mekanis NUMBER CHECK anti-halusinasi angka.</td>
+      </tr>
+      <tr>
+        <td><strong>Knowledge Base</strong></td>
+        <td><code>backend/app/services/knowledge_base.py</code></td>
+        <td>Menggabungkan Global KB &amp; Tenant KB, membentuk skema efektif, dan menyuntikkan Virtual Foreign Key.</td>
+      </tr>
+      <tr>
+        <td><strong>Tenant Isolation</strong></td>
+        <td><code>backend/app/services/tenant_pool.py</code></td>
+        <td>Pool koneksi database tenant terisolasi per cabang dengan dekripsi kredensial Fernet.</td>
+      </tr>
+      <tr>
+        <td><strong>Eval Harness</strong></td>
+        <td><code>backend/app/services/eval_runner.py</code></td>
+        <td>Menjalankan benchmark golden-set dan menegakkan gate aktivasi Tier 2 (&ge; 95% pass rate &amp; 0 pelanggaran).</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>6. Perintah Penting di Terminal (Tunjukkan Saat Live)</h2>
+  <div class="card">
+    <p style="margin-top:0; font-weight:700;">1. Menjalankan 507 Unit Tests Otomatis (Bukti Kualitas Kode):</p>
+    <pre>cd backend
+.venv\Scripts\python.exe -m pytest tests/ -q</pre>
+    <p style="margin-top:10px; font-weight:700;">2. Verifikasi Kompilasi Seluruh File Python:</p>
+    <pre>.venv\Scripts\python.exe -m compileall app</pre>
+    <p style="margin-top:10px; font-weight:700;">3. Verifikasi Linter &amp; Build Frontend:</p>
+    <pre>cd frontend
+npm run lint    # Exit code 0 (0 error)
+npm run build   # Exit code 0 (Bundle sukses)</pre>
+  </div>
+
+  <h2>7. Rencana Pengembangan Lanjutan (Roadmap Masa Depan)</h2>
+  <div class="card">
+    <p>Jika penguji bertanya <em>"Apa rencana pengembangan ke depan untuk platform ini?"</em>, sampaikan 3 poin roadmap yang sudah kami catat secara resmi:</p>
+    <ul>
+      <li><strong>Fitur Ekspor Laporan (F5):</strong> Menambahkan tombol unduh laporan hasil query ke format Excel (<code>.xlsx</code>), CSV, dan dokumen cetak PDF.</li>
+      <li><strong>Interactive Clarification Loop:</strong> Jika user memasukkan pertanyaan ambigu yang belum ada di Knowledge Base, AI akan menampilkan pilihan klarifikasi interaktif di UI sebelum menyusun query.</li>
+      <li><strong>Hardening Skalabilitas (F6):</strong> Implementasi Redis-backed distributed rate limiter dan penegakan kuota token harian per cabang untuk multi-server deployment.</li>
+    </ul>
+  </div>
+
+  <div style="text-align:center; margin-top:20px; color:#64748b; font-size:9pt;">
+    DMS AI Platform — Handcrafted with Spec-Driven Engineering &copy; 2026
+  </div>
+
+</body>
+</html>

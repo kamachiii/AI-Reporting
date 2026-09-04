@@ -58,6 +58,7 @@ KB_PENUH = {
     "tabel_dilarang": ["log_audit_internal"],
     "tabel_diizinkan": ["penjualan", "kendaraan"],
     "kolom_dikecualikan": ["penjualan.api_key", "users.token_hash"],
+    "relasi_tabel": [],
 }
 
 

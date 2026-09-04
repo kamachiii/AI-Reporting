@@ -2,21 +2,12 @@ import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import {
   CheckCircle, XCircle, Loader2, Trash2, Pencil,
-  Link, MoreVertical, Database, Wifi, Eye, Power,
-  ArrowUp, ArrowDown, ChevronsUpDown
+  Link, MoreVertical, Database, Wifi, Eye, Power
 } from 'lucide-react';
 import { notify } from '../../../utils/notification';
 import EmptyState from '../common/EmptyState';
 import PaginationBar from '../common/PaginationBar';
-
-function SortIcon({ columnKey, sortConfig }) {
-  if (sortConfig.key !== columnKey) {
-    return <ChevronsUpDown size={14} className="inline ml-1 text-muted" />;
-  }
-  return sortConfig.direction === 'asc'
-    ? <ArrowUp size={14} className="inline ml-1 text-primary" />
-    : <ArrowDown size={14} className="inline ml-1 text-primary" />;
-}
+import SortIcon from '../common/SortIcon';
 
 /**
  * Sub-tabel cabang.

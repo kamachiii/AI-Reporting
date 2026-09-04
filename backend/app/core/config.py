@@ -23,10 +23,37 @@ class Settings(BaseSettings):
     # JWT
     secret_key: str = os.getenv("JWT_SECRET_KEY", "")
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 1440  # 24 jam
+    access_token_expire_minutes: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
 
     # Fernet (enkripsi password DB tenant & API Key AI)
     fernet_key: str = os.getenv("FERNET_KEY", "")
+
+    # CORS (asal tambahan selain localhost/127.0.0.1, pisahkan dengan koma)
+    cors_origins: str = os.getenv("CORS_ORIGINS", "")
+
+    # Eksekusi Query Tenant (Gerbang #6)
+    statement_timeout: str = os.getenv("STATEMENT_TIMEOUT", "10s")
+    query_row_cap: int = int(os.getenv("QUERY_ROW_CAP", "500"))
+
+    # Rate Limiting Chat User
+    chat_rate_limit_max: int = int(os.getenv("CHAT_RATE_LIMIT_MAX", "10"))
+    chat_rate_limit_window: int = int(os.getenv("CHAT_RATE_LIMIT_WINDOW", "60"))
+
+    # Timeout Provider AI (detik)
+    llm_timeout_seconds: float = float(os.getenv("LLM_TIMEOUT_SECONDS", "60.0"))
+
+    # Tenant Pool Manager (LRU Cache Pool DB Tenant)
+    tenant_max_pools: int = int(os.getenv("TENANT_MAX_POOLS", "8"))
+    tenant_pool_max_size: int = int(os.getenv("TENANT_POOL_MAX_SIZE", "2"))
+    tenant_idle_timeout_seconds: float = float(os.getenv("TENANT_IDLE_TIMEOUT_SECONDS", "600.0"))
+
+    # Vanna API (sumber KB global — opsional, sync gagal = KB global kosong)
+    vanna_api_url: str = os.getenv("VANNA_API_URL", "")
+    vanna_api_user: str = os.getenv("VANNA_API_USER", "")
+    vanna_api_password: str = os.getenv("VANNA_API_PASSWORD", "")
+
+    # Few-shot examples (jumlah contoh yang diinjeksi ke prompt LLM)
+    fewshot_max_examples: int = int(os.getenv("FEWSHOT_MAX_EXAMPLES", "5"))
 
 
 settings = Settings()

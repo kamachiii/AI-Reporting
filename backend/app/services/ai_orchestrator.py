@@ -87,11 +87,17 @@ async def generate_json_filter(user_prompt: str, schema: dict, ai_config: dict):
                 logger.error(f"AI API Error: {resp.text}")
                 raise HTTPException(status_code=503, detail="Layanan AI sedang tidak tersedia atau quota habis. Silakan hubungi admin.")
 
-            data = resp.json()
+            raw_text = resp.text.strip()
+            if "data: [DONE]" in raw_text:
+                raw_text = raw_text.split("data: [DONE]")[0].strip()
+            data, _ = json.JSONDecoder().raw_decode(raw_text)
             # Ekstrak konten dari response (OpenAI vs Anthropic)
             content = ""
             if api_type == "openai":
-                content = data["choices"][0]["message"]["content"]
+                msg = data["choices"][0]["message"]
+                content = msg.get("content")
+                if (not content or not str(content).strip()) and msg.get("reasoning_content"):
+                    content = msg["reasoning_content"]
             elif api_type == "anthropic":
                 content = data["content"][0]["text"]
 

@@ -110,6 +110,8 @@ def _parse_output(raw: str, schema_config: dict):
         plan = data.get("plan")
         if not isinstance(plan, dict):
             return None, None, ["'plan' hilang atau bukan objek untuk tier 1"]
+        from app.services.query_planner import _normalisasi_plan_llm
+        plan = _normalisasi_plan_llm(plan, schema_config)
         return "tier1", plan, []
     if tier == 2:
         sql = data.get("sql")
@@ -122,7 +124,7 @@ def _parse_output(raw: str, schema_config: dict):
 async def generate_sql(question: str, schema_config: dict, kb: dict,
                        ai_config: dict, conn_factory, llm_call_fn=None,
                        max_attempts: int = MAX_ATTEMPTS_DEFAULT,
-                       now=None) -> dict:
+                       now=None, fewshot: list[dict] | None = None) -> dict:
     """Satu panggilan LLM -> keputusan tier + output sesuai jalurnya.
 
     Args:
@@ -139,6 +141,7 @@ async def generate_sql(question: str, schema_config: dict, kb: dict,
         max_attempts: total percobaan LLM (default 3 = 1 + self-repair 2x).
         now: datetime untuk compose_sql preset waktu (kontrak F2.2; None ->
             datetime.now() di composer).
+        fewshot: contoh pertanyaan→plan/SQL yang sudah terbukti benar (F3).
 
     Returns:
         dict kontrak (lihat docstring modul).
@@ -149,7 +152,7 @@ async def generate_sql(question: str, schema_config: dict, kb: dict,
     llm = llm_call_fn or panggil_llm_default
     kb_forbidden = kb.get("tabel_dilarang") or []
     system = _system_prompt()
-    user_dasar = build_user_prompt(question, schema_config, kb)
+    user_dasar = build_user_prompt(question, schema_config, kb, fewshot=fewshot)
 
     alasan_terakhir = None
     raw_lama = None

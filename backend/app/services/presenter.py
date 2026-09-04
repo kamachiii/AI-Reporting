@@ -165,9 +165,8 @@ def _system_prompt() -> str:
         "3. Jangan menyebut angka apa pun yang tidak ada di data, termasuk "
         "persentase atau selisih hasil hitungan Anda sendiri.\n"
         "4. HANYA kembalikan objek JSON dengan bentuk persis:\n"
-        "{\"ringkasan\": \"...\", \"saran\": [\"...\", \"...\", \"...\"]}\n"
-        "\"saran\" berisi 2-3 pertanyaan lanjutan yang relevan. Tanpa "
-        "komentar atau teks lain di luar JSON."
+        "{\"ringkasan\": \"...\"}\n"
+        "Tanpa komentar atau teks lain di luar JSON."
     )
 
 

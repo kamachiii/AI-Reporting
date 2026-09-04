@@ -122,9 +122,11 @@ class FakeGenerator:
 
     async def __call__(self, question, schema_config, kb, ai_config,
                        conn_factory, llm_call_fn=None,
-                       max_attempts=MAX_ATTEMPTS_DEFAULT, now=None):
+                       max_attempts=MAX_ATTEMPTS_DEFAULT, now=None,
+                       fewshot=None, **kwargs):
         self.panggilan.append({"question": question, "kb": kb,
-                               "max_attempts": max_attempts})
+                               "max_attempts": max_attempts,
+                               "fewshot": fewshot})
         if self.error is not None:
             raise self.error
         return copy.deepcopy(self.hasil)

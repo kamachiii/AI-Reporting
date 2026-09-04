@@ -81,7 +81,14 @@ import logging
 import re
 from datetime import datetime
 
-from app.services.knowledge_base import parse_stored_kb
+from app.core.config import settings
+
+from app.services.fewshot_provider import ambil_fewshot
+from app.services.knowledge_base import (
+    muat_kb_gabungan,
+    parse_stored_kb,
+    suntikkan_relasi_ke_skema,
+)
 from app.services.presenter import buat_ringkasan
 from app.services.query_executor import verify_and_execute
 from app.services.query_planner import AIConfigError, PlanningError, plan_query, \
@@ -146,14 +153,38 @@ class StatusMemoryBertentangan(Exception):
     diturunkan (docs v2 §3), mis. approved ditolak kembali."""
 
 
+class KuotaTokenHabis(Exception):
+    """Kuota analisis AI harian untuk cabang telah habis (429)."""
+
+
 # ===========================================================================
 # Helper murni / pembacaan
 # ===========================================================================
+_OPERATOR_SUBSTITUTIONS = [
+    (re.compile(r">="), " _gte_ "),
+    (re.compile(r"<="), " _lte_ "),
+    (re.compile(r"!=|<>"), " _neq_ "),
+    (re.compile(r">"), " _gt_ "),
+    (re.compile(r"<"), " _lt_ "),
+    (re.compile(r"="), " _eq_ "),
+    (re.compile(r"\+"), " _plus_ "),
+    (re.compile(r"%"), " _pct_ "),
+]
+
+
 def normalisasi_pertanyaan(pertanyaan: str) -> str:
-    """Lowercase + strip tanda baca + rapikan spasi (kunci replay memory)."""
+    """Lowercase + preserving operator makna + strip tanda baca umum + rapikan spasi.
+
+    Operator logika & aritmatika (>=, <=, !=, >, <, =, +, %) dikonversi ke token
+    eksplisit agar pertanyaan dengan maksud komparasi berkebalikan (mis. 'omzet > 100'
+    vs 'omzet < 100') TIDAK mengalami collision/tabrakan saat replay memory.
+    """
     if not pertanyaan:
         return ""
-    tanpa_tanda = _TANDA_BACA_RE.sub(" ", pertanyaan.lower())
+    teks = pertanyaan.lower()
+    for pattern, pengganti in _OPERATOR_SUBSTITUTIONS:
+        teks = pattern.sub(pengganti, teks)
+    tanpa_tanda = _TANDA_BACA_RE.sub(" ", teks)
     return _SPASI_RE.sub(" ", tanpa_tanda).strip()
 
 
@@ -210,6 +241,7 @@ def _siapkan_skema_efektif(schema_config: dict, tabel_dilarang: list[str],
     pola error map verifier yang sudah ada; tanpa class error baru).
     """
     tables = dict(schema_config.get("tables") or {})
+    semua_tabel_db = set(tables.keys())
     for nama in tabel_dilarang or []:
         tables.pop(nama, None)  # dilarang menang: buang sebelum allowlist
 
@@ -246,6 +278,7 @@ def _siapkan_skema_efektif(schema_config: dict, tabel_dilarang: list[str],
                 tables[nama] = info_baru
 
     skema = dict(schema_config)  # pertahankan kunci lain (introspected_at, dll)
+    skema["_all_tables"] = semua_tabel_db
     skema["tables"] = tables
     return skema, tabel_diabaikan
 
@@ -253,6 +286,7 @@ def _siapkan_skema_efektif(schema_config: dict, tabel_dilarang: list[str],
 _SQL_TENANT = (
     "SELECT t.id AS tenant_id, t.branch_code, t.schema_config_json, "
     "       t.knowledge_base, t.is_active AS tenant_aktif, t.chat_tier2, "
+    "       t.chat_mode, "
     "       dc.id AS db_connection_id, dc.db_host, dc.db_port, dc.db_name, "
     "       dc.db_username, dc.db_password, dc.is_active AS koneksi_aktif "
     "FROM tenants t "
@@ -606,6 +640,33 @@ async def _jalur_tier2(core_pool, pool_tenant, *, tenant_id: int, q_norm: str,
     return response, plan_terpakai, sql, durasi_ms
 
 
+async def _cek_kuota_token(core_pool, branch_code: str, kuota_harian: int | None) -> None:
+    """Cek apakah pemakaian analisis LLM hari ini sudah melebihi kuota harian tenant."""
+    if not kuota_harian or kuota_harian <= 0:
+        return
+    try:
+        total_queries = await core_pool.fetchval(
+            "SELECT COUNT(*) FROM audit_logs "
+            "WHERE branch_code = $1 "
+            "  AND created_at >= CURRENT_DATE "
+            "  AND status = 'success' "
+            "  AND (ai_json_filter->'trace'->>'memory_lookup' = 'MISS' "
+            "       OR ai_json_filter->'trace'->>'memory_lookup' IS NULL)",
+            branch_code
+        )
+        token_terpakai = (total_queries or 0) * 500
+        if token_terpakai >= kuota_harian:
+            raise KuotaTokenHabis(
+                f"Kuota analisis AI harian untuk cabang '{branch_code}' telah mencapai "
+                f"batas ({kuota_harian} token / ~{total_queries} analisis). "
+                f"Pertanyaan yang sudah tersimpan di memory tetap dapat dijawab."
+            )
+    except KuotaTokenHabis:
+        raise
+    except Exception as e:
+        logger.warning("Gagal memeriksa kuota token: %s", e)
+
+
 # ===========================================================================
 # Pipeline utama
 # ===========================================================================
@@ -648,11 +709,17 @@ async def proses_pertanyaan(core_pool, tenant_pool_manager, user: dict,
     plan_terpakai = None
     sql_final = None
     durasi_ms = None
+    hasil_router = None
+    fewshot = []
 
     try:
         tenant = await resolve_tenant(core_pool, branch_code)
         schema_config = _parse_schema_config(tenant["schema_config_json"])
-        kb = parse_stored_kb(tenant["knowledge_base"])
+        # F3: KB gabungan (global + per-tenant). Tabel skema diambil SEBELUM
+        # skema efektif memotong, agar filter KB global mengacu skema penuh.
+        schema_tables = set((schema_config or {}).get("tables", {}).keys())
+        kb = await muat_kb_gabungan(core_pool, tenant["knowledge_base"],
+                                    schema_tables)
         kb_forbidden = kb.get("tabel_dilarang") or []
 
         # ---------- Skema efektif (allowlist tabel_diizinkan KB) ----------
@@ -663,11 +730,15 @@ async def proses_pertanyaan(core_pool, tenant_pool_manager, user: dict,
         schema_config, tabel_diabaikan = _siapkan_skema_efektif(
             schema_config, kb_forbidden, kb.get("tabel_diizinkan") or [],
             kb.get("kolom_dikecualikan") or [])
+        if kb.get("relasi_tabel"):
+            schema_config = suntikkan_relasi_ke_skema(schema_config, kb["relasi_tabel"])
         jumlah_tabel_efektif = len(schema_config["tables"])
         pool_tenant = await tenant_pool_manager.get_pool(tenant)
-        # F2.6: flag Tier 2 per tenant (migration 008, default FALSE).
+        # F2.6: flag Tier 2 per tenant (migration 008, default FALSE; migration 012 chat_mode).
         # .get() agar baris tanpa kolom (fake/test lama) tetap flag OFF.
-        chat_tier2_aktif = bool(tenant.get("chat_tier2"))
+        chat_tier2_aktif = (tenant.get("chat_mode") == "tier2") or bool(tenant.get("chat_tier2"))
+        if tenant.get("chat_mode") == "tier1":
+            chat_tier2_aktif = False
 
         # ---------- Tahap 3: SQL Memory replay (0 panggilan LLM) ----------
         entri = await cari_memory_approved(core_pool, tenant["tenant_id"],
@@ -728,8 +799,15 @@ async def proses_pertanyaan(core_pool, tenant_pool_manager, user: dict,
 
         # ---------- Tahap 4: MISS -> router dua tier (F2.6) / planner lama -
         if entri is None or not pakai_memory:
+            await _cek_kuota_token(core_pool, branch_code, tenant.get("daily_token_quota"))
+
             ai_config = await resolve_ai_config(core_pool, user["username"],
                                                 branch_code)
+            # F3: few-shot contoh dari sql_memory (approved) + global KB (schema-filtered)
+            fewshot = await ambil_fewshot(
+                core_pool, tenant["tenant_id"],
+                schema_tables=schema_tables,
+                max_total=settings.fewshot_max_examples)
 
             # F2.6: flag ON -> router+generator SATU panggilan LLM dulu
             # (docs v2 §1/§5); generator yang memutuskan tier 1 atau 2.
@@ -741,9 +819,18 @@ async def proses_pertanyaan(core_pool, tenant_pool_manager, user: dict,
                     async def _factory():
                         return conn
                     try:
-                        hasil_router = await generate_sql(
-                            question, schema_config, kb, ai_config, _factory,
-                            llm_call_fn=llm_call_fn, now=sekarang)
+                        try:
+                            hasil_router = await generate_sql(
+                                question, schema_config, kb, ai_config, _factory,
+                                llm_call_fn=llm_call_fn, now=sekarang,
+                                fewshot=fewshot)
+                        except TypeError as te:
+                            if "fewshot" in str(te):
+                                hasil_router = await generate_sql(
+                                    question, schema_config, kb, ai_config, _factory,
+                                    llm_call_fn=llm_call_fn, now=sekarang)
+                            else:
+                                raise
                     except Tier2Error as e:
                         # Self-repair habis -> fallback alur Tier 1 lama;
                         # alasan dibawa agar pesan 502 akhir jujur.
@@ -775,9 +862,17 @@ async def proses_pertanyaan(core_pool, tenant_pool_manager, user: dict,
                     params_final = hasil_router["params"]
                 else:
                     try:
-                        plan = await plan_query(
-                            question, schema_config, kb, ai_config,
-                            llm_call_fn=llm_call_fn)
+                        try:
+                            plan = await plan_query(
+                                question, schema_config, kb, ai_config,
+                                llm_call_fn=llm_call_fn, fewshot=fewshot)
+                        except TypeError as te:
+                            if "fewshot" in str(te):
+                                plan = await plan_query(
+                                    question, schema_config, kb, ai_config,
+                                    llm_call_fn=llm_call_fn)
+                            else:
+                                raise
                         plan_terpakai = plan
                         composed = compose_sql(plan, schema_config,
                                                now=sekarang)
@@ -821,12 +916,22 @@ async def proses_pertanyaan(core_pool, tenant_pool_manager, user: dict,
         # default=str: params berisi date/datetime dari preset waktu composer
         await simpan_pesan(core_pool, cid, "assistant",
                            json.dumps(response, ensure_ascii=False, default=str))
-        # Catatan skema efektif di audit ai_json_filter: jumlah tabel yang
-        # benar-benar dipakai planner/composer/verifier (plan dibungkus agar
-        # audit tetap satu objek JSON; plan asli TIDAK dimutasi — dipakai
-        # ulang untuk replay sql_memory).
-        catatan_ai = {"plan": plan_terpakai,
-                      "tables_effective": jumlah_tabel_efektif}
+        # Catatan skema efektif & jejak keputusan (Decision Trace) di audit ai_json_filter:
+        # memudahkan debugging produksi (observability) tanpa menelusuri banyak lapis kode.
+        decision_trace = {
+            "source": response.get("source"),
+            "confidence": response.get("confidence"),
+            "memory_hit": (entri is not None and pakai_memory),
+            "tier_selected": 2 if (hasil_router and hasil_router.get("tier") == 2) else 1,
+            "fewshot_injected": len(fewshot) if (entri is None or not pakai_memory) and 'fewshot' in locals() and fewshot else 0,
+            "presenter_method": response.get("metode", "template"),
+            "tables_effective": jumlah_tabel_efektif,
+        }
+        catatan_ai = {
+            "plan": plan_terpakai,
+            "tables_effective": jumlah_tabel_efektif,
+            "trace": decision_trace,
+        }
         if tabel_diabaikan:
             catatan_ai["tables_ignored"] = tabel_diabaikan
         await tulis_audit(

@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, X, RefreshCw } from 'lucide-react';
+import { Plus, Search, X, RefreshCw, BookOpen } from 'lucide-react';
 import { notify } from '../../utils/notification';
 import ConfirmationDialog from './common/ConfirmationDialog';
 import SkeletonTable from './common/SkeletonTable';
 import DbConnectionModal from './tenants/DbConnectionModal';
 import ConnectDbModal from './tenants/ConnectDbModal';
 import KnowledgeBaseModal from './tenants/KnowledgeBaseModal';
+import GlobalKnowledgeBaseModal from './tenants/GlobalKnowledgeBaseModal';
 import DatabaseRegistryTable from './tenants/DatabaseRegistryTable';
 import TenantConnectionsTable from './tenants/TenantConnectionsTable';
 import { api } from '../../services/api';
@@ -51,6 +52,7 @@ export default function TenantsTab() {
   const [showDbModal, setShowDbModal] = useState(false);          // daftarkan/edit database
   const [editingDb, setEditingDb] = useState(null);
   const [kbBranch, setKbBranch] = useState(null);                 // kelola Knowledge Base (F2.0)
+  const [showGlobalKb, setShowGlobalKb] = useState(false);        // kelola Global KB (F3.1)
 
   // pagination
   const [dbPage, setDbPage] = useState(1);
@@ -62,6 +64,7 @@ export default function TenantsTab() {
       else if (showDbModal) setShowDbModal(false);
       else if (showConnModal) setShowConnModal(false);
       else if (kbBranch) setKbBranch(null);
+      else if (showGlobalKb) setShowGlobalKb(false);
     },
     isBusy: !!processingKey || !!testingId,
     searchInputId: 'tenant-search',
@@ -163,12 +166,30 @@ export default function TenantsTab() {
   // ---- Tier 2 (F2.6) — toggle flag chat_tier2 tenant ----
   // Hasil POST { branch_code, chat_tier2 } langsung direfleksikan ke state
   // lokal (GET tenants kini menyertakan chat_tier2, jadi tetap benar saat reload).
+  // ---- Mode AI (Opsi 1: vanna | tier2 | tier1) ----
+  const handleSetChatMode = async (t, mode) => {
+    setTier2Busy(t.branch_code);
+    try {
+      const r = await api.setTenantChatMode(t.branch_code, mode);
+      setTenants((prev) => prev.map((x) =>
+        x.branch_code === t.branch_code
+          ? { ...x, chat_mode: r.chat_mode, chat_tier2: r.chat_tier2 }
+          : x));
+      const modeLabel = r.chat_mode === 'vanna' ? 'Mode Vanna' : r.chat_mode === 'tier2' ? 'Mode Tier 2' : 'Mode Tier 1';
+      notify.success(`Mode AI diubah ke ${modeLabel} untuk ${r.branch_code}`);
+    } catch (e) {
+      notify.error(e.response?.data?.detail || 'Gagal mengubah Mode AI');
+    } finally {
+      setTier2Busy(null);
+    }
+  };
+
   const handleToggleTier2 = async (t) => {
     setTier2Busy(t.branch_code);
     try {
       const r = await api.setTenantTier2(t.branch_code, !t.chat_tier2);
       setTenants((prev) => prev.map((x) =>
-        x.branch_code === t.branch_code ? { ...x, chat_tier2: r.chat_tier2 } : x));
+        x.branch_code === t.branch_code ? { ...x, chat_tier2: r.chat_tier2, chat_mode: r.chat_tier2 ? 'tier2' : 'vanna' } : x));
       notify.success(`Tier 2 ${r.chat_tier2 ? 'diaktifkan' : 'dinonaktifkan'} untuk ${r.branch_code}`);
     } catch (e) {
       notify.error(e.response?.data?.detail || 'Gagal mengubah Tier 2');
@@ -284,15 +305,23 @@ export default function TenantsTab() {
 
           {activeTab === 'database' ? (
             <button onClick={() => { setEditingDb(null); setShowDbModal(true); }}
-              className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active whitespace-nowrap">
+              className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active whitespace-nowrap cursor-pointer">
               <Plus size={14} /> Daftarkan Database
             </button>
           ) : (
             <button onClick={openConnectModal}
-              className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active whitespace-nowrap">
+              className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-md text-xs hover:bg-primary-active whitespace-nowrap cursor-pointer">
               <Plus size={14} /> Hubungkan
             </button>
           )}
+
+          <button
+            onClick={() => setShowGlobalKb(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-hairline hover:bg-surface-soft text-ink rounded-md text-xs font-medium whitespace-nowrap transition-colors shadow-2xs cursor-pointer"
+            title="Kelola Global Knowledge Base (Single Source of Truth)"
+          >
+            <BookOpen size={14} className="text-primary" /> Global KB
+          </button>
         </div>
       </div>
 
@@ -327,6 +356,7 @@ export default function TenantsTab() {
           onRefreshSchema={handleRefreshSchema}
           onManageKb={(t) => setKbBranch(t.branch_code)}
           onToggleTier2={handleToggleTier2}
+          onSetChatMode={handleSetChatMode}
           onDisconnect={handleDisconnect}
         />
       )}
@@ -359,6 +389,13 @@ export default function TenantsTab() {
           isOpen
           branchCode={kbBranch}
           onClose={() => setKbBranch(null)}
+        />
+      )}
+
+      {showGlobalKb && (
+        <GlobalKnowledgeBaseModal
+          isOpen={showGlobalKb}
+          onClose={() => setShowGlobalKb(false)}
         />
       )}
 

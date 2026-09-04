@@ -3,19 +3,11 @@ import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import {
   Loader2, Trash2, Pencil, Eye,
-  ArrowUp, ArrowDown, ChevronsUpDown, MoreVertical, Power
+  MoreVertical, Power
 } from 'lucide-react';
 import EmptyState from '../common/EmptyState';
 import PaginationBar from '../common/PaginationBar';
-
-function SortIcon({ columnKey, sortConfig }) {
-  if (sortConfig.key !== columnKey) {
-    return <ChevronsUpDown size={14} className="inline ml-1 text-muted" />;
-  }
-  return sortConfig.direction === 'asc'
-    ? <ArrowUp size={14} className="inline ml-1 text-primary" />
-    : <ArrowDown size={14} className="inline ml-1 text-primary" />;
-}
+import SortIcon from '../common/SortIcon';
 
 /**
  * Sub-tabel perusahaan.

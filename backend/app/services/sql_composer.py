@@ -221,7 +221,11 @@ def validate_plan(plan, schema_config) -> tuple[dict | None, list[str]]:
                 continue
             sudah.add(t)
             if t not in tabels:
-                errors.append(f"tabel '{t}' tidak ada di skema")
+                all_t = schema_config.get("_all_tables") if isinstance(schema_config, dict) else None
+                if all_t and t in all_t:
+                    errors.append(f"tabel '{t}' ada di database, tetapi belum dimasukkan ke 'tabel_diizinkan' (allowlist)")
+                else:
+                    errors.append(f"tabel '{t}' tidak ada di skema")
                 continue
             tables_ok.add(t)
 
@@ -240,7 +244,11 @@ def validate_plan(plan, schema_config) -> tuple[dict | None, list[str]]:
                 errors.append(f"{konteks}: kolom '{ref}' merujuk tabel di luar "
                               f"rencana (tambahkan '{t}' ke tables)")
             else:
-                errors.append(f"{konteks}: tabel '{t}' tidak ada di skema")
+                all_t = schema_config.get("_all_tables") if isinstance(schema_config, dict) else None
+                if all_t and t in all_t:
+                    errors.append(f"{konteks}: tabel '{t}' ada di database, tetapi belum dimasukkan ke 'tabel_diizinkan' (allowlist)")
+                else:
+                    errors.append(f"{konteks}: tabel '{t}' tidak ada di skema")
             return None
         if not any(c.get("name") == k for c in tabels[t].get("columns", [])):
             errors.append(f"{konteks}: kolom '{k}' tidak ada di tabel '{t}'")
@@ -346,37 +354,39 @@ def validate_plan(plan, schema_config) -> tuple[dict | None, list[str]]:
                 if punya_preset and punya_range:
                     errors.append("time_range: pilih preset ATAU from/to, "
                                   "bukan keduanya")
-                elif punya_preset:
-                    # guard str: preset unhashable jangan bikin TypeError
-                    # (sama seperti guard op di _validasi_filter)
-                    if not isinstance(tr["preset"], str) or \
-                            tr["preset"] not in PRESET_WAKTU:
-                        errors.append(f"time_range.preset tidak dikenal: "
-                                      f"{tr['preset']!r} (pilihan: "
-                                      f"{', '.join(sorted(PRESET_WAKTU))})")
-                    else:
-                        clean_tr = {"field": tr["field"], "preset": tr["preset"]}
-                elif punya_range:
-                    if "from" not in kunci or "to" not in kunci:
-                        errors.append("time_range: from dan to wajib bersamaan")
-                    else:
-                        d1 = _parse_iso(tr["from"], "time_range.from", errors)
-                        d2 = _parse_iso(tr["to"], "time_range.to", errors)
-                        if d1 is not None and d2 is not None:
-                            try:
-                                terurut = d1 <= d2
-                            except TypeError:
-                                errors.append("time_range: from dan to harus "
-                                              "se-tipe (date atau datetime)")
-                            else:
-                                if not terurut:
-                                    errors.append("time_range: from harus <= to")
+
+                if tr is not None:
+                    if punya_preset:
+                        # guard str: preset unhashable jangan bikin TypeError
+                        # (sama seperti guard op di _validasi_filter)
+                        if not isinstance(tr["preset"], str) or \
+                                tr["preset"] not in PRESET_WAKTU:
+                            errors.append(f"time_range.preset tidak dikenal: "
+                                          f"{tr['preset']!r} (pilihan: "
+                                          f"{', '.join(sorted(PRESET_WAKTU))})")
+                        else:
+                            clean_tr = {"field": tr["field"], "preset": tr["preset"]}
+                    elif punya_range:
+                        if "from" not in kunci or "to" not in kunci:
+                            errors.append("time_range: from dan to wajib bersamaan")
+                        else:
+                            d1 = _parse_iso(tr["from"], "time_range.from", errors)
+                            d2 = _parse_iso(tr["to"], "time_range.to", errors)
+                            if d1 is not None and d2 is not None:
+                                try:
+                                    terurut = d1 <= d2
+                                except TypeError:
+                                    errors.append("time_range: from dan to harus "
+                                                  "se-tipe (date atau datetime)")
                                 else:
-                                    clean_tr = {"field": tr["field"],
-                                                "from": tr["from"],
-                                                "to": tr["to"]}
-                else:
-                    errors.append("time_range wajib punya preset atau from/to")
+                                    if not terurut:
+                                        errors.append("time_range: from harus <= to")
+                                    else:
+                                        clean_tr = {"field": tr["field"],
+                                                    "from": tr["from"],
+                                                    "to": tr["to"]}
+                    else:
+                        errors.append("time_range wajib punya preset atau from/to")
 
     # --- group_by ---
     group_refs: set[str] = set()
@@ -620,6 +630,42 @@ def _fk_join_chain(plan_tables: list[str], tabels: dict) -> list[tuple]:
                 berikut.append(nb)
         level = berikut
 
+    # Pass 2: Smart Heuristic Match bila ada target yang belum terhubung lewat FK formal
+    if any(t not in parent for t in targets):
+        kolom_non_join = {
+            "keterangan", "status", "created_at", "updated_at", "is_active",
+            "id", "catatan", "tgl", "tanggal", "userupdate", "tglupdate",
+            "tglsimpan", "tglbatal"
+        }
+        kunci_bisnis_prioritas = [
+            "norangka", "nopembelian", "nopenjualan", "nomor_pesanan",
+            "nomor_customer", "kode_customer", "kode_cabang", "kode_tipe",
+            "nomesin", "nomor_wo"
+        ]
+        for t in sorted(targets - set(parent.keys())):
+            cols_t = {c.get("name") for c in tabels.get(t, {}).get("columns") or []}
+            for p_node in sorted(parent.keys()):
+                cols_p = {c.get("name") for c in tabels.get(p_node, {}).get("columns") or []}
+                shared = (cols_t & cols_p) - kolom_non_join
+                if not shared:
+                    continue
+                kunci_terpilih = None
+                for k in kunci_bisnis_prioritas:
+                    if k in shared:
+                        kunci_terpilih = k
+                        break
+                if not kunci_terpilih:
+                    kandidat_khusus = [
+                        s for s in sorted(shared)
+                        if s.startswith(("kode_", "no_", "nomor_"))
+                        or s.endswith(("_id", "_kode", "_no"))
+                    ]
+                    if kandidat_khusus:
+                        kunci_terpilih = kandidat_khusus[0]
+                if kunci_terpilih:
+                    parent[t] = (p_node, kunci_terpilih, kunci_terpilih)
+                    break
+
     tak_terhubung = sorted(t for t in targets if t not in parent)
     if tak_terhubung:
         raise SqlComposerError(
@@ -761,21 +807,40 @@ def compose_sql(plan, schema_config, now=None) -> dict:
         sql += (f" JOIN {_q(tabel)} ON {_q(tabel)}.{_q(kol_child)}"
                 f" = {_q(parent)}.{_q(kol_parent)}")
 
+    def _coerce_filter_val(val, col_ref: str):
+        if not isinstance(val, str):
+            return val
+        if "." not in col_ref:
+            return val
+        t_nama, k_nama = col_ref.split(".")
+        tipe_kol = _tipe_kolom(tabels, t_nama, k_nama)
+        if "date" in tipe_kol or "timestamp" in tipe_kol:
+            try:
+                if len(val) == 10 and val.count("-") == 2:
+                    return date.fromisoformat(val)
+                elif "T" in val or len(val) > 10:
+                    return datetime.fromisoformat(val)
+            except (ValueError, TypeError):
+                pass
+        return val
+
     # --- WHERE: nilai filter dulu (urut rencana), lalu time_range ---
     kondisi = []
     for f in clean.get("filters", []):
         kol = _kolom_sql(f["column"])
         op = f["op"]
         if op in _OP_SQL:
-            kondisi.append(f"{kol} {_OP_SQL[op]} {param(f['value'])}")
+            v = _coerce_filter_val(f['value'], f['column'])
+            kondisi.append(f"{kol} {_OP_SQL[op]} {param(v)}")
         elif op == "like":
             kondisi.append(f"{kol} LIKE {param(f['value'])}")
         elif op == "in":
-            isi = ", ".join(param(v) for v in f["value"])
+            isi = ", ".join(param(_coerce_filter_val(v, f['column'])) for v in f["value"])
             kondisi.append(f"{kol} IN ({isi})")
         elif op == "between":
-            kondisi.append(f"{kol} BETWEEN {param(f['value'][0])}"
-                           f" AND {param(f['value'][1])}")
+            v0 = _coerce_filter_val(f['value'][0], f['column'])
+            v1 = _coerce_filter_val(f['value'][1], f['column'])
+            kondisi.append(f"{kol} BETWEEN {param(v0)} AND {param(v1)}")
         else:  # is_null / is_not_null
             kondisi.append(f"{kol} IS {'NOT ' if op == 'is_not_null' else ''}NULL")
     tr = clean.get("time_range")

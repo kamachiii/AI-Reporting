@@ -23,7 +23,8 @@ logger = logging.getLogger(__name__)
 
 # Field tingkat atas yang dikenal — field lain = error (validasi ketat).
 KNOWN_KEYS = ("glossary", "catatan_kolom", "nilai_map", "contoh_tanya",
-              "tabel_dilarang", "tabel_diizinkan", "kolom_dikecualikan")
+              "tabel_dilarang", "tabel_diizinkan", "kolom_dikecualikan",
+              "relasi_tabel")
 
 # Struktur kosong default: dipakai saat kolom NULL / tenant belum mengisi KB.
 EMPTY_KB = {
@@ -34,6 +35,7 @@ EMPTY_KB = {
     "tabel_dilarang": [],
     "tabel_diizinkan": [],
     "kolom_dikecualikan": [],
+    "relasi_tabel": [],
 }
 
 # Pola ident aman untuk nama tabel pada tabel_diizinkan (allowlist). Allowlist
@@ -46,9 +48,10 @@ _IDENT_TABEL_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _IDENT_KOLOM_RE = re.compile(
     r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$")
 
-# Field yang boleh ada di satu entri glossary / contoh_tanya.
+# Field yang boleh ada di satu entri glossary / contoh_tanya / relasi_tabel.
 GLOSSARY_FIELDS = ("istilah", "arti")
 CONTOH_TANYA_FIELDS = ("tanya", "tabel", "agg", "time_range")
+RELASI_TABEL_FIELDS = ("tabel", "kolom", "merujuk_tabel", "merujuk_kolom")
 
 
 def _is_nonempty_str(value) -> bool:
@@ -282,6 +285,47 @@ def _validate_kolom_dikecualikan(dikecualikan, errors: list[str]) -> list | None
     return [t.strip() for t in dikecualikan]
 
 
+def _validate_relasi_tabel(relasi, errors: list[str]) -> list | None:
+    """Validasi bagian relasi_tabel (virtual foreign keys antar tabel).
+
+    Bentuk: [{"tabel": "untt_pembelian", "kolom": "norangka",
+             "merujuk_tabel": "untt_datakendaraan", "merujuk_kolom": "norangka"}]
+    """
+    if not isinstance(relasi, list):
+        errors.append("relasi_tabel: harus berupa array (list) of objek")
+        return None
+    ok = True
+    for i, entry in enumerate(relasi):
+        if not isinstance(entry, dict):
+            errors.append(f"relasi_tabel[{i}]: entri harus berupa objek {{tabel, kolom, merujuk_tabel, merujuk_kolom}}")
+            ok = False
+            continue
+        for field in entry:
+            if field not in RELASI_TABEL_FIELDS:
+                errors.append(f"relasi_tabel[{i}]: field '{field}' tidak dikenal "
+                              "(field yang valid: tabel, kolom, merujuk_tabel, merujuk_kolom)")
+                ok = False
+        for field in RELASI_TABEL_FIELDS:
+            val = entry.get(field)
+            if not _is_nonempty_str(val):
+                errors.append(f"relasi_tabel[{i}]: field '{field}' wajib diisi (string non-kosong)")
+                ok = False
+            elif not _IDENT_TABEL_RE.match(val.strip()):
+                errors.append(f"relasi_tabel[{i}]: '{val}' bukan identifier yang valid pada field '{field}'")
+                ok = False
+    if not ok:
+        return None
+    return [
+        {
+            "tabel": e["tabel"].strip(),
+            "kolom": e["kolom"].strip(),
+            "merujuk_tabel": e["merujuk_tabel"].strip(),
+            "merujuk_kolom": e["merujuk_kolom"].strip(),
+        }
+        for e in relasi if isinstance(e, dict)
+    ]
+
+
 # Peta field -> validator bagian; mengembalikan versi bersih bila bagian valid.
 _SECTION_VALIDATORS = {
     "glossary": _validate_glossary,
@@ -291,6 +335,7 @@ _SECTION_VALIDATORS = {
     "tabel_dilarang": _validate_tabel_dilarang,
     "tabel_diizinkan": _validate_tabel_diizinkan,
     "kolom_dikecualikan": _validate_kolom_dikecualikan,
+    "relasi_tabel": _validate_relasi_tabel,
 }
 
 
@@ -321,3 +366,136 @@ def validate_kb(payload) -> tuple[dict, list[str]]:
                 clean[key] = section_clean
 
     return clean, errors
+
+
+async def muat_kb_gabungan(core_pool, tenant_kb_raw, schema_tables: set) -> dict:
+    """Gabungkan KB global + KB per-tenant (F3).
+
+    Aturan merge (tenant menang jika konflik):
+    - glossary: global + tenant (tenant menang jika 'istilah' sama)
+    - catatan_kolom: global + tenant (tenant menang jika key sama)
+    - nilai_map: global + tenant (tenant menang jika key sama)
+    - contoh_tanya: tenant di depan + global di belakang (semua digabung)
+    - tabel_dilarang/diizinkan/kolom_dikecualikan: HANYA dari tenant
+      (kontrol akses per-DB, tidak boleh di-override global)
+
+    KB global text bertipe 'Table X columns: ...' disaring berdasarkan
+    schema_tables — hanya entri yang tabel-nya ada di skema tenant yang
+    dikonversi menjadi catatan_kolom.
+
+    Jika tabel global_knowledge_base belum ada (migration belum jalan),
+    kembalikan KB tenant saja (graceful degradation).
+    """
+    tenant_kb = parse_stored_kb(tenant_kb_raw)
+
+    try:
+        global_rows = await core_pool.fetch(
+            "SELECT kind, content, question, sql_example FROM global_knowledge_base"
+        )
+    except Exception as e:
+        logger.warning(f"Gagal memuat KB global (mungkin tabel belum ada): {e}")
+        return tenant_kb
+
+    global_glossary = {}
+    global_catatan = {}
+    global_contoh = []
+
+    for row in global_rows:
+        kind = row["kind"]
+        if kind == "text":
+            content = row["content"].strip()
+            table_match = re.match(r"^Table\s+([A-Za-z0-9_]+)\s+columns:", content, re.IGNORECASE)
+            if table_match:
+                tabel = table_match.group(1)
+                if tabel in schema_tables:
+                    global_catatan[tabel] = content
+            else:
+                maps_to_match = re.search(r"^(.*?)\s+maps to\s+(.*?)$", content, re.IGNORECASE)
+                if maps_to_match:
+                    istilah = maps_to_match.group(1).strip()
+                    global_glossary[istilah] = content
+                else:
+                    istilah = (content[:30] + "...") if len(content) > 30 else content
+                    global_glossary[istilah] = content
+        elif kind == "example":
+            if row.get("question"):
+                contoh = {"tanya": row["question"]}
+                if row.get("sql_example"):
+                    # Beberapa field mungkin mengharapkan 'sql', disesuaikan
+                    contoh["sql_example"] = row["sql_example"]
+                global_contoh.append(contoh)
+
+    # Gabungkan (tenant menang jika konflik)
+    merged_kb = {
+        "tabel_dilarang": list(tenant_kb.get("tabel_dilarang", [])),
+        "tabel_diizinkan": list(tenant_kb.get("tabel_diizinkan", [])),
+        "kolom_dikecualikan": list(tenant_kb.get("kolom_dikecualikan", [])),
+        "nilai_map": dict(tenant_kb.get("nilai_map", {})),
+    }
+
+    # Merge glossary
+    merged_glossary = {k: {"istilah": k, "arti": v} for k, v in global_glossary.items()}
+    for entry in tenant_kb.get("glossary", []):
+        istilah = entry.get("istilah")
+        if istilah:
+            merged_glossary[istilah] = entry
+    merged_kb["glossary"] = list(merged_glossary.values())
+
+    # Merge catatan_kolom
+    merged_catatan = dict(global_catatan)
+    merged_catatan.update(tenant_kb.get("catatan_kolom", {}))
+    merged_kb["catatan_kolom"] = merged_catatan
+
+    # Merge contoh_tanya
+    merged_kb["contoh_tanya"] = list(tenant_kb.get("contoh_tanya", [])) + global_contoh
+
+    # Merge relasi_tabel (tenant diutamakan, global melengkapi)
+    seen_relasi = set()
+    merged_relasi = []
+    for r in tenant_kb.get("relasi_tabel", []):
+        key = (r.get("tabel"), r.get("kolom"), r.get("merujuk_tabel"), r.get("merujuk_kolom"))
+        if key not in seen_relasi and all(key):
+            seen_relasi.add(key)
+            merged_relasi.append(r)
+    merged_kb["relasi_tabel"] = merged_relasi
+
+    return merged_kb
+
+
+def suntikkan_relasi_ke_skema(schema_config: dict, relasi_tabel: list[dict]) -> dict:
+    """Suntikkan relasi foreign keys virtual dari KB ke schema_config['tables'].
+
+    Menambahkan entri ke tabels[tabel]['foreign_keys'] secara non-mutatif
+    (mengembalikan salinan baru) agar sql_composer dapat melakukan BFS FK path
+    bahkan saat database fisik tidak memiliki constraint FOREIGN KEY DDL.
+    """
+    if not schema_config or not isinstance(schema_config, dict):
+        return schema_config
+    tabels = schema_config.get("tables")
+    if not tabels or not isinstance(tabels, dict):
+        return schema_config
+
+    tables_copy = {}
+    for tname, tinfo in tabels.items():
+        tinfo_copy = dict(tinfo)
+        tinfo_copy["foreign_keys"] = list(tinfo.get("foreign_keys", []))
+        tables_copy[tname] = tinfo_copy
+
+    for r in (relasi_tabel or []):
+        t1 = r.get("tabel")
+        c1 = r.get("kolom")
+        t2 = r.get("merujuk_tabel")
+        c2 = r.get("merujuk_kolom")
+        if not (t1 and c1 and t2 and c2):
+            continue
+        if t1 in tables_copy and t2 in tables_copy:
+            fks1 = tables_copy[t1]["foreign_keys"]
+            if not any(fk.get("column") == c1 and fk.get("references_table") == t2 and fk.get("references_column") == c2 for fk in fks1):
+                fks1.append({
+                    "column": c1,
+                    "references_table": t2,
+                    "references_column": c2,
+                })
+
+    return {**schema_config, "tables": tables_copy}
+

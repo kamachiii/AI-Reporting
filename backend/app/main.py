@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 
+from app.core.config import settings
 from app.core.database import get_core_pool, close_core_pool, get_redis
 from app.routers import auth, admin, chat
 from app.services.tenant_pool import get_tenant_pool_manager
@@ -28,14 +29,25 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="DMS AI Platform API", version="1.0.0", lifespan=lifespan)
 
+# CORS Origins default (dev lokal) + tambahan dari ENV CORS_ORIGINS
+_default_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "http://localhost:5175",
+    "http://127.0.0.1:5175",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+if settings.cors_origins:
+    _extra = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+    _default_origins = list(dict.fromkeys(_default_origins + _extra))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000"
-    ],
+    allow_origins=_default_origins,
+    allow_origin_regex=r"^http:\/\/(localhost|127\.0\.0\.1):(517\d|8000)$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

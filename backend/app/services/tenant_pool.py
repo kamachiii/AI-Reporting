@@ -29,14 +29,15 @@ from collections import OrderedDict
 
 import asyncpg
 
+from app.core.config import settings
 from app.core.security import decrypt_credential
 
 logger = logging.getLogger(__name__)
 
-# Batas default (v1 §5): LRU maks 8 tenant, pool kecil per tenant.
-DEFAULT_MAX_POOLS = 8
-DEFAULT_POOL_MAX_SIZE = 2
-DEFAULT_IDLE_TIMEOUT_SECONDS = 600.0
+# Batas default (v1 §5): LRU tenant & pool per tenant — disetel via ENV
+DEFAULT_MAX_POOLS = settings.tenant_max_pools
+DEFAULT_POOL_MAX_SIZE = settings.tenant_pool_max_size
+DEFAULT_IDLE_TIMEOUT_SECONDS = settings.tenant_idle_timeout_seconds
 
 
 class TenantPoolError(Exception):

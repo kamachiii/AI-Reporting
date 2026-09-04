@@ -266,6 +266,23 @@ class FakeCorePool:
         raise AssertionError(f"execute tak dikenal: {sql[:90]}")
 
     async def fetch(self, sql, *args):
+        if "FROM global_knowledge_base" in sql:
+            return []
+        if "FROM sql_memory" in sql:
+            if "WHERE tenant_id = $1 AND status = 'approved'" in sql:
+                tenant_id = args[0]
+                limit = args[1] if len(args) > 1 else 3
+                approved = [
+                    {
+                        "pertanyaan_ternormalisasi": r["pertanyaan_ternormalisasi"],
+                        "plan_json": r["plan_json"],
+                        "sql": r["sql"],
+                        "sumber": r.get("sumber", "tier1"),
+                    }
+                    for r in self.sql_memory
+                    if r.get("tenant_id") == tenant_id and r.get("status") == "approved"
+                ]
+                return approved[:limit]
         if "FROM messages" in sql:
             conv_id = args[0]
             rows = [dict(m) for m in self.messages

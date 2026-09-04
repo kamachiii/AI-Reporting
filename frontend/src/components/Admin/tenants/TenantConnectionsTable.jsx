@@ -1,14 +1,15 @@
-import { useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { CheckCircle, XCircle, Loader2, RefreshCw, Trash2, BookOpen } from 'lucide-react';
+import { CheckCircle, XCircle, Loader2, RefreshCw, Trash2, BookOpen, Zap, Layers, Shield } from 'lucide-react';
 import PaginationBar from '../common/PaginationBar';
 import EmptyState from '../common/EmptyState';
+import SortIcon from '../common/SortIcon';
 
 const PAGE_SIZE = 10; // sinkron dengan DatabaseRegistryTable (ukuran halaman tabel admin)
 
 /**
  * Tabel relasi cabang ↔ database (sub-tab "Koneksi" di TenantsTab).
- * Presentational: menerima data + callback; pagination & render murni di sini —
+ * Presentational: menerima data + callback; sorting, pagination & render murni di sini —
  * aksi (refresh skema, putus koneksi) tetap di TenantsTab.
  */
 export default function TenantConnectionsTable({
@@ -22,9 +23,17 @@ export default function TenantConnectionsTable({
   tier2Busy,
   onRefreshSchema,
   onManageKb,
-  onToggleTier2,
+  onSetChatMode,
   onDisconnect,
 }) {
+  const [sortConfig, setSortConfig] = useState({ key: 'branch_code', direction: 'asc' });
+
+  const handleSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
+    setSortConfig({ key, direction });
+  };
+
   const filteredConns = useMemo(() => {
     if (!debouncedSearch) return tenants;
     const q = debouncedSearch.toLowerCase();
@@ -33,11 +42,31 @@ export default function TenantConnectionsTable({
       (t.db_name_label || '').toLowerCase().includes(q));
   }, [tenants, debouncedSearch]);
 
-  const connTotalPages = Math.max(1, Math.ceil(filteredConns.length / PAGE_SIZE));
+  const sortedConns = useMemo(() => {
+    const sorted = [...filteredConns];
+    return sorted.sort((a, b) => {
+      let aVal = a[sortConfig.key] ?? '';
+      let bVal = b[sortConfig.key] ?? '';
+
+      if (sortConfig.key === 'status') {
+        aVal = dbStatus[String(a.db_connection_id)]?.status || '';
+        bVal = dbStatus[String(b.db_connection_id)]?.status || '';
+      }
+
+      if (typeof aVal === 'string') aVal = aVal.toLowerCase();
+      if (typeof bVal === 'string') bVal = bVal.toLowerCase();
+
+      if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [filteredConns, sortConfig, dbStatus]);
+
+  const connTotalPages = Math.max(1, Math.ceil(sortedConns.length / PAGE_SIZE));
   useEffect(() => { if (connPage > connTotalPages) setConnPage(connTotalPages); }, [connPage, connTotalPages, setConnPage]);
   const paginatedConns = useMemo(
-    () => filteredConns.slice((connPage - 1) * PAGE_SIZE, connPage * PAGE_SIZE),
-    [filteredConns, connPage]);
+    () => sortedConns.slice((connPage - 1) * PAGE_SIZE, connPage * PAGE_SIZE),
+    [sortedConns, connPage]);
 
   if (filteredConns.length === 0) {
     return (
@@ -53,10 +82,18 @@ export default function TenantConnectionsTable({
         <table className="w-full text-left">
           <thead className="bg-surface-soft text-sm text-muted sticky top-0 z-10">
             <tr>
-              <th className="p-3">Cabang</th>
-              <th className="p-3">Database</th>
-              <th className="p-3">Lokasi</th>
-              <th className="p-3 w-32">Status</th>
+              <th className="p-3 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('branch_code')}>
+                Cabang <SortIcon columnKey="branch_code" sortConfig={sortConfig} />
+              </th>
+              <th className="p-3 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('db_name_label')}>
+                Database <SortIcon columnKey="db_name_label" sortConfig={sortConfig} />
+              </th>
+              <th className="p-3 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('db_host')}>
+                Lokasi <SortIcon columnKey="db_host" sortConfig={sortConfig} />
+              </th>
+              <th className="p-3 w-36 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('status')}>
+                Status <SortIcon columnKey="status" sortConfig={sortConfig} />
+              </th>
               <th className="p-3 w-0 text-center">Aksi</th>
             </tr>
           </thead>
@@ -90,21 +127,38 @@ export default function TenantConnectionsTable({
                 </td>
                 <td className="p-3">
                   <div className="flex justify-end items-center gap-0.5">
-                    {/* Chip toggle Tier 2 (F2.6) — status dari GET tenants
-                        (chat_tier2), aksi via onToggleTier2 di TenantsTab */}
-                    <button onClick={() => onToggleTier2(t)} disabled={tier2Busy === t.branch_code}
-                      title={t.chat_tier2 ? 'Tier 2 aktif — klik untuk nonaktifkan' : 'Tier 2 nonaktif — klik untuk aktifkan'}
-                      aria-label={`Tier 2 ${t.branch_code} ${t.chat_tier2 ? 'aktif' : 'nonaktif'}`}
-                      className={`inline-flex items-center gap-1 mr-1 px-2 py-1 rounded-md text-[11px] font-medium border transition-colors disabled:opacity-50 ${
-                        t.chat_tier2
-                          ? 'bg-success/10 border-success/20 text-success hover:bg-success/20'
-                          : 'bg-canvas border-hairline text-muted hover:text-ink hover:border-primary/40'
-                      }`}>
-                      {tier2Busy === t.branch_code
-                        ? <Loader2 size={11} className="animate-spin" />
-                        : null}
-                      Tier 2 {t.chat_tier2 ? 'ON' : 'OFF'}
-                    </button>
+                    {/* Mode AI Selector (Opsi 1: vanna | tier2 | tier1) */}
+                    {(() => {
+                      const curMode = t.chat_mode || (t.chat_tier2 ? 'tier2' : 'vanna');
+                      return (
+                        <div className="relative inline-flex items-center mr-2">
+                          <span className="absolute left-2 pointer-events-none text-muted">
+                            {curMode === 'vanna' ? (
+                              <Zap size={11} />
+                            ) : curMode === 'tier2' ? (
+                              <Layers size={11} />
+                            ) : (
+                              <Shield size={11} />
+                            )}
+                          </span>
+                          <select
+                            value={curMode}
+                            onChange={(e) => onSetChatMode && onSetChatMode(t, e.target.value)}
+                            disabled={tier2Busy === t.branch_code}
+                            aria-label={`Mode AI ${t.branch_code}`}
+                            title="Pilih Mode Eksekusi AI untuk cabang ini"
+                            className="text-xs py-1 pl-6 pr-2 rounded-md border border-hairline bg-canvas text-ink font-medium focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 hover:border-hairline-strong cursor-pointer transition-colors"
+                          >
+                            <option value="vanna">Mode Vanna</option>
+                            <option value="tier2">Tier 2 (Kompleks)</option>
+                            <option value="tier1">Tier 1 (Standar)</option>
+                          </select>
+                          {tier2Busy === t.branch_code && (
+                            <Loader2 size={12} className="animate-spin ml-1.5 text-primary" />
+                          )}
+                        </div>
+                      );
+                    })()}
                     <button onClick={() => onManageKb(t)} disabled={processingKey === t.branch_code}
                       title="Knowledge Base" aria-label={`Knowledge Base ${t.branch_code}`}
                       className="p-1.5 text-muted hover:text-primary hover:bg-surface-soft rounded-md disabled:opacity-50">

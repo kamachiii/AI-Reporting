@@ -9,6 +9,7 @@ import {
 import EmptyState from './common/EmptyState';
 import ConfirmationDialog from './common/ConfirmationDialog';
 import SkeletonTable from './common/SkeletonTable';
+import SortIcon from './common/SortIcon';
 import AIConfigModal from './ai/AIConfigModal';
 import useDebounce from '../../hooks/useDebounce';
 import useAdminShortcuts from '../../hooks/useAdminShortcuts';
@@ -162,6 +163,42 @@ export default function AIConfigTab() {
     );
   }, [configs, debouncedSearch]);
 
+  const [sortConfig, setSortConfig] = useState({ key: 'scope', direction: 'asc' });
+
+  const handleSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
+    setSortConfig({ key, direction });
+  };
+
+  const sortedConfigs = useMemo(() => {
+    const sorted = [...filteredConfigs];
+    return sorted.sort((a, b) => {
+      let aVal = a[sortConfig.key] ?? '';
+      let bVal = b[sortConfig.key] ?? '';
+
+      if (sortConfig.key === 'scope') {
+        const scopeLabel = (c) => c.scope === 'global' ? 'Global' : c.scope === 'tenant' ? `Tenant: ${c.target_id}` : `User: ${c.target_id}`;
+        aVal = scopeLabel(a);
+        bVal = scopeLabel(b);
+      } else if (sortConfig.key === 'temperature') {
+        const av = Number(a.temperature) || 0;
+        const bv = Number(b.temperature) || 0;
+        return sortConfig.direction === 'asc' ? av - bv : bv - av;
+      } else if (sortConfig.key === 'status') {
+        aVal = statusMap[a.id] || '';
+        bVal = statusMap[b.id] || '';
+      }
+
+      if (typeof aVal === 'string') aVal = aVal.toLowerCase();
+      if (typeof bVal === 'string') bVal = bVal.toLowerCase();
+
+      if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [filteredConfigs, sortConfig, statusMap]);
+
   if (loading) return <SkeletonTable rows={4} columns={5} />;
 
   return (
@@ -209,16 +246,26 @@ export default function AIConfigTab() {
             <table className="w-full text-left">
               <thead className="bg-surface-soft text-sm text-muted sticky top-0 z-10">
                 <tr>
-                  <th className="p-3">Scope</th>
-                  <th className="p-3">Provider / Type</th>
-                  <th className="p-3">Model</th>
-                  <th className="p-3">Temp.</th>
-                  <th className="p-3">Status</th>
-                  <th className="p-3 w-20">Aksi</th>
+                  <th className="p-3 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('scope')}>
+                    Scope <SortIcon columnKey="scope" sortConfig={sortConfig} />
+                  </th>
+                  <th className="p-3 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('provider')}>
+                    Provider / Type <SortIcon columnKey="provider" sortConfig={sortConfig} />
+                  </th>
+                  <th className="p-3 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('model')}>
+                    Model <SortIcon columnKey="model" sortConfig={sortConfig} />
+                  </th>
+                  <th className="p-3 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('temperature')}>
+                    Temp. <SortIcon columnKey="temperature" sortConfig={sortConfig} />
+                  </th>
+                  <th className="p-3 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('status')}>
+                    Status <SortIcon columnKey="status" sortConfig={sortConfig} />
+                  </th>
+                  <th className="p-3 w-20 text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-hairline">
-                {filteredConfigs.map((c, idx) => (
+                {sortedConfigs.map((c, idx) => (
                   <motion.tr
                     key={c.id}
                     initial={{ opacity: 0, y: 10 }}

@@ -138,6 +138,11 @@ export const api = {
     const response = await apiClient.post(`/admin/tenants/${branch_code}/tier2`, { enabled });
     return response.data;
   },
+  // Set Mode AI per tenant (Opsi 1: vanna | tier2 | tier1)
+  setTenantChatMode: async (branch_code, mode) => {
+    const response = await apiClient.post(`/admin/tenants/${branch_code}/mode`, { mode });
+    return response.data; // { branch_code, chat_mode, chat_tier2 }
+  },
   // Knowledge Base tenant (F2.0) — lapisan semantik untuk AI
   getTenantKnowledgeBase: async (branchCode) => {
     const response = await apiClient.get(`/admin/tenants/${branchCode}/knowledge-base`);
@@ -227,10 +232,10 @@ export const api = {
   //           truncated, duration_ms, memory_id}
   // memory_id hanya terisi untuk jawaban baru (SQL memory pending) —
   // dipakai tombol feedback "Jawaban benar/salah".
-  askAssistant: async (branchCode, question) => {
-    // Timeout 60 dtk: planner LLM + verifikasi + eksekusi query tenant
+  askAssistant: async (branchCode, question, mode = 'auto') => {
+    // Timeout 180 dtk (3 menit): mengakomodasi model penalaran / thinking AI
     const response = await apiClient.post('/chat/query',
-      { branch_code: branchCode, question }, { timeout: 60000 });
+      { branch_code: branchCode, question, mode }, { timeout: 180000 });
     return response.data;
   },
   // Riwayat percakapan: {conversation_id, messages: [{role, content,
@@ -250,6 +255,41 @@ export const api = {
   rejectMemory: async (branchCode, memoryId) => {
     const response = await apiClient.post('/chat/reject-memory',
       { branch_code: branchCode, memory_id: memoryId });
+    return response.data;
+  },
+
+  // ==========================================
+  // 6. ADMIN: GLOBAL KNOWLEDGE BASE (F3/F3.1)
+  // ==========================================
+  getGlobalKBStats: async () => {
+    const response = await apiClient.get('/admin/global-kb/stats');
+    return response.data;
+  },
+  getGlobalKBItems: async ({ kind, q, limit = 25, offset = 0 } = {}) => {
+    const params = { limit, offset };
+    if (kind) params.kind = kind;
+    if (q) params.q = q;
+    const response = await apiClient.get('/admin/global-kb/items', { params });
+    return response.data;
+  },
+  getGlobalKBItem: async (id) => {
+    const response = await apiClient.get(`/admin/global-kb/items/${id}`);
+    return response.data;
+  },
+  createGlobalKBItem: async (data) => {
+    const response = await apiClient.post('/admin/global-kb/items', data);
+    return response.data;
+  },
+  updateGlobalKBItem: async (id, data) => {
+    const response = await apiClient.put(`/admin/global-kb/items/${id}`, data);
+    return response.data;
+  },
+  deleteGlobalKBItem: async (id) => {
+    const response = await apiClient.delete(`/admin/global-kb/items/${id}`);
+    return response.data;
+  },
+  syncGlobalKB: async () => {
+    const response = await apiClient.post('/admin/global-kb/sync');
     return response.data;
   },
 };

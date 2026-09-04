@@ -7,7 +7,7 @@ Satu cabang = satu database; satu database boleh dipakai banyak cabang.
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import asyncpg
 import logging
 
@@ -74,7 +74,8 @@ async def get_tenants(user: dict = Depends(require_admin_role)):
         rows = await pool.fetch("""
             SELECT t.branch_code, t.db_connection_id,
                    dc.name AS db_name_label, dc.db_host, dc.db_port,
-                   dc.db_name, t.is_active, t.chat_tier2
+                   dc.db_name, t.is_active, t.chat_tier2,
+                   COALESCE(t.chat_mode, CASE WHEN t.chat_tier2 THEN 'tier2' ELSE 'vanna' END) AS chat_mode
             FROM tenants t
             JOIN db_connections dc ON dc.id = t.db_connection_id
             ORDER BY t.branch_code
@@ -89,6 +90,7 @@ async def get_tenants(user: dict = Depends(require_admin_role)):
                 "db_name": r["db_name"],
                 "is_active": r["is_active"],
                 "chat_tier2": r["chat_tier2"],
+                "chat_mode": r["chat_mode"],
             } for r in rows
         ]
     except Exception as e:
@@ -274,20 +276,69 @@ class Tier2ToggleRequest(BaseModel):
     enabled: bool
 
 
+class TenantModeUpdate(BaseModel):
+    mode: str = Field(pattern="^(vanna|tier2|tier1)$")
+
+
+@router.post("/tenants/{branch_code}/mode")
+async def set_tenant_mode(branch_code: str, payload: TenantModeUpdate,
+                          user: dict = Depends(require_admin_role)):
+    """Ubah mode eksekusi AI untuk satu tenant: vanna | tier2 | tier1.
+
+    - vanna: Pure Vanna engine (cepat, luwes, tanpa gerbang verifier).
+    - tier2: Enterprise Verified Text2SQL (kueri kompleks, wajib lolos 6 gerbang
+             dan gate aktivasi eval golden-set).
+    - tier1: Deterministik (rencana JSON, paling ketat).
+    """
+    pool = await get_core_pool()
+    try:
+        row = await pool.fetchrow(
+            "SELECT id FROM tenants WHERE branch_code = $1", branch_code)
+        if not row:
+            pesan = f"Tenant untuk cabang '{branch_code}' tidak ditemukan."
+            await tulis_audit(
+                pool, user_id=(user or {}).get("user_id"),
+                branch_code=branch_code,
+                prompt_text=f"[mode-toggle] {branch_code}",
+                ai_json_filter={"chat_mode": payload.mode},
+                generated_sql=None, execution_time_ms=None,
+                status="error", error_message=pesan)
+            raise HTTPException(status_code=404, detail=pesan)
+
+        is_tier2 = (payload.mode == "tier2")
+        if is_tier2:
+            run_terakhir = await ambil_run_terakhir(pool, row["id"])
+            gate = status_gate({"branch_code": branch_code}, run_terakhir)
+            if not gate["tier2_diizinkan"]:
+                await tulis_audit(
+                    pool, user_id=(user or {}).get("user_id"),
+                    branch_code=branch_code,
+                    prompt_text=f"[mode-toggle] {branch_code}",
+                    ai_json_filter={"chat_mode": payload.mode,
+                                    "gate_ditolak": gate["alasan"]},
+                    generated_sql=None, execution_time_ms=None,
+                    status="error", error_message=gate["alasan"])
+                raise HTTPException(status_code=400, detail=gate["alasan"])
+    except HTTPException:
+        raise
+
+    await pool.execute(
+        "UPDATE tenants SET chat_mode = $2, chat_tier2 = $3, updated_at = CURRENT_TIMESTAMP "
+        "WHERE branch_code = $1",
+        branch_code, payload.mode, is_tier2)
+    await tulis_audit(
+        pool, user_id=(user or {}).get("user_id"), branch_code=branch_code,
+        prompt_text=f"[mode-toggle] {branch_code}",
+        ai_json_filter={"chat_mode": payload.mode, "chat_tier2": is_tier2},
+        generated_sql=None, execution_time_ms=None,
+        status="success", error_message=None)
+    return {"branch_code": branch_code, "chat_mode": payload.mode, "chat_tier2": is_tier2}
+
+
 @router.post("/tenants/{branch_code}/tier2")
 async def set_tenant_tier2(branch_code: str, payload: Tier2ToggleRequest,
                            user: dict = Depends(require_admin_role)):
-    """Aktifkan/matikan jalur Tier 2 (docs v2 §1) untuk satu tenant.
-
-    Flag `tenants.chat_tier2` default FALSE (migration 008) — pipeline chat
-    memakai alur lama (planner -> composer) selama flag mati. F2.7 (docs v2
-    §8): mengaktifkan flag (enabled=True) kini MELEWATI GATE eval harness —
-    snapshot eval_runs terakhir tenant harus pass_rate >= 0.95 dengan 0
-    pelanggaran verifier; belum pernah eval -> ditolak ("jalankan eval
-    dulu"). Mematikan flag TIDAK memerlukan gate. Keputusan admin ter-audit
-    ke audit_logs (pola tulis_audit chat_pipeline): sukses maupun percobaan
-    yang ditolak (404/gate) — pensondelan terlihat.
-    """
+    """Aktifkan/matikan jalur Tier 2 (docs v2 §1) untuk satu tenant."""
     pool = await get_core_pool()
     try:
         row = await pool.fetchrow(
@@ -303,7 +354,6 @@ async def set_tenant_tier2(branch_code: str, payload: Tier2ToggleRequest,
                 status="error", error_message=pesan)
             raise HTTPException(status_code=404, detail=pesan)
         if payload.enabled:
-            # F2.7 gate aktivasi: snapshot eval terakhir menentukan.
             run_terakhir = await ambil_run_terakhir(pool, row["id"])
             gate = status_gate({"branch_code": branch_code}, run_terakhir)
             if not gate["tier2_diizinkan"]:

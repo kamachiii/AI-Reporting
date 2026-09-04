@@ -10,6 +10,7 @@ import PaginationBar from './common/PaginationBar';
 import EmptyState from './common/EmptyState';
 import ConfirmationDialog from './common/ConfirmationDialog';
 import SkeletonTable from './common/SkeletonTable';
+import SortIcon from './common/SortIcon';
 import UserModal from './users/UserModal';
 import useDebounce from '../../hooks/useDebounce';
 import useAdminShortcuts from '../../hooks/useAdminShortcuts';
@@ -71,11 +72,45 @@ export default function UsersTab() {
     );
   }, [users, debouncedSearch]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / PAGE_SIZE));
+  const [sortConfig, setSortConfig] = useState({ key: 'username', direction: 'asc' });
+
+  const handleSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
+    setSortConfig({ key, direction });
+  };
+
+  const sortedUsers = useMemo(() => {
+    const sorted = [...filteredUsers];
+    return sorted.sort((a, b) => {
+      let aVal = a[sortConfig.key] ?? '';
+      let bVal = b[sortConfig.key] ?? '';
+
+      if (sortConfig.key === 'is_active') {
+        const av = a.is_active ? 1 : 0;
+        const bv = b.is_active ? 1 : 0;
+        return sortConfig.direction === 'asc' ? av - bv : bv - av;
+      }
+      if (sortConfig.key === 'branches') {
+        const av = (a.branches || []).length;
+        const bv = (b.branches || []).length;
+        return sortConfig.direction === 'asc' ? av - bv : bv - av;
+      }
+
+      if (typeof aVal === 'string') aVal = aVal.toLowerCase();
+      if (typeof bVal === 'string') bVal = bVal.toLowerCase();
+
+      if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [filteredUsers, sortConfig]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedUsers.length / PAGE_SIZE));
   const paginatedUsers = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE;
-    return filteredUsers.slice(start, start + PAGE_SIZE);
-  }, [filteredUsers, page]);
+    return sortedUsers.slice(start, start + PAGE_SIZE);
+  }, [sortedUsers, page]);
 
   useEffect(() => setPage(1), [debouncedSearch]);
   useEffect(() => {
@@ -195,12 +230,22 @@ export default function UsersTab() {
             <table className="w-full text-left">
               <thead className="bg-surface-soft text-sm text-muted sticky top-0 z-10">
                 <tr>
-                  <th className="p-3">Username</th>
-                  <th className="p-3">Email</th>
-                  <th className="p-3 w-24">Role</th>
-                  <th className="p-3">Akses Cabang</th>
-                  <th className="p-3 w-28">Status</th>
-                  <th className="p-3 w-24">Aksi</th>
+                  <th className="p-3 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('username')}>
+                    Username <SortIcon columnKey="username" sortConfig={sortConfig} />
+                  </th>
+                  <th className="p-3 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('email')}>
+                    Email <SortIcon columnKey="email" sortConfig={sortConfig} />
+                  </th>
+                  <th className="p-3 w-28 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('role')}>
+                    Role <SortIcon columnKey="role" sortConfig={sortConfig} />
+                  </th>
+                  <th className="p-3 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('branches')}>
+                    Akses Cabang <SortIcon columnKey="branches" sortConfig={sortConfig} />
+                  </th>
+                  <th className="p-3 w-32 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('is_active')}>
+                    Status <SortIcon columnKey="is_active" sortConfig={sortConfig} />
+                  </th>
+                  <th className="p-3 w-24 text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-hairline">

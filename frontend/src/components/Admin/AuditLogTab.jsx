@@ -6,6 +6,7 @@ import { RefreshCw, Search, CheckCircle, XCircle, Clock, X, ChevronDown } from '
 import EmptyState from './common/EmptyState';
 import PaginationBar from './common/PaginationBar';
 import SkeletonTable from './common/SkeletonTable';
+import SortIcon from './common/SortIcon';
 
 const PAGE_SIZE = 20;
 
@@ -35,6 +36,15 @@ export default function AuditLogTab() {
   // Baris log yang sedang di-expand (lihat SQL rencana/hasil + error)
   const [expandedId, setExpandedId] = useState(null);
 
+  const [sortConfig, setSortConfig] = useState({ key: 'created_at', direction: 'desc' });
+
+  const handleSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
+    setSortConfig({ key, direction });
+    setPage(1);
+  };
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const fetchLogs = async (opts = {}) => {
@@ -46,6 +56,8 @@ export default function AuditLogTab() {
       if (dateFrom) params.date_from = dateFrom;
       if (dateTo) params.date_to = dateTo;
       if (searchQuery) params.q = searchQuery;
+      params.sort_by = sortConfig.key;
+      params.sort_dir = sortConfig.direction;
       const data = await api.getAuditLogs(params);
       setLogs(data.data || []);
       setTotal(data.total || 0);
@@ -60,7 +72,7 @@ export default function AuditLogTab() {
   useEffect(() => {
     fetchLogs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, statusFilter, dateFrom, dateTo, searchQuery]);
+  }, [page, statusFilter, dateFrom, dateTo, searchQuery, sortConfig]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -205,12 +217,22 @@ export default function AuditLogTab() {
               <thead className="bg-surface-soft sticky top-0 z-10">
                 <tr className="text-left text-xs uppercase tracking-wider text-muted border-b border-hairline">
                   <th className="px-2 py-2 w-8"><span className="sr-only">Detail</span></th>
-                  <th className="px-3 py-2">Waktu</th>
-                  <th className="px-3 py-2">User</th>
-                  <th className="px-3 py-2">Cabang</th>
+                  <th className="px-3 py-2 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('created_at')}>
+                    Waktu <SortIcon columnKey="created_at" sortConfig={sortConfig} />
+                  </th>
+                  <th className="px-3 py-2 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('user_name')}>
+                    User <SortIcon columnKey="user_name" sortConfig={sortConfig} />
+                  </th>
+                  <th className="px-3 py-2 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('branch_code')}>
+                    Cabang <SortIcon columnKey="branch_code" sortConfig={sortConfig} />
+                  </th>
                   <th className="px-3 py-2">Pertanyaan</th>
-                  <th className="px-3 py-2">Durasi</th>
-                  <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('execution_time_ms')}>
+                    Durasi <SortIcon columnKey="execution_time_ms" sortConfig={sortConfig} />
+                  </th>
+                  <th className="px-3 py-2 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('status')}>
+                    Status <SortIcon columnKey="status" sortConfig={sortConfig} />
+                  </th>
                 </tr>
               </thead>
               <tbody>

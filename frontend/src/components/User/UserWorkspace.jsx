@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { Bot, Building2, Check, Loader2, LogOut, Send, Sparkles } from 'lucide-react';
+import { Bot, Building2, Check, Loader2, LogOut, Send } from 'lucide-react';
 
 import AssistantAnswerCard from './AssistantAnswerCard';
 import { api } from '../../services/api';
@@ -21,12 +21,6 @@ const PIPELINE_STAGES = [
   { key: 'fetch', label: 'Mengambil data…' },
 ];
 const STAGE_INTERVAL_MS = 1200;
-
-const SUGGESTED_QUESTIONS = [
-  'Penjualan bulan ini',
-  'Stok kendaraan tersedia',
-  'Servis bulan ini',
-];
 
 // ID pesan sekuensial untuk pesan baru (riwayat hydrate memakai awalan h-)
 let messageSeq = 0;
@@ -358,24 +352,9 @@ export default function UserWorkspace({ user, onLogout }) {
         </div>
       </main>
 
-      {/* Chip saran + kolom input */}
+      {/* Kolom input */}
       <footer className="bg-white border-t border-hairline shrink-0">
-        <div className="max-w-3xl mx-auto px-4 py-3 space-y-2">
-          <div className="flex items-center gap-2 flex-wrap">
-            <Sparkles size={14} className="text-primary shrink-0" aria-hidden="true" />
-            {SUGGESTED_QUESTIONS.map((q) => (
-              <button
-                key={q}
-                type="button"
-                disabled={isProcessing || !branchCode}
-                onClick={() => handleSend(q)}
-                className="px-3 py-1 text-xs border border-hairline rounded-full bg-canvas text-body hover:bg-surface-soft hover:border-primary/40 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {q}
-              </button>
-            ))}
-          </div>
-
+        <div className="max-w-3xl mx-auto px-4 py-3">
           <form
             onSubmit={(e) => {
               e.preventDefault();

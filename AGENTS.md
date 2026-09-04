@@ -27,19 +27,21 @@ natural dengan data nyata dari database per-cabang (dealer), dengan keamanan ent
 
 ## 2. Status saat ini & urutan baca
 
-**Status (2026-09-02): arsitektur v2 KOMPLET dan LIVE** — sudah dipakai nyata via browser
-(login user → pertanyaan → SQL → data nyata). Head: `2466052`. Test: **458 passed**.
+**Status (2026-09-03): arsitektur v2 KOMPLET dan LIVE** — sudah dipakai nyata via browser
+(login user → pertanyaan → SQL → data nyata). Head: LIVE. Test: **507 passed**.
 
-Urutan baca (semua di `docs/`):
+Urutan baca:
 
-1. **`PROGRES-IMPLEMENTASI.md`** — PALING PENTING. Status per fase + commit, detail
-   teknis per fase (§3a–3g: kontrak API, keputusan, bug yang pernah terjadi), jebakan
+1. **`docs/PANDUAN-PENGEMBANGAN-LENGKAP.md`** — HANDBOOK UTAMA bagi programmer yang baru
+   bergabung: ringkasan sistem, diagram alur Mermaid, setup dev, rincian komponen,
+   aturan emas, daftar API endpoint, dan roadmap sisa kerja.
+2. **`docs/PROGRES-IMPLEMENTASI.md`** — HISTORI TEKNIS LENGKAP. Status per fase + commit, detail
+   teknis per fase (§3a–3h: kontrak API, keputusan, bug yang pernah terjadi), jebakan
    teknis (§4), checklist verifikasi standar (§5), sisa kerja (§6).
-2. **`PERANCANGAN-PIPELINE-AI-v2.md`** — desain final yang disetujui owner (dua tier,
+3. **`docs/PERANCANGAN-PIPELINE-AI-v2.md`** — desain final yang disetujui owner (dua tier,
    verifier, SQL Memory, taxonomy kegagalan, keputusan domain: hanya role `user` yang
    boleh chat). v1 (`PERANCANGAN-PIPELINE-AI.md`) masih acuan bentuk Knowledge Base.
-3. `Readme.md` — arsitektur umum & setup awal (sedikit drift utk endpoint baru; yang
-   benar ada di kode + PROGRESS §3).
+4. `Readme.md` — arsitektur umum & setup awal.
 
 ## 3. Kontrak teknis yang TIDAK boleh dilanggar
 

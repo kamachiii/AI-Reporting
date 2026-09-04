@@ -467,13 +467,40 @@ erDiagram
 | `POST` | `/admin/ai-configs/test-draft` | Test draft config |
 | `POST` | `/admin/ai-providers/models` | Fetch daftar model dari provider |
 
+### Chat & AI Reporting (User Role)
+| Method | Endpoint | Deskripsi |
+|---|---|---|
+| `POST` | `/chat/query` | Mengajukan pertanyaan analitik bahasa natural ke AI |
+| `POST` | `/chat/feedback` | Feedback jawaban ("Jawaban benar" → promosi ke SQL Memory) |
+| `GET` | `/chat/history` | Riwayat percakapan pengguna |
+
+### Admin — Global Knowledge Base (SSOT)
+| Method | Endpoint | Deskripsi |
+|---|---|---|
+| `GET` | `/admin/global-kb/items` | Daftar item Global KB (aturan bisnis, kamus skema, Q→SQL) |
+| `POST` | `/admin/global-kb/items` | Tambah item baru manual |
+| `GET` | `/admin/global-kb/items/{id}` | Detail item Global KB |
+| `PUT` | `/admin/global-kb/items/{id}` | Edit item Global KB |
+| `DELETE` | `/admin/global-kb/items/{id}` | Hapus item Global KB |
+| `POST` | `/admin/global-kb/sync` | Sinkronisasi / import snapshot dari Vanna API |
+| `GET` | `/admin/global-kb/stats` | Statistik jumlah aturan & contoh SQL |
+
+### Admin — Eval Harness (Golden-Set Benchmark)
+| Method | Endpoint | Deskripsi |
+|---|---|---|
+| `GET` | `/admin/tenants/{branch}/eval-cases` | Daftar soal evaluasi golden-set per cabang |
+| `POST` | `/admin/tenants/{branch}/eval-cases` | Tambah soal evaluasi golden-set |
+| `POST` | `/admin/tenants/{branch}/eval-run` | Jalankan evaluasi benchmark (syarat lulus Tier 2) |
+| `GET` | `/admin/tenants/{branch}/eval-runs` | Riwayat metrik evaluasi snapshot |
+
 > 💡 **Base URL provider** otomatis dinormalisasi (trailing slash dihapus) sebelum
 > dipakai menghitung URL endpoint (`/models`, `/chat/completions`, `/messages`).
 > Gateway dengan route-matching ketat (mis. B.AI) menolak path double-slash
 > seperti `/v1//models`. Pastikan base_url sudah memuat prefix versi yang benar
 > (mis. `https://api.b.ai/v1`) — host root tanpa `/v1` tetap akan ditolak gateway.
 
-> 📖 Dokumentasi API lengkap tersedia di **http://localhost:8000/docs** (Swagger UI)
+> 📖 **Panduan Lengkap Pengembang**: Baca [docs/PANDUAN-PENGEMBANGAN-LENGKAP.md](docs/PANDUAN-PENGEMBANGAN-LENGKAP.md) untuk arsitektur detail Two-Tier, Verifier 6 Gerbang, dan alur pipeline.
+> Dokumentasi OpenAPI interaktif tersedia di **http://localhost:8000/docs** (Swagger UI).
 
 ---
 

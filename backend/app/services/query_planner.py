@@ -33,13 +33,14 @@ from app.core.security import decrypt_credential
 from app.services.ai_orchestrator import build_chat_url
 from app.services.sql_composer import (
     AGGREGASI_DIIZINKAN, OPERATOR_DIIZINKAN, PRESET_WAKTU, validate_plan)
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 # Coba 1x (call pertama) + 1x retry dengan feedback error validator.
 MAX_ATTEMPT = 2
 
-_LLM_TIMEOUT_SECONDS = 60.0
+_LLM_TIMEOUT_SECONDS = settings.llm_timeout_seconds
 _MAX_TOKENS_ANTHROPIC = 4096
 # Ambil maksimal 800 char output LLM saat dimasukkan ke prompt feedback
 # (jaga token & hindari prompt injection berulit dari output lama).
@@ -78,8 +79,7 @@ def _system_prompt() -> str:
         "4. Agregasi yang boleh: " + aggs + " (ditulis pada field 'agg', "
         "kolom agregat ditulis {\"agg\": ..., \"column\": ..., \"alias\": ...}).\n"
         "5. Operator filter yang boleh: " + ops + ".\n"
-        "6. preset time_range yang boleh: " + presets + " — ATAU pakai "
-        "'from'/'to' tanggal ISO format YYYY-MM-DD.\n"
+        "6. time_range.field WAJIB kolom bertipe tanggal/timestamp (mis. 'tglinvoice', 'tanggal', 'tgltransaksi'). PILIH SATU antara 'preset' (pilihan: " + presets + ") ATAU 'from'/'to' (tanggal ISO YYYY-MM-DD), JANGAN keduanya. Kolom tahun string/angka (mis. 'thnpembuatan') dimasukkan ke 'filters' biasa.\n"
         "7. alias (jika ada) hanya huruf kecil/underscore: [a-z_][a-z0-9_]*.\n"
         "8. limit bilangan bulat 1..500 (jika user tidak menyebut, biarkan "
         "default).\n"
@@ -147,7 +147,8 @@ def _skema_ringkas(schema_config: dict) -> dict:
     return ringkas
 
 
-def build_user_prompt(question: str, schema_config: dict, kb: dict) -> str:
+def build_user_prompt(question: str, schema_config: dict, kb: dict,
+                      fewshot: list[dict] | None = None) -> str:
     """Prompt user: skema tenant + KB (glossary/catatan/nilai/contoh) + tanya.
 
     KB dibatasi ukurannya secara alami oleh validasi admin (KB disimpan
@@ -155,23 +156,51 @@ def build_user_prompt(question: str, schema_config: dict, kb: dict) -> str:
     utama mencegah salah semantik (docs v2 §4). Skema memakai bentuk padat
     `_skema_ringkas`; keterangan formatnya ditulis di header agar LLM tidak
     salah baca.
+
+    Parameter fewshot (F3): contoh pertanyaan→plan/SQL yang sudah terbukti
+    benar dari sql_memory (approved) + global KB. Opsional — backward
+    compatible (None = tanpa contoh, output identik dengan versi lama).
     """
+    tabel_efektif = set((schema_config or {}).get("tables", {}).keys())
+    catatan_kolom_efektif = {
+        k: v for k, v in (kb.get("catatan_kolom") or {}).items()
+        if any(k.startswith(f"{t}.") or k == t for t in tabel_efektif)
+    }
     kb_bagian = {
         "glossary": kb.get("glossary", []),
-        "catatan_kolom": kb.get("catatan_kolom", {}),
+        "catatan_kolom": catatan_kolom_efektif,
         "nilai_map": kb.get("nilai_map", {}),
         "contoh_tanya": kb.get("contoh_tanya", []),
     }
-    return (
+    bagian_utama = (
         "SKEMA DATABASE (JSON padat): per tabel, 'columns' = SATU string "
         "\"nama:tipe\" dipisah koma; 'foreign_keys' = \"kolom -> "
         "tabel.kolom\".\n"
         + json.dumps(_skema_ringkas(schema_config), ensure_ascii=False)
         + "\n\n"
         "KNOWLEDGE BASE TENANT (makna istilah & contoh pertanyaan):\n"
-        + json.dumps(kb_bagian, ensure_ascii=False) + "\n\n"
-        "PERTANYAAN USER:\n" + question.strip()
+        + json.dumps(kb_bagian, ensure_ascii=False) + "\n"
     )
+
+    # F3: Injeksi few-shot examples (contoh nyata yang terbukti benar)
+    bagian_fewshot = ""
+    if fewshot:
+        baris = []
+        for i, fs in enumerate(fewshot, 1):
+            baris.append(f"{i}. Q: {fs.get('pertanyaan', '')}")
+            if fs.get("plan_json") and isinstance(fs["plan_json"], dict):
+                baris.append(
+                    f"   Plan: {json.dumps(fs['plan_json'], ensure_ascii=False)}")
+            elif fs.get("sql"):
+                baris.append(f"   SQL: {fs['sql']}")
+        if baris:
+            bagian_fewshot = (
+                "\nCONTOH PERTANYAAN & JAWABAN YANG SUDAH TERBUKTI BENAR "
+                "(gunakan sebagai referensi pola, BUKAN disalin langsung):\n"
+                + "\n".join(baris) + "\n"
+            )
+
+    return bagian_utama + bagian_fewshot + "\nPERTANYAAN USER:\n" + question.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +224,53 @@ def _buang_pembungkus(raw: str) -> str:
     return teks
 
 
+def _normalisasi_plan_llm(plan: dict, schema_config: dict) -> dict:
+    """Normalisasi toleran output LLM sebelum masuk validasi ketat composer."""
+    if not isinstance(plan, dict):
+        return plan
+    p = dict(plan)
+    tr = p.get("time_range")
+    if isinstance(tr, dict):
+        tr_norm = dict(tr)
+        # 1. Jika LLM mengirim preset DAN from/to: utamakan from/to bila ada
+        if "preset" in tr_norm and ("from" in tr_norm or "to" in tr_norm):
+            if "from" in tr_norm and "to" in tr_norm:
+                tr_norm.pop("preset", None)
+            else:
+                tr_norm.pop("from", None)
+                tr_norm.pop("to", None)
+
+        # 2. Jika field merujuk kolom tahun non-date (mis. 'thnpembuatan'):
+        fld = tr_norm.get("field")
+        if isinstance(fld, str) and "." in fld:
+            t, col = fld.split(".", 1)
+            tabels = schema_config.get("tables", {})
+            tipe = ""
+            for c in tabels.get(t, {}).get("columns", []):
+                if c.get("name") == col:
+                    tipe = str(c.get("type", "")).lower()
+                    break
+            is_date = ("date" in tipe or "timestamp" in tipe)
+            if not is_date and any(k in col.lower() for k in ["thn", "tahun", "year", "yr"]):
+                year_val = None
+                if "from" in tr_norm:
+                    m = re.match(r"^(\d{4})", str(tr_norm["from"]).strip())
+                    if m:
+                        year_val = m.group(1)
+                elif "preset" in tr_norm and tr_norm["preset"] in ("this_year", "last_year"):
+                    year_val = str(datetime.now().year) if tr_norm["preset"] == "this_year" else str(datetime.now().year - 1)
+
+                if year_val:
+                    # Alihkan ke filter biasa (mis. thnpembuatan = '2026')
+                    filters = list(p.get("filters") or [])
+                    filters.append({"column": fld, "op": "eq", "value": year_val})
+                    p["filters"] = filters
+                    p.pop("time_range", None)
+                    return p
+        p["time_range"] = tr_norm
+    return p
+
+
 def _parse_dan_validasi(raw: str, schema_config: dict) -> tuple[dict | None, list[str]]:
     """Output LLM -> (clean plan | None, daftar error validator)."""
     teks = _buang_pembungkus(raw)
@@ -202,7 +278,8 @@ def _parse_dan_validasi(raw: str, schema_config: dict) -> tuple[dict | None, lis
         plan = json.loads(teks)
     except (ValueError, TypeError) as e:
         return None, [f"output bukan JSON valid: {e}"]
-    clean, errors = validate_plan(plan, schema_config)
+    plan_ternormalisasi = _normalisasi_plan_llm(plan, schema_config)
+    clean, errors = validate_plan(plan_ternormalisasi, schema_config)
     if errors:
         return None, errors
     return clean, []
@@ -269,9 +346,15 @@ async def panggil_llm_default(system: str, user: str, ai_config: dict) -> str:
         raise PlanningError(_reason)
 
     try:
-        data = resp.json()
+        raw_text = resp.text.strip()
+        if "data: [DONE]" in raw_text:
+            raw_text = raw_text.split("data: [DONE]")[0].strip()
+        data, _ = json.JSONDecoder().raw_decode(raw_text)
         if api_type == "openai":
-            content = data["choices"][0]["message"]["content"]
+            msg = data["choices"][0]["message"]
+            content = msg.get("content")
+            if (not content or not str(content).strip()) and msg.get("reasoning_content"):
+                content = msg["reasoning_content"]
         else:
             content = data["content"][0]["text"]
     except (ValueError, KeyError, IndexError, TypeError) as e:
@@ -329,7 +412,8 @@ async def resolve_ai_config(pool, username: str, branch_code: str) -> dict:
 # plan_query — orkestrasi panggilan #1 + retry
 # ---------------------------------------------------------------------------
 async def plan_query(question: str, schema_config: dict, kb: dict,
-                     ai_config: dict, llm_call_fn=None) -> dict:
+                     ai_config: dict, llm_call_fn=None,
+                     fewshot: list[dict] | None = None) -> dict:
     """Pertanyaan -> rencana JSON (clean, lolos validate_plan).
 
     Gagal parse/validasi pada percobaan pertama -> SATU retry dengan feedback
@@ -344,10 +428,11 @@ async def plan_query(question: str, schema_config: dict, kb: dict,
         ai_config: hasil resolve_ai_config (api_key sudah didekripsi).
         llm_call_fn: injectable async (system, user, ai_config) -> str;
             default panggil_llm_default.
+        fewshot: contoh pertanyaan→plan/SQL yang sudah terbukti benar (F3).
     """
     llm = llm_call_fn or panggil_llm_default
     system = _system_prompt()
-    user = build_user_prompt(question, schema_config, kb)
+    user = build_user_prompt(question, schema_config, kb, fewshot=fewshot)
 
     raw = await llm(system, user, ai_config)
     plan, errors = _parse_dan_validasi(raw, schema_config)

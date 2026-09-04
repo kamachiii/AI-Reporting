@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  AlertTriangle, Check, ChevronDown, ChevronRight, Database, Layers, Sparkles, X,
+  AlertTriangle, Check, ChevronDown, ChevronRight, Database, Layers, Sparkles, X, Zap,
 } from 'lucide-react';
 
 /** Durasi ms -> teks ringkas ("320 ms" / "1,4 dtk"). */
@@ -9,9 +9,81 @@ function formatDurasi(ms) {
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} dtk`;
 }
 
-/** Sel tabel: null/undefined tampil sebagai garis, bukan kosong. */
-function formatSel(nilai) {
+const UANG_KEYWORDS = [
+  'harga', 'omzet', 'omset', 'beli', 'jual', 'biaya', 'uang', 'dpp', 'ppn',
+  'nominal', 'saldo', 'total_pembelian', 'total_penjualan', 'total_nilai',
+  'hpunit', 'hpdpp', 'hpppn', 'hppbm', 'tarif', 'subtotal', 'diskon',
+  'selisih', 'laba', 'rugi', 'profit', 'margin', 'pendapatan', 'piutang', 'hutang',
+  'nilai_transaksi', 'total_transaksi',
+];
+
+// Kolom yang pasti kuantitas / hitungan unit — BUKAN uang
+const KUANTITAS_KEYWORDS = [
+  'jumlah', 'qty', 'count', 'cnt', 'banyak', 'total_unit', 'unit_terjual',
+  'frekuensi', 'freq', 'banyaknya', 'nomor', 'kode',
+];
+
+// Pengecualian: kolom yang mengandung kata 'jumlah' / 'total' tapi eksplisit uang
+const EKSPLISIT_UANG = [
+  'jumlah_nominal', 'jumlah_uang', 'jumlah_biaya', 'jumlah_rupiah', 'jumlah_rp',
+  'total_nominal', 'total_biaya', 'total_rupiah', 'total_rp', 'total_nilai',
+];
+
+function isKolomUang(colName) {
+  if (!colName) return false;
+  const col = String(colName).toLowerCase();
+  if (EKSPLISIT_UANG.some((k) => col.includes(k))) return true;
+  if (KUANTITAS_KEYWORDS.some((k) => col.includes(k))) return false;
+  return UANG_KEYWORDS.some((k) => col.includes(k));
+}
+
+/** Bersihkan notasi ilmiah dan angka di teks ringkasan agar rapi dengan format Rp. */
+function bersihkanRingkasan(teks) {
+  if (!teks) return '';
+  return teks.replace(/([a-zA-Z0-9_]+:\s*)([+-]?\d+(?:\.\d+)?[eE][+-]?\d+|[+-]?\d+)/g, (match, prefix, numStr) => {
+    const num = Number(numStr);
+    if (Number.isNaN(num)) return match;
+    const isUang = isKolomUang(prefix);
+    const isPersen = prefix.toLowerCase().includes('persen') || prefix.toLowerCase().includes('pct');
+    const formatted = new Intl.NumberFormat('id-ID', { maximumFractionDigits: 2 }).format(Math.abs(Math.round(num)));
+    if (isUang) {
+      return `${prefix}${num < 0 ? '-Rp ' : 'Rp '}${formatted}`;
+    }
+    if (isPersen) {
+      return `${prefix}${num < 0 ? '-' : ''}${formatted}%`;
+    }
+    return `${prefix}${num < 0 ? '-' : ''}${formatted}`;
+  });
+}
+
+/** Sel tabel: null/undefined tampil sebagai garis, angka dan uang diformat id-ID rapi. */
+function formatSel(nilai, colName = '') {
   if (nilai === null || nilai === undefined) return '—';
+  const isAngka = typeof nilai === 'number'
+    || (typeof nilai === 'string' && nilai.trim() !== '' && !Number.isNaN(Number(nilai)));
+
+  if (isAngka) {
+    const num = Number(nilai);
+    const colStr = String(colName || '').toLowerCase();
+    // Kolom tahun (mis. 2025 atau 2026): tampilkan apa adanya tanpa Rp dan tanpa pemisah ribuan
+    if (Number.isInteger(num) && num >= 1900 && num <= 2100 && (colStr.includes('tahun') || colStr.includes('thn') || colStr === '')) {
+      return String(num);
+    }
+    // Deteksi musiman / periode finansial: semester_..., kuartal_..., q1_..., q2_...
+    const isPeriodeMusiman = /^(semester|kuartal|triwulan|q[1-4]|s[1-2])(_|\b)/i.test(colStr);
+    const isNominalBesar = Math.abs(num) >= 100000;
+    const isUang = isKolomUang(colName) || (isPeriodeMusiman && isNominalBesar);
+
+    const formatted = new Intl.NumberFormat('id-ID', { maximumFractionDigits: 2 }).format(Math.abs(num));
+    if (isUang) {
+      return num < 0 ? `-Rp ${formatted}` : `Rp ${formatted}`;
+    }
+    const isPersen = colStr.includes('persen') || colStr.includes('percent') || colStr.includes('pct');
+    if (isPersen) {
+      return `${num < 0 ? '-' : ''}${formatted}%`;
+    }
+    return `${num < 0 ? '-' : ''}${formatted}`;
+  }
   return String(nilai);
 }
 
@@ -66,6 +138,11 @@ export default function AssistantAnswerCard({
               <X size={11} />
               Ditolak
             </span>
+          ) : answer.source === 'vanna' ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-card text-ink border border-hairline text-[11px] font-medium">
+              <Zap size={11} className="text-muted" />
+              Mode Vanna
+            </span>
           ) : answer.source === 'tier2' ? (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-card text-ink text-[11px] font-medium">
               <Layers size={11} />
@@ -85,7 +162,7 @@ export default function AssistantAnswerCard({
         {/* Ringkasan naratif (F2.5) — di atas tabel data */}
         {answer.ringkasan && (
           <p className="border-l-2 border-primary/40 pl-3 font-serif italic text-[15px] leading-relaxed text-ink">
-            {answer.ringkasan}
+            {bersihkanRingkasan(answer.ringkasan)}
           </p>
         )}
 
@@ -112,18 +189,21 @@ export default function AssistantAnswerCard({
                 </tr>
               </thead>
               <tbody className="divide-y divide-hairline">
-                {answer.rows.map((row, i) => (
-                  <tr key={i} className="hover:bg-surface-soft/50 transition-colors">
-                    {row.map((cell, j) => (
-                      <td
-                        key={j}
-                        className={`px-3 py-2 whitespace-nowrap ${j === 0 ? 'text-ink font-medium' : 'text-body'}`}
-                      >
-                        {formatSel(cell)}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
+                {answer.rows.map((row, i) => {
+                  const cells = Array.isArray(row) ? row : Object.values(row || {});
+                  return (
+                    <tr key={i} className="hover:bg-surface-soft/50 transition-colors">
+                      {cells.map((cell, j) => (
+                        <td
+                          key={j}
+                          className={`px-3 py-2 whitespace-nowrap ${j === 0 ? 'text-ink font-medium' : 'text-body'}`}
+                        >
+                          {formatSel(cell, answer.columns?.[j])}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

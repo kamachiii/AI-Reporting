@@ -212,3 +212,71 @@ class TestUserPrompt:
         assert "250000000" not in prompt
         assert "primary_key" not in prompt
         assert "nullable" not in prompt
+
+    def test_fewshot_injeksi_ke_prompt(self):
+        fewshot = [
+            {
+                "pertanyaan": "omzet bulan ini",
+                "plan_json": {"tables": ["penjualan"]},
+                "sql": "SELECT SUM(harga_deal) FROM penjualan"
+            },
+            {
+                "pertanyaan": "total unit",
+                "sql": "SELECT COUNT(*) FROM kendaraan"
+            }
+        ]
+        prompt = build_user_prompt("berapa penjualan?", SCHEMA_CONFIG_DEALER, KB_MIN, fewshot=fewshot)
+        assert "CONTOH PERTANYAAN & JAWABAN YANG SUDAH TERBUKTI BENAR" in prompt
+        assert "omzet bulan ini" in prompt
+        assert "Plan: {\"tables\": [\"penjualan\"]}" in prompt
+        assert "total unit" in prompt
+        assert "SQL: SELECT COUNT(*) FROM kendaraan" in prompt
+        assert "berapa penjualan?" in prompt
+
+    def test_normalisasi_plan_preset_dan_range(self):
+        from app.services.query_planner import _normalisasi_plan_llm
+        plan = {
+            "tables": ["penjualan"],
+            "columns": ["penjualan.tanggal"],
+            "time_range": {
+                "field": "penjualan.tanggal",
+                "preset": "this_year",
+                "from": "2026-01-01",
+                "to": "2026-12-31"
+            }
+        }
+        res = _normalisasi_plan_llm(plan, SCHEMA_CONFIG_DEALER)
+        # Preset harus dihapus karena from/to lebih spesifik
+        assert "preset" not in res["time_range"]
+        assert res["time_range"]["from"] == "2026-01-01"
+        assert res["time_range"]["to"] == "2026-12-31"
+
+    def test_normalisasi_plan_thnpembuatan_varchar_ke_filters(self):
+        from app.services.query_planner import _normalisasi_plan_llm
+        skema = {
+            "tables": {
+                "untt_datakendaraan": {
+                    "columns": [
+                        {"name": "norangka", "type": "varchar"},
+                        {"name": "thnpembuatan", "type": "character varying"}
+                    ]
+                }
+            }
+        }
+        plan = {
+            "tables": ["untt_datakendaraan"],
+            "columns": ["untt_datakendaraan.norangka"],
+            "time_range": {
+                "field": "untt_datakendaraan.thnpembuatan",
+                "preset": "this_year",
+                "from": "2026-01-01",
+                "to": "2026-12-31"
+            }
+        }
+        res = _normalisasi_plan_llm(plan, skema)
+        # time_range harus dialihkan ke filters
+        assert "time_range" not in res
+        assert len(res.get("filters", [])) == 1
+        assert res["filters"][0]["column"] == "untt_datakendaraan.thnpembuatan"
+        assert res["filters"][0]["op"] == "eq"
+        assert res["filters"][0]["value"] == "2026"
