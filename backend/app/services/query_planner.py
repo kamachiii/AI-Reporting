@@ -351,12 +351,19 @@ async def panggil_llm_default(system: str, user: str, ai_config: dict) -> str:
             raw_text = raw_text.split("data: [DONE]")[0].strip()
         data, _ = json.JSONDecoder().raw_decode(raw_text)
         if api_type == "openai":
+            if "error" in data:
+                err_msg = data["error"].get("message") if isinstance(data["error"], dict) else str(data["error"])
+                raise PlanningError(f"Provider AI: {err_msg}")
+            if "choices" not in data or not data["choices"]:
+                raise PlanningError(f"Respons AI tidak memuat pilihan jawaban (choices)")
             msg = data["choices"][0]["message"]
             content = msg.get("content")
             if (not content or not str(content).strip()) and msg.get("reasoning_content"):
                 content = msg["reasoning_content"]
         else:
             content = data["content"][0]["text"]
+    except PlanningError:
+        raise
     except (ValueError, KeyError, IndexError, TypeError) as e:
         raise PlanningError(f"respons gateway tidak terbaca: {e}") from e
 

@@ -241,8 +241,8 @@ async def chat_reject_memory(payload: MemoryDecisionRequest,
 
 class ChatExplainRequest(BaseModel):
     branch_code: str = Field(min_length=1, max_length=50)
-    question: str = Field(min_length=1, max_length=2000)
-    sql: str = Field(min_length=1)
+    question: str = Field(default="Analisis data transaksi", max_length=2000)
+    sql: str = Field(default="", max_length=10000)
     rows: list = Field(default_factory=list)
 
 
@@ -258,10 +258,12 @@ async def chat_explain(payload: ChatExplainRequest,
             detail=f"Cabang '{payload.branch_code}' bukan penugasan Anda.")
 
     core_pool = await get_core_pool()
+    q = (payload.question or "").strip() or "Analisis data transaksi"
+    sql_text = (payload.sql or "").strip() or "-- query"
     try:
         from app.services.vanna_engine import buat_penjelasan_naratif
         narasi = await buat_penjelasan_naratif(
-            core_pool, user, payload.branch_code, payload.question, payload.sql, payload.rows
+            core_pool, user, payload.branch_code, q, sql_text, payload.rows
         )
         return {"narasi": narasi}
     except Exception as e:

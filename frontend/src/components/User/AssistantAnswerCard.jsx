@@ -245,15 +245,17 @@ export default function AssistantAnswerCard({
     if (loadingExplain || !branchCode) return;
     setLoadingExplain(true);
     try {
+      const qText = (question || answer.question || 'Analisis data transaksi').trim() || 'Analisis data transaksi';
       const res = await api.explainChat({
         branchCode,
-        question: question || answer.question || '',
-        sql: answer.sql,
-        rows: answer.rows,
+        question: qText,
+        sql: answer.sql || '-- query',
+        rows: answer.rows || [],
       });
       setPenjelasan(res.narasi);
-    } catch {
-      toast.error('Gagal memuat penjelasan naratif.');
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Gagal memuat penjelasan naratif.');
     } finally {
       setLoadingExplain(false);
     }

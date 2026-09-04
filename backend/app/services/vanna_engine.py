@@ -292,9 +292,11 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                     "truncated": len(db_rows) > 500,
                     "duration_ms": durasi_ms,
                     "memory_id": entri_memori["id"],
+                    "question": question,
                     "ringkasan": ringkasan,
                     "saran": [],
-                    "metode": "memory"
+                    "metode": "memory",
+                    "allow_explain": True
                 }
 
                 conv_id = await ambil_atau_buat_conversation(core_pool, user_id, branch_code, question)
@@ -408,6 +410,7 @@ Berikan ringkasan naratif eksekutif singkat (2-3 kalimat) dalam bahasa Indonesia
                 "truncated": len(db_rows) > 500,
                 "duration_ms": durasi_ms,
                 "memory_id": None,
+                "question": question,
                 "ringkasan": ringkasan,
                 "saran": [],
                 "metode": "vanna",
@@ -465,6 +468,31 @@ Berikan ringkasan naratif eksekutif singkat (2-3 kalimat) dalam bahasa Indonesia
         raise
 
 
+def ekstrak_narasi(llm_output: str) -> str:
+    """Ekstrak narasi dari response JSON atau raw text LLM."""
+    text = (llm_output or "").strip()
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            for k in ("narasi", "analysis", "penjelasan", "text", "response", "content", "summary"):
+                if k in data and isinstance(data[k], str) and data[k].strip():
+                    return data[k].strip()
+            if len(data) == 1 and isinstance(list(data.values())[0], str):
+                return list(data.values())[0].strip()
+    except Exception:
+        m_json = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL | re.IGNORECASE)
+        if m_json:
+            try:
+                data = json.loads(m_json.group(1))
+                if isinstance(data, dict):
+                    for k in ("narasi", "analysis", "penjelasan", "text", "response"):
+                        if k in data and isinstance(data[k], str) and data[k].strip():
+                            return data[k].strip()
+            except Exception:
+                pass
+    return text
+
+
 async def buat_penjelasan_naratif(
     core_pool,
     user: dict,
@@ -476,18 +504,24 @@ async def buat_penjelasan_naratif(
     """Buat narasi penjelasan mendalam on-demand saat user mengklik tombol 'Jelaskan Lebih Dalam'."""
     ai_config = await resolve_ai_config(core_pool, user.get("username", ""), branch_code)
     panggil_fn = panggil_llm_default
+    q_text = (question or "Analisis data hasil kueri").strip()
+    sample_rows = rows[:5] if rows else []
+
     narr_prompt = f"""Kueri Data:
-Pertanyaan: {question}
+Pertanyaan: {q_text}
 SQL: {sql}
 Hasil Data (sampel 5 baris pertama):
-{json.dumps(rows[:5], default=str)}
+{json.dumps(sample_rows, default=str)}
 Total Baris: {len(rows)}
 
-Buatkan analisis naratif mendalam dan profesional dalam bahasa Indonesia mengenai data di atas untuk membantu pengambilan keputusan bisnis dealer."""
-    
-    return await panggil_fn(
-        "You are a senior business data analyst. Provide thorough and insightful business narrative in Indonesian.",
+Sebagai senior business analyst dealer, buatkan analisis naratif bisnis yang mendalam, profesional, dan mudah dipahami dalam bahasa Indonesia untuk membantu manajemen dealer mengambil keputusan.
+Format respons HARUS berupa JSON murni dengan kunci 'narasi':
+{{"narasi": "tulis analisis naratif di sini..."}}"""
+
+    raw_output = await panggil_fn(
+        "You are a senior business data analyst. Always respond in pure JSON format with a 'narasi' key.",
         narr_prompt,
         ai_config
     )
+    return ekstrak_narasi(raw_output)
 

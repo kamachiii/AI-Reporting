@@ -554,6 +554,45 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Frontend `npm run build`: **Exit code 0**.
   - Backend `pytest tests/ -q`: **527 passed in 35.61s**.
 
+## 3q. Detail Perbaikan Fitur Explain Naratif On-Demand & Penyelarasan Riwayat Chat
+
+- **Latar Belakang & Akar Masalah**:
+  User melaporkan pop-up error *"Gagal memuat penjelasan naratif"* ketika mengklik tombol **"Jelaskan Lebih Dalam dengan AI"** pada pesan yang dimuat dari riwayat percakapan (`/chat/history`).
+  Setelah investigasi mendalam:
+  1. *History Hydration Missing Question*: Pada `UserWorkspace.jsx`, fungsi pemetaan `pesanDariHistory` tidak mengaitkan properti `question` dari pesan user sebelumnya ke kartu balasan asisten. Akibatnya nilai `question` bernilai string kosong `""`.
+  2. *Strict Schema Validation 422*: Skema `ChatExplainRequest` di backend mendefinisikan `question: str = Field(min_length=1, max_length=2000)`, sehingga string kosong langsung ditolak FastAPI dengan status `HTTP 422 Unprocessable Entity`.
+  3. *OpenAI JSON Object Requirement*: Pada `query_planner.py`, pemanggilan LLM default menyertakan header/body `response_format: {"type": "json_object"}`. Pada endpoint `buat_penjelasan_naratif`, prompt LLM belum secara eksplisit mewajibkan format JSON (kunci `"narasi"`), menyebabkan respons mentah LLM sulit diparsing atau terkena timeout.
+  4. *Memory Replay allow_explain Missing*: Jawaban yang berasal dari memory replay sebelumnya tidak menyertakan `allow_explain: True` dan `question`, sehingga tombol tidak muncul atau tidak memiliki konteks pertanyaan.
+  5. *React Duplicate Key*: `messageSeq` numerik murni berpotensi menghasilkan ID bentrok (`msg-1`, `msg-3`) saat re-render, memicu warning React di browser.
+
+- **Perubahan yang Dilakukan**:
+  1. `backend/app/routers/chat.py`:
+     - Menambahkan nilai fallback default pada `ChatExplainRequest` (`question = "Analisis data transaksi"`, `sql = ""`) agar tidak langsung melempar 422 saat payload parsial.
+     - Melakukan sanitasi `(payload.question or "").strip() or "Analisis data transaksi"` dan `(payload.sql or "").strip() or "-- query"`.
+  2. `backend/app/services/vanna_engine.py`:
+     - Menambahkan properti `"question": question` dan `"allow_explain": True` baik pada hasil eksekusi Mode Vanna maupun SQL Memory Replay.
+     - Membuat fungsi utilitas `ekstrak_narasi(llm_output: str) -> str` yang secara cerdas mengekstrak teks narasi dari objek JSON (`{"narasi": "..."}` atau markdown codeblock), mengeliminasi karakter format JSON mentah bagi user.
+     - Memperbarui prompt `buat_penjelasan_naratif` agar mewajibkan format JSON `{"narasi": "..."}`, sinkron dengan `response_format: {"type": "json_object"}`.
+  3. `backend/app/services/query_planner.py`:
+     - Menambahkan guard defensif terhadap respons error gateway provider AI (seperti pengecekan `"error"` dan ketiadaan `"choices"`) sebelum mengakses indeks pesan.
+  4. `frontend/src/components/User/UserWorkspace.jsx`:
+     - Memperbarui `pesanDariHistory(m, idx, allMsgs)` untuk mencari teks pertanyaan dari `answer?.question || prevUserMsg?.content || prevUserMsg?.text || ''` dan menyimpannya ke `message.question`.
+     - Memperbarui generator ID pesan menjadi kombinasi timestamp dan acak (`msg-${Date.now()}-${messageSeq}-${Math.random()}...` dan `h-${m.id || idx}-${m.created_at}`) sehingga 100% bebas dari duplikasi key React.
+  5. `frontend/src/components/User/AssistantAnswerCard.jsx`:
+     - Menambahkan fallback `qText = (question || answer.question || 'Analisis data transaksi').trim() || 'Analisis data transaksi'`.
+     - Menampilkan detail pesan error dari backend secara dinamis pada toast jika terjadi kegagalan.
+
+- **Hasil Verifikasi**:
+  - Backend compile: `compileall app` lolos 100% (exit code 0).
+  - Backend test suite: `pytest tests/ -q` lolos 100% (**527 passed in 34.63s**).
+  - Frontend lint: `npm run lint` lolos (**0 errors**).
+  - Frontend build: `npm run build` lolos (exit code 0).
+  - Live Browser Testing via Chrome DevTools MCP:
+    - Membuka sesi chat user nyata (`tester01`), mengklik tombol **"Jelaskan Lebih Dalam dengan AI"** pada kartu perbandingan Semester 1 vs Semester 2 tahun 2025.
+    - Kueri `/chat/explain` merespons `HTTP 200 OK`.
+    - Box **ANALISIS EKSEKUTIF AI** berhasil ter-render secara utuh, rapi, dan menyajikan narasi bisnis mendalam (volume vs harga jual, rekomendasi 5 langkah strategis).
+    - Screenshot verifikasi visual tersimpan di `explain_live_verified.png`.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai

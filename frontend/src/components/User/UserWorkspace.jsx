@@ -26,7 +26,7 @@ const STAGE_INTERVAL_MS = 1200;
 let messageSeq = 0;
 const nextMessageId = () => {
   messageSeq += 1;
-  return `msg-${messageSeq}`;
+  return `msg-${Date.now()}-${messageSeq}-${Math.random().toString(36).slice(2, 6)}`;
 };
 
 /**
@@ -75,8 +75,8 @@ function pesanErrorChat(error) {
  * Pesan assistant menyimpan objek jawaban sebagai JSON string (lihat
  * chat_pipeline.simpan_pesan) — parse gagal = tampilkan sebagai teks.
  */
-function pesanDariHistory(m, idx) {
-  const id = `h-${idx}`;
+function pesanDariHistory(m, idx, allMsgs = []) {
+  const id = m.id ? `h-${m.id}` : `h-${idx}-${m.created_at || ''}`;
   if (m.role === 'user') {
     return { id, role: 'user', text: m.content, createdAt: m.created_at };
   }
@@ -87,8 +87,11 @@ function pesanDariHistory(m, idx) {
   } catch {
     // konten non-JSON (pesan lama/aset lain) — tampilkan apa adanya
   }
+  const prevUserMsg = allMsgs && idx > 0 ? allMsgs[idx - 1] : null;
+  const questionText = answer?.question || prevUserMsg?.content || prevUserMsg?.text || '';
+
   if (answer) {
-    return { id, role: 'assistant', status: 'done', answer, createdAt: m.created_at };
+    return { id, role: 'assistant', status: 'done', answer, question: questionText, createdAt: m.created_at };
   }
   return { id, role: 'assistant', status: 'error', text: m.content, createdAt: m.created_at };
 }
@@ -204,7 +207,7 @@ export default function UserWorkspace({ user, onLogout }) {
     let batal = false;
     api.fetchChatHistory(branchCode)
       .then((data) => {
-        if (!batal) setMessages(data.messages.map(pesanDariHistory));
+        if (!batal) setMessages(data.messages.map((m, idx, arr) => pesanDariHistory(m, idx, arr)));
       })
       .catch(() => {
         if (!batal) toast.error('Riwayat percakapan gagal dimuat.');
