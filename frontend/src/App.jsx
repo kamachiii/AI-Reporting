@@ -25,7 +25,7 @@ function App() {
     // Notifikasi sesi kadaluarsa (di-set oleh interceptor api.js)
     if (sessionStorage.getItem('session_expired')) {
       sessionStorage.removeItem('session_expired');
-      toast('Sesi kamu sudah berakhir. Silakan login kembali.', { icon: '⏳' });
+      toast.error('Sesi kamu sudah berakhir. Silakan login kembali.');
     }
     setLoading(false);
   }, []);

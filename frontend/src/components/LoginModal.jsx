@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Sparkles } from 'lucide-react';
 import { api } from '../services/api';
 import { notify } from '../utils/notification';
 
@@ -32,7 +33,7 @@ export default function LoginModal({ onLoginSuccess }) {
       <div className="w-full max-w-md bg-white rounded-xl border border-hairline p-8 shadow-sm">
         <div className="text-center mb-6">
           <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-primary/10 mb-4">
-            <span className="text-2xl text-primary">✦</span>
+            <Sparkles className="w-6 h-6 text-primary" />
           </div>
           <h1 className="font-serif text-2xl text-ink">DMS AI Platform</h1>
           <p className="text-muted text-sm mt-1">SaaS Add-on Chat AI untuk DMS</p>

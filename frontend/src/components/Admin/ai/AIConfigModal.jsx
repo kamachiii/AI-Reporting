@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { X, CheckCircle, XCircle, Eye, EyeOff, RefreshCw, Loader2, Info, Zap, Cpu, Wifi } from 'lucide-react';
+import { X, CheckCircle, XCircle, Eye, EyeOff, RefreshCw, Loader2, Info, Zap, Cpu, Wifi, ChevronDown } from 'lucide-react';
 import ModelPickerModal from './ModelPickerModal';
 import TargetPicker from './TargetPicker';
 import { api } from '../../../services/api';
@@ -108,9 +108,9 @@ export default function AIConfigModal({ isOpen, onClose, onSave, editing }) {
       if (result.models?.length > 0) {
         toast.success(`Berhasil mengambil ${result.models.length} model!`);
       } else if (form.api_type === 'anthropic') {
-        toast('Untuk Anthropic, silakan ketik nama model secara manual.', { icon: 'ℹ️' });
+        toast('Untuk Anthropic, silakan ketik nama model secara manual.');
       } else {
-        toast('Tidak ada model yang ditemukan untuk provider ini.', { icon: '⚠️' });
+        toast.error('Tidak ada model yang ditemukan untuk provider ini.');
       }
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Gagal mengambil model');
@@ -263,7 +263,7 @@ export default function AIConfigModal({ isOpen, onClose, onSave, editing }) {
                 <span className={`${form.model ? 'text-ink' : 'text-muted'}`}>
                   {form.model || 'Klik untuk pilih model'}
                 </span>
-                <span className="text-muted text-xs">⌄</span>
+                <ChevronDown size={14} className="text-muted" />
               </button>
               <ModelPickerModal isOpen={isModelPickerOpen} onClose={() => setIsModelPickerOpen(false)}
                 onSelect={(modelId) => { setForm({ ...form, model: modelId }); setIsModelPickerOpen(false); }}

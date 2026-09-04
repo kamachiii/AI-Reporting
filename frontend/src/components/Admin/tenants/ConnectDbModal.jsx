@@ -121,7 +121,7 @@ export default function ConnectDbModal({ isOpen, onClose, branchCode, branches =
                 className="w-full px-3 py-2 border border-hairline rounded-md bg-canvas text-sm focus:ring-2 focus:ring-primary/30"
               >
                 <option value="" disabled>— Pilih cabang —</option>
-                {branches.length === 0 && <option value="">Semua cabang sudah terhubung ✓</option>}
+                {branches.length === 0 && <option value="">Semua cabang sudah terhubung</option>}
                 {branches.map((b) => (
                   <option key={b.code} value={b.code}>{b.code} — {b.name}</option>
                 ))}

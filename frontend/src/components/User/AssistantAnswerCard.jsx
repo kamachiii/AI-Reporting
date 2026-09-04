@@ -330,7 +330,7 @@ export default function AssistantAnswerCard({
               className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium border border-primary/30 rounded-lg text-primary bg-primary/5 hover:bg-primary/10 transition-colors disabled:opacity-50 cursor-pointer"
             >
               {loadingExplain ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-              {loadingExplain ? 'Menganalisis data mendalam...' : '✨ Jelaskan Lebih Dalam dengan AI'}
+              {loadingExplain ? 'Menganalisis data mendalam...' : 'Jelaskan Lebih Dalam dengan AI'}
             </button>
           </div>
         )}
