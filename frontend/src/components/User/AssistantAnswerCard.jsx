@@ -1,12 +1,14 @@
-import { Component, useState } from 'react';
+import { Component, useMemo, useState } from 'react';
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight, Database, Layers, Sparkles, X, Zap,
   BarChart2, Table as TableIcon, Loader2, GraduationCap,
+  TrendingUp, TrendingDown, Lightbulb, Compass, Award,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
 } from 'recharts';
 import { api } from '../../services/api';
+import { hitungSmartInsights, buatRekomendasiPertanyaan } from '../../utils/smartInsights';
 import toast from 'react-hot-toast';
 
 /** Durasi ms -> teks ringkas ("320 ms" / "1,4 dtk"). */
@@ -217,9 +219,27 @@ export default function AssistantAnswerCard({
   const durasi = formatDurasi(answer.duration_ms);
   const terverifikasi = answer.source === 'memory' || memoryStatus === 'confirmed';
   const ditolak = memoryStatus === 'rejected';
-  const saran = !ditolak && onAsk && Array.isArray(answer.saran) ? answer.saran : [];
 
-  const grafikConfig = deteksiKecocokanGrafik(answer.columns, answer.rows);
+  const smartInsights = useMemo(
+    () => hitungSmartInsights(answer.columns, answer.rows),
+    [answer.columns, answer.rows]
+  );
+
+  const smartSaran = useMemo(() => {
+    if (ditolak || !onAsk) return [];
+    if (Array.isArray(answer.saran) && answer.saran.length > 0) return answer.saran;
+    return buatRekomendasiPertanyaan(
+      question || answer.question || '',
+      answer.columns,
+      answer.rows,
+      answer.sql
+    );
+  }, [ditolak, onAsk, answer.saran, question, answer.question, answer.columns, answer.rows, answer.sql]);
+
+  const grafikConfig = useMemo(
+    () => deteksiKecocokanGrafik(answer.columns, answer.rows),
+    [answer.columns, answer.rows]
+  );
 
   const handleExplain = async () => {
     if (loadingExplain || !branchCode) return;
@@ -323,6 +343,63 @@ export default function AssistantAnswerCard({
               <span>Analisis Eksekutif AI</span>
             </div>
             <p className="whitespace-pre-wrap text-body font-sans">{penjelasan}</p>
+          </div>
+        )}
+
+        {/* Smart Insights (Zero-Token Analisis Matematis) */}
+        {smartInsights.hasInsights && (
+          <div className="bg-canvas border border-hairline rounded-lg p-2.5 space-y-2 text-xs">
+            <div className="flex items-center justify-between text-muted text-[11px]">
+              <span className="inline-flex items-center gap-1 font-medium text-ink">
+                <Lightbulb size={13} className="text-amber-500" />
+                Smart Insight (Zero-Token)
+              </span>
+              <span>{smartInsights.jumlahData} data dianalisis</span>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap text-xs">
+              {smartInsights.deltaPersen !== null && (
+                <div
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md border font-medium ${
+                    smartInsights.arahTren === 'naik'
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : smartInsights.arahTren === 'turun'
+                        ? 'bg-rose-50 text-rose-700 border-rose-200'
+                        : 'bg-surface-soft text-body border-hairline'
+                  }`}
+                >
+                  {smartInsights.arahTren === 'naik' ? (
+                    <TrendingUp size={13} />
+                  ) : smartInsights.arahTren === 'turun' ? (
+                    <TrendingDown size={13} />
+                  ) : null}
+                  <span>
+                    Tren: {Number(smartInsights.deltaPersen) > 0 ? `+${smartInsights.deltaPersen}%` : `${smartInsights.deltaPersen}%`}
+                  </span>
+                </div>
+              )}
+
+              {smartInsights.tertinggi && (
+                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-surface-soft/80 border border-hairline text-body">
+                  <Award size={13} className="text-amber-600 shrink-0" />
+                  <span className="truncate max-w-[240px]">
+                    Tertinggi: <strong className="font-semibold text-ink">{smartInsights.tertinggi.label}</strong> ({smartInsights.tertinggi.nilaiFormatted})
+                  </span>
+                </div>
+              )}
+
+              {smartInsights.totalFormatted && (
+                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-surface-soft/80 border border-hairline text-muted">
+                  <span>Total: <strong className="text-ink">{smartInsights.totalFormatted}</strong></span>
+                </div>
+              )}
+
+              {smartInsights.rataRataFormatted && (
+                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-surface-soft/80 border border-hairline text-muted">
+                  <span>Rata-rata: <strong className="text-ink">{smartInsights.rataRataFormatted}</strong></span>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -516,19 +593,25 @@ export default function AssistantAnswerCard({
         </div>
       </div>
 
-      {/* Saran pertanyaan lanjutan */}
-      {saran.length > 0 && (
-        <div className="flex items-center gap-2 flex-wrap pt-0.5">
-          {saran.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => onAsk(s)}
-              className="px-3 py-1 text-xs border border-hairline rounded-full bg-canvas text-body hover:bg-surface-soft hover:border-primary/40 transition-colors cursor-pointer"
-            >
-              {s}
-            </button>
-          ))}
+      {/* Saran pertanyaan lanjutan kontekstual (Zero-Token Chips) */}
+      {smartSaran.length > 0 && (
+        <div className="space-y-1.5 pt-1">
+          <p className="text-[11px] text-muted flex items-center gap-1 font-medium">
+            <Compass size={12} className="text-primary" />
+            Rekomendasi pertanyaan berikutnya:
+          </p>
+          <div className="flex items-center gap-2 flex-wrap">
+            {smartSaran.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => onAsk(s)}
+                className="px-3 py-1 text-xs border border-hairline rounded-full bg-canvas text-body hover:bg-surface-soft hover:border-primary/40 hover:text-primary transition-colors cursor-pointer text-left shadow-2xs"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </>

@@ -56,6 +56,7 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **F3.4 Mode Vanna & Penyatuan Mode AI** | selesai | `fc163f1` | Pure Vanna engine mandiri (`vanna_engine.py`); Hapus saran pertanyaan lanjutan (hemat token 70%); Format mata uang Rp otomatis; Penyatuan kontrol mode per-tenant di Admin Panel (`vanna` / `tier2` / `tier1`) via migrasi 012 (`chat_mode`); UI Chat User bersih; 513 test lulus |
 | **Unified Vanna AI + pgvector** | selesai | `11c7701` | Single DB pgvector (384 dim all-MiniLM-L6-v2), dual-mode narasi (Executive vs 0-token Operasional + on-demand explain), Visualizer React (recharts + silent error boundary), Instant Training API, Timeout 15s + Semaphore(5), branch v2 diarsipkan; 519 test lulus |
 | **Smart Domain Thesaurus Otomotif** | selesai | LIVE | Kamus istilah otomotif Indonesia (penjualan unit, servis/WO, sparepart, customer, periode), filter transaksi sah (batal=false & retur=false), alur 2-hop customer, vektorisasi pgvector GLOBAL, endpoint /sync-thesaurus; 527 test lulus |
+| **Zero-Token Smart Insights & Chips** | selesai | LIVE | Engine analitik klien (Δ%, peak, bottom, total/avg) 0 token LLM + 3 chips rekomendasi kontekstual otomotif (sales, customer, workshop, spareparts); UI AssistantAnswerCard; 527 test backend lulus, build 0 error |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -511,6 +512,32 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
     - Kueri *"berapa total omzet penjualan mobil di tahun 2025?"* langsung menghasilkan query bersih `WHERE batal = false AND retur = false AND tanggal >= '2025-01-01' AND tanggal < '2026-01-01'` dengan hasil **`Rp 69.825.000.000`** dalam 9 detik.
     - Kueri *"siapa 3 pelanggan dengan transaksi penjualan terbesar di tahun 2025?"* langsung sukses mengeksekusi join 2-hop `untt_penjualan -> untt_pesanankendaraan -> glbm_customer` pada percobaan pertama (0 auto-repair retry) dan mengembalikan 3 data pelanggan riil teratas.
 
+### 3p. Opsi 3: Zero-Token Smart Insights & Rekomendasi Pertanyaan Lanjutan (Follow-up Chips) (commit: LIVE)
+
+- **Latar Belakang & Kebutuhan**:
+  - Pengguna operasional dan eksekutif membutuhkan ringkasan analitik instan (seperti tren pertumbuhan $\Delta\%$, nilai tertinggi/terendah, dan total akumulasi) tanpa membebani biaya token LLM atau memperlambat latensi jawaban.
+  - Pengguna sering kali bingung menanyakan pertanyaan kelanjutan yang relevan setelah melihat hasil data tabular.
+- **Implementasi Solusi**:
+  1. **Engine Analitik Klien (`frontend/src/utils/smartInsights.js`)**:
+     - `hitungSmartInsights(columns, rows)`: Menghitung secara matematis di browser:
+       - Deteksi kolom metrik numerik sejati dengan pengecualian ketat kolom identitas (`tahun`, `thn`, `bulan`, `nomor`, `kode`, `id`, `telepon`, `nik`, `ktp`).
+       - Deteksi tren pergerakan ($\Delta\%$) dengan badge warna visual (hijau jika naik, merah jika turun).
+       - Ekstraksi pemenang kinerja (*Peak / Nilai Tertinggi*) dan nilai terendah (*Bottom*).
+       - Total akumulasi dan rata-rata dengan formatting Rupiah / angka Indonesia (`Rp 69,83 Miliar`, dsb).
+       - Batasan aman: Hanya aktif jika baris $\ge 2$ dan terdapat kolom numerik valid.
+     - `buatRekomendasiPertanyaan(question, columns, rows, sql)`: Menghasilkan 3 opsi rekomendasi pertanyaan lanjutan terarah berdasarkan kategori domain otomotif:
+       - Customer / Pelanggan (analisis transaksi terbesar, tipe mobil favorit, dsb).
+       - Servis / Bengkel / WO (rasio jasa vs sparepart, mekanik terproduktif).
+       - Sparepart / Stok Gudang (stok kritis, suku cadang terlaris).
+       - Penjualan Mobil / Omzet (breakdown bulanan, komparasi semester).
+  2. **Integrasi Komponen UI (`frontend/src/components/User/AssistantAnswerCard.jsx`)**:
+     - Memoized dengan `useMemo` untuk performa render nol lag.
+     - Menampilkan banner **💡 Smart Insight (Zero-Token)** di bawah ringkasan jawaban.
+     - Menampilkan **Rekomendasi pertanyaan berikutnya** dengan chip interaktif yang langsung memicu kueri baru saat diklik.
+- **Hasil Verifikasi**:
+  - Frontend: `npm run lint` 0 errors, `npm run build` exit 0 (1.05s).
+  - Backend: **527 passed in 39.80s** (tidak ada regresi backend).
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -557,16 +584,14 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] F2.4 Executor: gerbang #6 via `query_executor.verify_and_execute` - SELESAI (lihat 3d).
       `query_verifier.verify_query` — verdict + `detail["final_sql"]` sudah disiapkan.
 - [x] Pengarsipan Arsitektur Two-Tier ke branch `v2` (commit `fc163f1`) & pembaruan `Readme.md` bersih dari Tier 1/2.
-- [ ] **Smart Automotive Domain Thesaurus & Semantic RAG Injection** (Sedang Dikerjakan):
-      Pemetaan komprehensif istilah dealer otomotif Indonesia (*omzet, servis, sparepart, SPK, DO, retur, batal, faktur*) ke tabel & kolom fisik, aturan transaksi sah `batal = 0 AND retur = 0`, serta vektorisasi kamus ke `tenant_vector_kb`.
+- [x] **Smart Automotive Domain Thesaurus & Semantic RAG Injection** — SELESAI (lihat §3o).
+- [x] **Opsi 3: Zero-Token Smart Insights & Rekomendasi Pertanyaan (Follow-up Chips)** — SELESAI (lihat §3p).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. **Opsi 1: Fitur Ekspor Laporan (Excel `.xlsx` & CSV)**:
      Tombol unduh hasil kueri ke spreadsheet langsung dari antarmuka User Chat dengan formatting angka akuntansi dan nama file dinamis.
-  2. **Opsi 3: Zero-Token Smart Insights & Rekomendasi Pertanyaan (Follow-up Chips)**:
-     Analisis matematis tren pergerakan data ($\Delta\%$, min/max) di browser tanpa biaya LLM + pembuat 3 opsi rekomendasi pertanyaan lanjutan terarah.
-  3. **Opsi 4: Interactive Clarification Loop (Human-in-the-Loop Dialog)**:
+  2. **Opsi 4: Interactive Clarification Loop (Human-in-the-Loop Dialog)**:
      Jika pertanyaan ambigu/multi-tafsir (misal: penjualan mobil vs sparepart), sistem menyajikan opsi klarifikasi sebelum SQL dijalankan.
-  4. **Opsi 5: Hardening & Persiapan Demo/Presentasi PKL**:
+  3. **Opsi 5: Hardening & Persiapan Demo/Presentasi PKL**:
      Optimasi UI Admin, metrik utilisasi AI per-cabang, dan skenario presentasi live demo.
 - [ ] Pembersihan repo (menunggu waktu khusus): `git rm --cached frontend/test-results/.last-run.json`
       (file ter-track padahal sudah di .gitignore); 3 folder `backup_*` root dipindah ke arsip eksternal.
