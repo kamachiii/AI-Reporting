@@ -25,6 +25,7 @@ from app.services.query_executor import _konversi_nilai
 from app.services.query_planner import AIConfigError, panggil_llm_default, resolve_ai_config
 from app.services.vanna_pgvector import cari_konteks_pgvector
 from app.services.automotive_thesaurus import deteksi_konteks_domain, susun_instruksi_domain
+from app.services.clarification_engine import cek_ambiguitas_pertanyaan
 
 logger = logging.getLogger(__name__)
 
@@ -317,6 +318,49 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                 return response
             except Exception as e_mem:
                 logger.warning("Replay SQL memory gagal (%s), lanjut ke LLM...", e_mem)
+
+        # 0.5. Cek Ambiguitas Domain Dealer (Interactive Clarification Loop)
+        ambiguitas = cek_ambiguitas_pertanyaan(question)
+        if ambiguitas:
+            durasi_ms = int((time.monotonic() - t0) * 1000)
+            response = {
+                "source": "clarification",
+                "confidence": "B",
+                "status": "clarification_needed",
+                "question": question,
+                "clarification_message": ambiguitas["message"],
+                "category": ambiguitas["category"],
+                "options": ambiguitas["options"],
+                "sql": "",
+                "params": [],
+                "columns": [],
+                "rows": [],
+                "row_count": 0,
+                "truncated": False,
+                "duration_ms": durasi_ms,
+                "memory_id": None,
+                "ringkasan": ambiguitas["message"],
+                "saran": [],
+                "metode": "clarification",
+                "allow_explain": False
+            }
+
+            conv_id = await ambil_atau_buat_conversation(core_pool, user_id, branch_code, question)
+            await simpan_pesan(core_pool, conv_id, "user", question)
+            await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
+
+            await tulis_audit(
+                core_pool,
+                user_id=user_id,
+                branch_code=branch_code,
+                prompt_text=question,
+                ai_json_filter={"mode": "vanna", "clarification": ambiguitas["category"]},
+                generated_sql=None,
+                execution_time_ms=durasi_ms,
+                status="clarification",
+                error_message=None
+            )
+            return response
 
         ai_config = await resolve_ai_config(core_pool, user.get("username", ""), branch_code)
         

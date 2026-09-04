@@ -70,7 +70,7 @@ async def test_jalankan_mode_vanna_mock():
             return "```sql\nSELECT tahun, total FROM vw_pembelian;\n```"
 
         res = await jalankan_mode_vanna(
-            fake_core_pool, fake_tpm, user, "bandingkan pembelian 2025 dan 2026", "TST_01",
+            fake_core_pool, fake_tpm, user, "bandingkan pembelian unit mobil 2025 dan 2026", "TST_01",
             llm_call_fn=fake_llm
         )
 
@@ -111,3 +111,29 @@ async def test_jalankan_mode_vanna_memory_replay():
         assert res["confidence"] == "A"
         assert res["memory_id"] == 99
         assert "untt_penjualan" in res["sql"]
+
+
+@pytest.mark.anyio
+async def test_jalankan_mode_vanna_clarification():
+    fake_core_pool = AsyncMock()
+    # SQL Memory miss
+    fake_core_pool.fetchrow = AsyncMock(return_value=None)
+    fake_core_pool.fetchval = AsyncMock(return_value=123)
+    fake_core_pool.execute = AsyncMock()
+
+    fake_tpm = AsyncMock()
+    user = {"user_id": 1, "username": "testuser"}
+
+    with patch("app.services.vanna_engine.resolve_tenant", return_value={"tenant_id": 1, "branch_code": "TST_01"}):
+        res = await jalankan_mode_vanna(
+            fake_core_pool, fake_tpm, user, "berapa total penjualan tahun 2025", "TST_01"
+        )
+
+        assert res["source"] == "clarification"
+        assert res["status"] == "clarification_needed"
+        assert "divisi bisnis dealer" in res["clarification_message"]
+        assert len(res["options"]) == 3
+        assert res["options"][0]["label"] == "Penjualan Unit Mobil"
+        assert res["options"][1]["label"] == "Penjualan Sparepart / Suku Cadang"
+        assert res["options"][2]["label"] == "Total Gabungan (Unit & Sparepart)"
+

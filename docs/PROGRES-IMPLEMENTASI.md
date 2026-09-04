@@ -554,7 +554,7 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Frontend `npm run build`: **Exit code 0**.
   - Backend `pytest tests/ -q`: **527 passed in 35.61s**.
 
-## 3q. Detail Perbaikan Fitur Explain Naratif On-Demand & Penyelarasan Riwayat Chat
+### 3r. Detail Perbaikan Fitur Explain Naratif On-Demand & Penyelarasan Riwayat Chat (commit: 5fcf422)
 
 - **Latar Belakang & Akar Masalah**:
   User melaporkan pop-up error *"Gagal memuat penjelasan naratif"* ketika mengklik tombol **"Jelaskan Lebih Dalam dengan AI"** pada pesan yang dimuat dari riwayat percakapan (`/chat/history`).
@@ -592,6 +592,41 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
     - Kueri `/chat/explain` merespons `HTTP 200 OK`.
     - Box **ANALISIS EKSEKUTIF AI** berhasil ter-render secara utuh, rapi, dan menyajikan narasi bisnis mendalam (volume vs harga jual, rekomendasi 5 langkah strategis).
     - Screenshot verifikasi visual tersimpan di `explain_live_verified.png`.
+
+### 3s. Opsi 4: Interactive Clarification Loop (Human-in-the-Loop Ambiguity Dialog)
+
+- **Latar Belakang & Masalah**:
+  Pertanyaan operasional dealer otomotif dari staf lapangan sering kali bersifat umum atau multi-tafsir. Contoh: *"berapa penjualan tahun 2025?"* atau *"tampilkan sisa stok saat ini"*. Dealer memiliki dua divisi bisnis utama dengan data dan tabel database terpisah:
+  1. **Unit Kendaraan** (penjualan unit mobil/motor, data VIN/chassis, tabel `spk`, `faktur_kendaraan`, `unit_stock`).
+  2. **Aftersales & Sparepart** (penjualan suku cadang, oli, servis bengkel, tabel `part_sales`, `part_stock`, `work_order`).
+  Jika AI langsung menebak kueri SQL tanpa konfirmasi, risiko menghasilkan metrik keliru atau mengeksekusi tabel yang salah sangat tinggi, sekaligus memboroskan kuota token LLM.
+
+- **Solusi Arsitektur (Zero-Token Rule-Based Clarification)**:
+  Membangun mesin deteksi ambiguitas pra-eksekusi (`clarification_engine.py`) yang bekerja deterministik (< 10 ms, 0 token LLM):
+  1. **Pemeriksaan Qualifier Spesifik**: Jika pertanyaan sudah menyebutkan domain spesifik (misal: `unit`, `mobil`, `motor`, `vin`, `chassis`, `part`, `sparepart`, `oli`, `bengkel`), deteksi ambiguitas langsung di-bypass (`return None`).
+  2. **Pemicu Dialog Klarifikasi**: Untuk kata kunci umum (`penjualan`, `omzet`, `stok`, `persediaan`, `pembelian`) tanpa qualifier spesifik, sistem langsung mengembalikan struktur klarifikasi:
+     - `source`: `"clarification"`
+     - `status`: `"clarification_needed"`
+     - `options`: array opsi tombol (Label, Deskripsi, dan Prompt rekonsiliasi yang sudah disisipi qualifier spesifik).
+  3. **Penempatan di Pipeline (`vanna_engine.py`)**: Dijalankan tepat setelah pengecekan SQL Memory (sehingga memory replay terverifikasi tetap diutamakan) dan sebelum pemanggilan model AI. Percakapan dan audit log disimpan dengan status `"clarification"`.
+  4. **Komponen UI Interaktif (`ClarificationCard.jsx`)**:
+     - Menggunakan token desain (`bg-canvas`, `border-hairline`, `text-primary`, `bg-surface-soft`, `font-serif`).
+     - Menampilkan badge "Perlu Klarifikasi", durasi "< 10 ms", dan tombol opsi interaktif dengan ikon SVG Lucide (`Car`, `Wrench`, `Layers`, `ArrowRight`).
+     - Mengklik tombol opsi langsung mengirimkan prompt terperinci kembali ke chat pipeline, yang secara otomatis lolos dari deteksi ambiguitas dan langsung mengeksekusi kueri SQL.
+  5. **Dukungan Riwayat Chat (`UserWorkspace.jsx`)**:
+     - `pesanDariHistory` mendukung `source === 'clarification' || status === 'clarification_needed'` sehingga dialog klarifikasi tetap muncul secara konsisten saat user me-refresh browser atau membuka riwayat percakapan.
+
+- **Hasil Verifikasi**:
+  - Backend compile: `compileall app` lolos 100% (exit code 0).
+  - Backend test suite: `pytest tests/ -q` lolos 100% (**535 passed in 38.34s**, +8 tes baru di `test_clarification_engine.py` dan `test_vanna_engine.py`).
+  - Frontend lint: `npm run lint` lolos (**0 errors, 0 warnings pada file baru**).
+  - Frontend build: `npm run build` lolos (exit code 0).
+  - Live Browser Testing via Chrome DevTools MCP:
+    1. Input pertanyaan ambigu: *"berapa total stok saat ini"*.
+    2. Muncul instan `ClarificationCard` dengan badge "Perlu Klarifikasi" dan dua pilihan: *Stok Unit Kendaraan* vs *Stok Sparepart & Suku Cadang*.
+    3. User mengklik tombol **"Stok Unit Kendaraan"**.
+    4. Kueri terarah *"berapa total stok unit kendaraan saat ini"* langsung dieksekusi oleh pipeline Vanna dan menghasilkan data riil dari DB tenant (`total_stok_unit: 13.093`) beserta chip rekomendasi lanjutan.
+    5. Tangkapan layar tersimpan di `clarification_dialog_card.png` dan `clarification_result_answered.png`.
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
@@ -641,12 +676,13 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] Pengarsipan Arsitektur Two-Tier ke branch `v2` (commit `fc163f1`) & pembaruan `Readme.md` bersih dari Tier 1/2.
 - [x] **Smart Automotive Domain Thesaurus & Semantic RAG Injection** — SELESAI (lihat §3o).
 - [x] **Opsi 3: Zero-Token Smart Insights & Rekomendasi Pertanyaan (Follow-up Chips)** — SELESAI (lihat §3p).
+- [x] **Pembersihan Emoji & Standarisasi Icon SVG Lucide** — SELESAI (lihat §3q).
+- [x] **Perbaikan Fitur Explain Naratif On-Demand & Penyelarasan Riwayat Chat** — SELESAI (lihat §3r).
+- [x] **Opsi 4: Interactive Clarification Loop (Human-in-the-Loop Dialog)** — SELESAI (lihat §3s).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. **Opsi 1: Fitur Ekspor Laporan (Excel `.xlsx` & CSV)**:
      Tombol unduh hasil kueri ke spreadsheet langsung dari antarmuka User Chat dengan formatting angka akuntansi dan nama file dinamis.
-  2. **Opsi 4: Interactive Clarification Loop (Human-in-the-Loop Dialog)**:
-     Jika pertanyaan ambigu/multi-tafsir (misal: penjualan mobil vs sparepart), sistem menyajikan opsi klarifikasi sebelum SQL dijalankan.
-  3. **Opsi 5: Hardening & Persiapan Demo/Presentasi PKL**:
+  2. **Opsi 5: Hardening & Persiapan Demo/Presentasi PKL**:
      Optimasi UI Admin, metrik utilisasi AI per-cabang, dan skenario presentasi live demo.
 - [ ] Pembersihan repo (menunggu waktu khusus): `git rm --cached frontend/test-results/.last-run.json`
       (file ter-track padahal sudah di .gitignore); 3 folder `backup_*` root dipindah ke arsip eksternal.

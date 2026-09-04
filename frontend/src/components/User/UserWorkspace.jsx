@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { Bot, Building2, Check, Loader2, LogOut, Send } from 'lucide-react';
 
 import AssistantAnswerCard from './AssistantAnswerCard';
+import ClarificationCard from './ClarificationCard';
 import { api } from '../../services/api';
 
 // Cabang aktif = penugasan PERTAMA user (App.jsx: user.allowed_branches =
@@ -83,7 +84,9 @@ function pesanDariHistory(m, idx, allMsgs = []) {
   let answer = null;
   try {
     const parsed = JSON.parse(m.content);
-    if (parsed && Array.isArray(parsed.rows)) answer = parsed;
+    if (parsed && (Array.isArray(parsed.rows) || parsed.source === 'clarification' || parsed.status === 'clarification_needed')) {
+      answer = parsed;
+    }
   } catch {
     // konten non-JSON (pesan lama/aset lain) — tampilkan apa adanya
   }
@@ -165,6 +168,13 @@ function MessageBubble({
       ) : message.status === 'error' ? (
         <div className="max-w-[80%] bg-white border border-hairline rounded-xl rounded-tl-md px-4 py-3 shadow-sm text-sm text-error">
           {message.text}
+        </div>
+      ) : message.answer?.source === 'clarification' || message.answer?.status === 'clarification_needed' ? (
+        <div className="max-w-[85%] min-w-0">
+          <ClarificationCard
+            answer={message.answer}
+            onAsk={onAsk}
+          />
         </div>
       ) : (
         <div className="max-w-[85%] min-w-0">
