@@ -54,7 +54,8 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **F3.1 Quick Hardening Fondasi** | selesai | (lihat git log) | Strict Operator Normalization (anti-collision komparasi); Schema-Aware Few-Shot Filter (anti-halusinasi tabel asing); Cross-Tenant Isolation Test Suite; Penegakan token quota harian (HTTP 429) + Request Decision Trace di audit; 493 test |
 | **F3.2 Global KB SSOT & Full CRUD** | selesai | (lihat git log) | Snapshot final Vanna (2.407 items tersimpan permanen); Backend CRUD lengkap (`POST /admin/global-kb/items` [extra=forbid], `PUT /items/{id}`, `GET /items/{id}`, `DELETE /items/{id}`); Frontend Admin Modal `GlobalKnowledgeBaseModal.jsx` (List, Search, Filter Kind, Pagination, Tambah, Edit, Hapus, Sync); 498 test |
 | **F3.4 Mode Vanna & Penyatuan Mode AI** | selesai | `fc163f1` | Pure Vanna engine mandiri (`vanna_engine.py`); Hapus saran pertanyaan lanjutan (hemat token 70%); Format mata uang Rp otomatis; Penyatuan kontrol mode per-tenant di Admin Panel (`vanna` / `tier2` / `tier1`) via migrasi 012 (`chat_mode`); UI Chat User bersih; 513 test lulus |
-| **Unified Vanna AI + pgvector** | selesai | LIVE | Single DB pgvector (384 dim all-MiniLM-L6-v2), dual-mode narasi (Executive vs 0-token Operasional + on-demand explain), Visualizer React (recharts + silent error boundary), Instant Training API, Timeout 15s + Semaphore(5), branch v2 diarsipkan; 519 test lulus |
+| **Unified Vanna AI + pgvector** | selesai | `11c7701` | Single DB pgvector (384 dim all-MiniLM-L6-v2), dual-mode narasi (Executive vs 0-token Operasional + on-demand explain), Visualizer React (recharts + silent error boundary), Instant Training API, Timeout 15s + Semaphore(5), branch v2 diarsipkan; 519 test lulus |
+| **Smart Domain Thesaurus Otomotif** | selesai | LIVE | Kamus istilah otomotif Indonesia (penjualan unit, servis/WO, sparepart, customer, periode), filter transaksi sah (batal=false & retur=false), alur 2-hop customer, vektorisasi pgvector GLOBAL, endpoint /sync-thesaurus; 527 test lulus |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -473,6 +474,43 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Idempotency Database: `init_db.py` sukses teruji 2x berturut-turut tanpa error.
   - Live Testing: Pengujian kueri penjualan tahun 2025 vs 2026 di cabang `TST_01` (DB riil 2.387 tabel) sukses menghasilkan tabel, grafik batang Recharts, dan penjelasan AI on-demand dalam format bahasa Indonesia profesional.
 
+### 3o. Implementasi Smart Automotive Domain Thesaurus & RAG Semantic Injection (2026-09-04)
+
+- **Latar Belakang & Masalah**:
+  1. Pengguna di lapangan sering menggunakan bahasa percakapan sehari-hari/slang otomotif dealer (seperti *"omzet"*, *"laku"*, *"unit"*, *"servis"*, *"WO"*, *"sparepart"*, *"stok gudang"*, *"SPK"*, *"DO"*) yang tidak memiliki nama kolom fisik persis sama di database PostgreSQL dealer (Otobitz 2.387 tabel).
+  2. Transaksi kotor (batal atau retur) harus disaring dengan benar (`batal = false AND retur = false`) agar omzet dan jumlah unit tidak membengkak karena mencatat pesanan yang dibatalkan.
+  3. Relasi ke data pelanggan (`glbm_customer`) memerlukan alur join 2-hop melalui Surat Pesanan Kendaraan (`untt_pesanankendaraan`) karena tabel faktur `untt_penjualan` tidak menyimpan kode pelanggan secara langsung.
+- **Implementasi Solusi**:
+  1. **Modul Kamus Semantik & Aturan Bisnis Otomotif (`automotive_thesaurus.py`)**:
+     - Memetakan 5 kategori domain utama:
+       - **Penjualan Unit Kendaraan**: `untt_penjualan`, `untt_pesanankendaraan`, `glbm_kendaraan`, `glbm_customer`, `vw_untt_penjualan`.
+       - **Servis & Bengkel**: `womt_wo`, `womt_wopart`, `womt_wojasa`.
+       - **Suku Cadang & Inventori**: `invt_item`, `invt_pembelian`, `invt_stok`.
+       - **Pelanggan / Customer**: `glbm_customer` (relasi 2-hop via `untt_pesanankendaraan`).
+       - **Periode Waktu Akuntansi**: Semester 1/2, Kuartal 1-4, perbandingan tahunan/bulanan.
+     - Penegakan aturan bisnis baku:
+       - Transaksi sah: `batal = false AND retur = false` (tipe boolean PostgreSQL).
+       - Total omzet: `SUM(untt_penjualan.hjakhir)`.
+       - Jumlah unit: `COUNT(untt_penjualan.nomor)`.
+  2. **Integrasi RAG Semantik Otomatis (`vanna_pgvector.py` & `vanna_engine.py`)**:
+     - Fungsi `deteksi_konteks_domain(question)` mendeteksi kata kunci pertanyaan secara instan.
+     - Panduan bisnis diinjeksikan langsung ke dalam konteks prompt Vanna AI (`susun_instruksi_domain`).
+     - Fungsi `injeksi_thesaurus_ke_pgvector(core_pool)` mem-vektorisasi aturan domain ke tabel `tenant_vector_kb` (`branch_code = 'GLOBAL'`, `item_type = 'domain_thesaurus'`).
+  3. **Penyelarasan API & Endpoint Admin**:
+     - `POST /admin/vanna/sync-thesaurus`: Injeksi/sinkronisasi aturan kamus domain otomotif ke pgvector.
+     - `POST /admin/vanna/sync-global`: Otomatis menyinkronkan DDL Global KB sekaligus aturan domain thesaurus.
+  4. **Pembaruan Dokumentasi `Readme.md`**:
+     - Menghilangkan referensi mode Tier 1 dan Tier 2 dari `Readme.md` utama di branch `master`.
+     - Menegaskan bahwa arsitektur Two-Tier AST Verifier diarsipkan secara eksklusif di branch `v2`.
+     - Memperbaiki penulisan visualizer menjadi **React Recharts**.
+     - Melengkapi seluruh daftar endpoint API aktif.
+- **Hasil Verifikasi**:
+  - Backend: **527 passed in 43.95s** (100% lulus, termasuk 8 test baru di `test_automotive_thesaurus.py`).
+  - Frontend: `npm run lint` 0 errors, `npm run build` exit 0.
+  - Live Testing:
+    - Kueri *"berapa total omzet penjualan mobil di tahun 2025?"* langsung menghasilkan query bersih `WHERE batal = false AND retur = false AND tanggal >= '2025-01-01' AND tanggal < '2026-01-01'` dengan hasil **`Rp 69.825.000.000`** dalam 9 detik.
+    - Kueri *"siapa 3 pelanggan dengan transaksi penjualan terbesar di tahun 2025?"* langsung sukses mengeksekusi join 2-hop `untt_penjualan -> untt_pesanankendaraan -> glbm_customer` pada percobaan pertama (0 auto-repair retry) dan mengembalikan 3 data pelanggan riil teratas.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -518,21 +556,20 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] F2.2 SQL Composer Tier 1 - SELESAI (lihat 3c).
 - [x] F2.4 Executor: gerbang #6 via `query_executor.verify_and_execute` - SELESAI (lihat 3d).
       `query_verifier.verify_query` — verdict + `detail["final_sql"]` sudah disiapkan.
-- [ ] Keputusan terbuka v2 §11 (ambang eval 95%, normalisasi replay, retensi, number check numerik).
-- [ ] **Keputusan Strategis: Fokus Penuh Mode Vanna & 4 Rencana Pengoptimalan (Status: Tercatat, Menunggu Persetujuan Implementasi)**:
-  - *Latar Belakang*: Tier 1 & Tier 2 diistirahatkan/di-pause karena konsumsi token 2-3x lipat dan kerentanan perancangan JSON pada skema dealer multi-hop. Fokus penuh dialihkan ke penyempurnaan Mode Vanna mandiri.
-  - *Daftar Rencana Pengoptimalan*:
-    1. **Ringkasan Naratif Cerdas (Zero-Token)**: Algoritma heuristik deterministik untuk menganalisis tren, persentase perubahan ($\Delta\%$), dan penyorot nilai tertinggi/terendah langsung dari data baris tanpa pemanggilan LLM kedua.
-    2. **Rekomendasi Pertanyaan Lanjutan Terarah (Zero-Token)**: Pembuat 3 opsi pertanyaan rekomendasi dinamis berbasis rule-based konteks kueri sebelumnya (misal: agregasi tahunan $\rightarrow$ breakdown bulanan / perbandingan tahun lalu).
-    3. **Smart Synonym & Domain Thesaurus pada RAG Retrieval (`ambil_konteks_vanna`)**: Pemetaan kata sinonim otomotif Indonesia (omzet, servis, sparepart, dll.) ke tabel fisik spesifik untuk meningkatkan akurasi context injection.
-    4. **Fitur Ekspor Laporan (Excel/CSV)**: Tombol unduh data hasil kueri ke spreadsheet langsung dari antarmuka User Chat.
-- [ ] **Interactive Clarification Loop (Human-in-the-Loop Dialog)**:
-      Jika Planner/LLM mendeteksi ambiguitas istilah/entitas yang belum terdaftar di KB, pipeline tidak langsung menebak atau gagal, melainkan mengembalikan response `status: "needs_clarification"` dengan opsi pertanyaan balik ke user di UI chat sebelum SQL disusun dan dieksekusi.
-- [ ] Pembersihan repo (belum tereksekusi): `git rm --cached frontend/test-results/.last-run.json`
-      (file ter-track padahal sudah di .gitignore); 3 folder `backup_*` root dipindah ke
-      `D:\Kerja PKL\arsip-backup` (terblokir Safety Guard saat itu, butuh approval ulang).
-- [ ] README perlu update tabel endpoint (tambah KB endpoints + branches-with-tenants +
-      ai-configs/test-all yang belum tercantum).
+- [x] Pengarsipan Arsitektur Two-Tier ke branch `v2` (commit `fc163f1`) & pembaruan `Readme.md` bersih dari Tier 1/2.
+- [ ] **Smart Automotive Domain Thesaurus & Semantic RAG Injection** (Sedang Dikerjakan):
+      Pemetaan komprehensif istilah dealer otomotif Indonesia (*omzet, servis, sparepart, SPK, DO, retur, batal, faktur*) ke tabel & kolom fisik, aturan transaksi sah `batal = 0 AND retur = 0`, serta vektorisasi kamus ke `tenant_vector_kb`.
+- [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
+  1. **Opsi 1: Fitur Ekspor Laporan (Excel `.xlsx` & CSV)**:
+     Tombol unduh hasil kueri ke spreadsheet langsung dari antarmuka User Chat dengan formatting angka akuntansi dan nama file dinamis.
+  2. **Opsi 3: Zero-Token Smart Insights & Rekomendasi Pertanyaan (Follow-up Chips)**:
+     Analisis matematis tren pergerakan data ($\Delta\%$, min/max) di browser tanpa biaya LLM + pembuat 3 opsi rekomendasi pertanyaan lanjutan terarah.
+  3. **Opsi 4: Interactive Clarification Loop (Human-in-the-Loop Dialog)**:
+     Jika pertanyaan ambigu/multi-tafsir (misal: penjualan mobil vs sparepart), sistem menyajikan opsi klarifikasi sebelum SQL dijalankan.
+  4. **Opsi 5: Hardening & Persiapan Demo/Presentasi PKL**:
+     Optimasi UI Admin, metrik utilisasi AI per-cabang, dan skenario presentasi live demo.
+- [ ] Pembersihan repo (menunggu waktu khusus): `git rm --cached frontend/test-results/.last-run.json`
+      (file ter-track padahal sudah di .gitignore); 3 folder `backup_*` root dipindah ke arsip eksternal.
 
 ## 7. Cara menjalankan untuk uji manual
 

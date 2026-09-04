@@ -21,6 +21,12 @@ from typing import Optional
 
 import httpx
 
+from app.services.automotive_thesaurus import (
+    ambil_semua_aturan_thesaurus,
+    deteksi_konteks_domain,
+    susun_instruksi_domain,
+)
+
 logger = logging.getLogger(__name__)
 
 # Singleton untuk model lokal agar tidak reload setiap query
@@ -100,7 +106,16 @@ async def cari_konteks_pgvector(
     embedding_provider: str = "local",
     api_key: Optional[str] = None
 ) -> tuple[str, list[str]]:
-    """Cari tabel dan contoh SQL relevan menggunakan semantic search pgvector."""
+    """Cari tabel, contoh SQL, dan aturan bisnis domain relevan menggunakan semantic search pgvector."""
+    # 0. Deteksi aturan domain otomotif & tabel utama terkait
+    matched_rules = deteksi_konteks_domain(question)
+    domain_instructions = susun_instruksi_domain(matched_rules)
+    tables_found = []
+    for r in matched_rules:
+        for t in r.get("primary_tables", []):
+            if t not in tables_found:
+                tables_found.append(t)
+
     # 1. Hitung vektor pertanyaan
     query_vec = await hitung_embedding(question, provider=embedding_provider, api_key=api_key)
     vec_str = "[" + ",".join(f"{x:.6f}" for x in query_vec) + "]"
@@ -117,7 +132,6 @@ async def cari_konteks_pgvector(
     rows = await core_pool.fetch(search_sql, vec_str, branch_code, limit)
 
     contexts = []
-    tables_found = []
 
     for r in rows:
         c = r.get("content", "") if hasattr(r, "get") else (r["content"] if "content" in r else "")
@@ -126,7 +140,9 @@ async def cari_konteks_pgvector(
             # Ekstrak nama tabel fisik
             m = re.search(r"Table\s+([a-zA-Z0-9_]+)", c, re.IGNORECASE)
             if m:
-                tables_found.append(m.group(1))
+                tbl = m.group(1)
+                if tbl not in tables_found:
+                    tables_found.append(tbl)
 
     # Jika tabel DDL belum pernah di-sync ke tenant_vector_kb, fallback ke teks global_knowledge_base
     if not contexts:
@@ -157,7 +173,13 @@ async def cari_konteks_pgvector(
         sql_content = ex.get("content", "") if hasattr(ex, "get") else (ex["content"] if "content" in ex else "")
         contexts.append(f"Example question: {q}\nExample SQL: {sql_content}")
 
-    return "\n\n".join(contexts), tables_found
+    # Susun konteks akhir: panduan domain bisnis otomotif di awal, diikuti oleh DDL & contoh SQL
+    all_contexts = []
+    if domain_instructions:
+        all_contexts.append(domain_instructions)
+    all_contexts.extend(contexts)
+
+    return "\n\n".join(all_contexts), tables_found
 
 
 async def latih_pertanyaan_sql(
@@ -250,3 +272,23 @@ async def sync_global_kb_ke_pgvector(core_pool, batch_size: int = 64) -> dict:
         logger.info("Progress sinkronisasi pgvector: %d / %d...", processed, total)
 
     return {"total": total, "processed": processed, "status": "completed"}
+
+
+async def injeksi_thesaurus_ke_pgvector(core_pool, embedding_provider: str = "local") -> int:
+    """Vektorisasi seluruh aturan kamus semantik domain otomotif ke tenant_vector_kb."""
+    entries = ambil_semua_aturan_thesaurus()
+    count = 0
+    for entry in entries:
+        vec = await hitung_embedding(entry["content"], provider=embedding_provider)
+        await simpan_vektor_item(
+            core_pool,
+            branch_code="GLOBAL",
+            item_type="domain_thesaurus",
+            content=entry["content"],
+            embedding=vec,
+            metadata={"category": entry["category"], "title": entry["title"], "tables": entry["tables"]}
+        )
+        count += 1
+    logger.info("Berhasil menginjeksi %d aturan domain thesaurus ke pgvector (GLOBAL)", count)
+    return count
+

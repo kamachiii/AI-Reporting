@@ -24,6 +24,7 @@ from app.services.chat_pipeline import (
 from app.services.query_executor import _konversi_nilai
 from app.services.query_planner import AIConfigError, panggil_llm_default, resolve_ai_config
 from app.services.vanna_pgvector import cari_konteks_pgvector
+from app.services.automotive_thesaurus import deteksi_konteks_domain, susun_instruksi_domain
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,20 @@ async def ambil_konteks_vanna(core_pool, question: str, branch_code: str = "GLOB
     for ex in ex_rows:
         contexts.append(f"Example question: {ex['question']}\nExample SQL: {ex['sql_example']}")
 
-    return "\n\n".join(contexts), tables_found
+    # Susun konteks fallback dengan aturan domain otomotif
+    matched_rules = deteksi_konteks_domain(question)
+    domain_instructions = susun_instruksi_domain(matched_rules)
+    for r in matched_rules:
+        for t in r.get("primary_tables", []):
+            if t not in tables_found:
+                tables_found.append(t)
+
+    all_contexts = []
+    if domain_instructions:
+        all_contexts.append(domain_instructions)
+    all_contexts.extend(contexts)
+
+    return "\n\n".join(all_contexts), tables_found
 
 
 def susun_prompt_vanna(question: str, context: str) -> str:
@@ -115,6 +129,7 @@ def susun_prompt_vanna(question: str, context: str) -> str:
 1. If the provided context is sufficient, please generate a valid SQL query without any explanations.
 2. Ensure the query runs cleanly on PostgreSQL.
 3. Return ONLY the SQL query enclosed in ```sql ... ``` code block.
+4. Strictly apply the automotive business rules provided in the context (e.g. filtering out cancelled or returned records with untt_penjualan.batal = 0 AND untt_penjualan.retur = 0).
 """
 
 

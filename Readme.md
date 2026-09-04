@@ -4,8 +4,8 @@
 
 > [!IMPORTANT]
 > **Struktur Versi & Git Branching:**
-> - **Branch `v2` (Arsitektur Two-Tier)**: Diarsipkan sebagai jaring pengaman sistem. Berisi implementasi penuh Tier 1 (Planner JSON deterministik) dan Tier 2 (LLM query bebas dengan Verifier 6 Gerbang AST default-deny). Dapat diaktifkan kembali sewaktu-waktu dengan `git checkout v2`.
-> - **Branch `master` (Arsitektur Unified Vanna AI + pgvector)**: Versi utama aktif yang mengintegrasikan engine Vanna resmi, basis data vektor terpadu PostgreSQL (`pgvector`), mode ganda embedding (Lokal `all-MiniLM-L6-v2` vs Cloud API), pembungkus multi-tenant asinkron, proteksi timeout 15 detik, dan visualizer grafik interaktif React Plotly (0 token).
+> - **Branch `master` (Arsitektur Unified Vanna AI + pgvector)**: Versi utama aktif yang mengintegrasikan engine Vanna Text-to-SQL mandiri, basis data vektor terpadu PostgreSQL (`pgvector`), mode ganda embedding (Lokal `all-MiniLM-L6-v2` offline vs Cloud API), pembungkus multi-tenant asinkron, proteksi timeout 15 detik, antrean konkruensi Semaphore (5 request paralel), Smart Automotive Domain Thesaurus, dan visualizer grafik interaktif React Recharts (0 token).
+> - **Branch `v2` (Arsitektur Dua-Tier Legacy)**: Diarsipkan secara terpisah sebagai jaring pengaman sistem. Berisi implementasi penuh Tier 1 (Planner JSON deterministik) dan Tier 2 (LLM query bebas dengan Verifier 6 Gerbang AST dan Golden-Set Eval Harness). Tersimpan aman di branch `v2` dan dapat diakses dengan `git checkout v2`.
 
 ---
 
@@ -63,6 +63,9 @@ Sistem ini menggunakan arsitektur **multi-tenant**. Setiap cabang (branch) dapat
 | **passlib + bcrypt** | — | Password hashing |
 | **cryptography (Fernet)** | 44.0 | Enkripsi kredensial tenant & API key |
 | **sqlglot** | 26.3 | SQL parsing & validation |
+| **vanna** | 2.0+ | Text-to-SQL RAG AI engine |
+| **pgvector** | 0.8+ | Ekstensi vektor database PostgreSQL |
+| **sentence-transformers** | 6.0+ | Model embedding lokal (all-MiniLM-L6-v2) |
 | **Redis** | 5.2 | Caching & session store |
 
 ### Frontend
@@ -475,9 +478,26 @@ erDiagram
 ### Chat & AI Reporting (User Role)
 | Method | Endpoint | Deskripsi |
 |---|---|---|
-| `POST` | `/chat/query` | Mengajukan pertanyaan analitik bahasa natural ke AI |
+| `POST` | `/chat/query` | Mengajukan pertanyaan analitik bahasa natural ke AI Text-to-SQL |
+| `POST` | `/chat/explain` | Menghasilkan narasi analisis mendalam dengan AI (On-Demand Explain) |
 | `POST` | `/chat/feedback` | Feedback jawaban ("Jawaban benar" → promosi ke SQL Memory) |
-| `GET` | `/chat/history` | Riwayat percakapan pengguna |
+| `GET` | `/chat/history` | Riwayat percakapan analitik pengguna |
+
+### Admin — Vanna AI & PgVector Training (Human-in-the-Loop)
+| Method | Endpoint | Deskripsi |
+|---|---|---|
+| `POST` | `/admin/vanna/train` | Latih pasangan Pertanyaan → SQL langsung ke database vektor pgvector |
+| `POST` | `/admin/vanna/sync-global` | Vektorisasi massal kamus DDL Global KB ke `tenant_vector_kb` |
+| `GET` | `/admin/vanna/items` | Ambil daftar data training vektor per cabang |
+| `DELETE` | `/admin/vanna/items/{id}` | Hapus item data training vektor |
+
+### Admin — Tenant Knowledge Base & Cabang
+| Method | Endpoint | Deskripsi |
+|---|---|---|
+| `GET` | `/admin/tenants/{branch_code}/knowledge-base` | Ambil Knowledge Base per cabang (tabel diizinkan, relasi, glossary) |
+| `PUT` | `/admin/tenants/{branch_code}/knowledge-base` | Perbarui konfigurasi Knowledge Base cabang |
+| `POST` | `/admin/tenants/{branch_code}/knowledge-base/validate` | Validasi struktur JSON Knowledge Base tanpa menyimpan (dry-run) |
+| `GET` | `/admin/branches-with-tenants` | Ambil daftar seluruh cabang beserta database terhubung & statusnya |
 
 ### Admin — Global Knowledge Base (SSOT)
 | Method | Endpoint | Deskripsi |
@@ -487,16 +507,8 @@ erDiagram
 | `GET` | `/admin/global-kb/items/{id}` | Detail item Global KB |
 | `PUT` | `/admin/global-kb/items/{id}` | Edit item Global KB |
 | `DELETE` | `/admin/global-kb/items/{id}` | Hapus item Global KB |
-| `POST` | `/admin/global-kb/sync` | Sinkronisasi / import snapshot dari Vanna API |
-| `GET` | `/admin/global-kb/stats` | Statistik jumlah aturan & contoh SQL |
-
-### Admin — Eval Harness (Golden-Set Benchmark)
-| Method | Endpoint | Deskripsi |
-|---|---|---|
-| `GET` | `/admin/tenants/{branch}/eval-cases` | Daftar soal evaluasi golden-set per cabang |
-| `POST` | `/admin/tenants/{branch}/eval-cases` | Tambah soal evaluasi golden-set |
-| `POST` | `/admin/tenants/{branch}/eval-run` | Jalankan evaluasi benchmark (syarat lulus Tier 2) |
-| `GET` | `/admin/tenants/{branch}/eval-runs` | Riwayat metrik evaluasi snapshot |
+| `POST` | `/admin/global-kb/sync` | Sinkronisasi / import snapshot kamus skema sistem |
+| `GET` | `/admin/global-kb/stats` | Statistik jumlah aturan & contoh SQL terdaftar |
 
 > 💡 **Base URL provider** otomatis dinormalisasi (trailing slash dihapus) sebelum
 > dipakai menghitung URL endpoint (`/models`, `/chat/completions`, `/messages`).
@@ -504,7 +516,7 @@ erDiagram
 > seperti `/v1//models`. Pastikan base_url sudah memuat prefix versi yang benar
 > (mis. `https://api.b.ai/v1`) — host root tanpa `/v1` tetap akan ditolak gateway.
 
-> 📖 **Panduan Lengkap Pengembang**: Baca [docs/PANDUAN-PENGEMBANGAN-LENGKAP.md](docs/PANDUAN-PENGEMBANGAN-LENGKAP.md) untuk arsitektur detail Two-Tier, Verifier 6 Gerbang, dan alur pipeline.
+> 📖 **Panduan Lengkap Pengembang**: Baca [docs/PANDUAN-PENGEMBANGAN-LENGKAP.md](docs/PANDUAN-PENGEMBANGAN-LENGKAP.md) untuk rincian arsitektur Unified Vanna AI, pgvector, dan panduan konfigurasi sistem.
 > Dokumentasi OpenAPI interaktif tersedia di **http://localhost:8000/docs** (Swagger UI).
 
 ---
