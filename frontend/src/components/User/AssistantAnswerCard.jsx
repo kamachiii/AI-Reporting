@@ -1,12 +1,12 @@
 import { Component, useMemo, useState } from 'react';
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight, Database, Layers, Sparkles, X, Zap,
-  BarChart2, Table as TableIcon, Loader2, GraduationCap,
+  BarChart2, LineChart as LineChartIcon, Table as TableIcon, Loader2, GraduationCap,
   TrendingUp, TrendingDown, Lightbulb, Compass, Award,
   Car, Wrench, Package,
 } from 'lucide-react';
 import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
+  ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
 } from 'recharts';
 import { api } from '../../services/api';
 import { hitungSmartInsights, buatRekomendasiPertanyaan } from '../../utils/smartInsights';
@@ -96,9 +96,31 @@ function formatSel(nilai, colName = '') {
   return String(nilai);
 }
 
+/** Formatter sumbu Y ringkas standar eksekutif (cth: 500 rb, 1,2 jt, 69,8 M, 10 T). */
+function formatCompactAxis(val, isUang = false) {
+  if (val === null || val === undefined || Number.isNaN(Number(val))) return '0';
+  const num = Math.abs(Number(val));
+  const prefix = val < 0 ? '-' : '';
+  const currency = isUang ? 'Rp ' : '';
+
+  if (num >= 1_000_000_000_000) {
+    return `${currency}${prefix}${(num / 1_000_000_000_000).toLocaleString('id-ID', { maximumFractionDigits: 1 })} T`;
+  }
+  if (num >= 1_000_000_000) {
+    return `${currency}${prefix}${(num / 1_000_000_000).toLocaleString('id-ID', { maximumFractionDigits: 1 })} M`;
+  }
+  if (num >= 1_000_000) {
+    return `${currency}${prefix}${(num / 1_000_000).toLocaleString('id-ID', { maximumFractionDigits: 1 })} jt`;
+  }
+  if (num >= 1_000) {
+    return `${currency}${prefix}${(num / 1_000).toLocaleString('id-ID', { maximumFractionDigits: 1 })} rb`;
+  }
+  return `${currency}${prefix}${num.toLocaleString('id-ID')}`;
+}
+
 /** Deteksi apakah hasil data kueri cocok untuk ditampilkan sebagai grafik (0 token). */
 function deteksiKecocokanGrafik(columns, rows) {
-  if (!columns || !rows || rows.length === 0) return { cocok: false };
+  if (!columns || !rows || rows.length === 0) return { cocok: false, shouldDefaultChart: false };
 
   let categoryIdx = -1;
   const numericIndices = [];
@@ -108,7 +130,7 @@ function deteksiKecocokanGrafik(columns, rows) {
     const sampleVal = rows[0]?.[i] !== undefined ? rows[0][i] : rows[0]?.[columns[i]];
     const isNum = typeof sampleVal === 'number' || (!Number.isNaN(Number(sampleVal)) && String(sampleVal).trim() !== '');
 
-    const isPriorityCategory = /tahun|thn|year|bulan|bln|month|periode|cabang|nama|kategori|tipe|model|jenis/i.test(colName);
+    const isPriorityCategory = /tahun|thn|year|bulan|bln|month|periode|cabang|nama|kategori|tipe|model|jenis|tanggal|tgl|date/i.test(colName);
 
     if (isPriorityCategory && categoryIdx === -1) {
       categoryIdx = i;
@@ -135,15 +157,22 @@ function deteksiKecocokanGrafik(columns, rows) {
   }
 
   if (categoryIdx === -1 || numericIndices.length === 0) {
-    return { cocok: false };
+    return { cocok: false, shouldDefaultChart: false };
   }
 
   const categoryCol = columns[categoryIdx];
   const valueCols = numericIndices.map((idx) => columns[idx]);
+  const isTimeSeries = /tahun|thn|year|bulan|bln|month|periode|quarter|semester|tanggal|tgl|date/i.test(categoryCol);
+  const hasCurrencyCol = valueCols.some((c) => isKolomUang(c));
 
-  const chartData = rows.slice(0, 30).map((r) => {
+  const chartData = rows.slice(0, 50).map((r) => {
     const cells = Array.isArray(r) ? r : Object.values(r || {});
-    const obj = { [categoryCol]: String(cells[categoryIdx] ?? '') };
+    let catVal = cells[categoryIdx] ?? '';
+    // Ringkas format tanggal ISO menjadi YYYY-MM-DD
+    if (typeof catVal === 'string' && catVal.length > 10 && catVal.includes('T')) {
+      catVal = catVal.substring(0, 10);
+    }
+    const obj = { [categoryCol]: String(catVal) };
     numericIndices.forEach((numIdx) => {
       const colName = columns[numIdx];
       const val = Number(cells[numIdx]);
@@ -152,12 +181,31 @@ function deteksiKecocokanGrafik(columns, rows) {
     return obj;
   });
 
+  // Otomatis buka grafik jika time-series atau komparasi kategori (2 - 50 data points)
+  const shouldDefaultChart = Boolean(
+    rows.length > 1 &&
+    rows.length <= 50 &&
+    numericIndices.length > 0 &&
+    (isTimeSeries || rows.length >= 3)
+  );
+
+  const title = isTimeSeries
+    ? `Dinamika Tren Berdasarkan ${categoryCol.replace(/_/g, ' ')}`
+    : `Grafik Perbandingan ${valueCols[0]?.replace(/_/g, ' ') || 'Data'}`;
+
   return {
-    cocok: true, categoryCol, valueCols, chartData,
+    cocok: true,
+    shouldDefaultChart,
+    isTimeSeries,
+    hasCurrencyCol,
+    categoryCol,
+    valueCols,
+    chartData,
+    title,
   };
 }
 
-const BAR_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
+const BAR_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#f43f5e', '#06b6d4'];
 
 /** Silent Error Boundary: Cegah error runtime chart agar tidak merusak UI user. */
 class SilentChartErrorBoundary extends Component {
@@ -185,13 +233,18 @@ class SilentChartErrorBoundary extends Component {
 function CustomChartTooltip({ active, payload, label }) {
   if (active && payload && payload.length) {
     return (
-      <div className="bg-white border border-hairline rounded-lg p-2 shadow-md text-xs">
-        <p className="font-semibold text-ink mb-1">{label}</p>
+      <div className="bg-white border border-hairline rounded-lg p-2.5 shadow-lg text-xs space-y-1 z-50">
+        <p className="font-semibold text-ink border-b border-hairline pb-1 mb-1.5">{label}</p>
         {payload.map((entry, index) => (
-          <p key={index} style={{ color: entry.color }} className="flex justify-between gap-3">
-            <span>{entry.name}:</span>
-            <span className="font-medium">{formatSel(entry.value, entry.name)}</span>
-          </p>
+          <div key={index} className="flex items-center justify-between gap-4">
+            <span className="flex items-center gap-1.5 text-muted">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: entry.color }} />
+              <span>{entry.name}:</span>
+            </span>
+            <span className="font-semibold text-ink font-mono">
+              {formatSel(entry.value, entry.name)}
+            </span>
+          </div>
         ))}
       </div>
     );
@@ -211,7 +264,8 @@ export default function AssistantAnswerCard({
   onReject,
 }) {
   const [tampilSql, setTampilSql] = useState(false);
-  const [activeTab, setActiveTab] = useState('table'); // 'table' | 'chart'
+  const [userTabPreference, setUserTabPreference] = useState(null); // 'table' | 'chart' | null
+  const [chartType, setChartType] = useState('bar'); // 'bar' | 'line'
   const [penjelasan, setPenjelasan] = useState(null);
   const [loadingExplain, setLoadingExplain] = useState(false);
   const [trainingBusy, setTrainingBusy] = useState(false);
@@ -249,6 +303,10 @@ export default function AssistantAnswerCard({
     () => deteksiKecocokanGrafik(activeColumns, activeRows),
     [activeColumns, activeRows]
   );
+
+  const activeTab = (userTabPreference !== null)
+    ? (userTabPreference === 'chart' && !grafikConfig.cocok ? 'table' : userTabPreference)
+    : (grafikConfig.shouldDefaultChart ? 'chart' : 'table');
 
   const handleExplain = async () => {
     if (loadingExplain || !branchCode) return;
@@ -369,7 +427,6 @@ export default function AssistantAnswerCard({
                     type="button"
                     onClick={() => {
                       setActiveDomainTab(idx);
-                      setActiveTab('table');
                     }}
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer whitespace-nowrap ${
                       isActive
@@ -453,31 +510,64 @@ export default function AssistantAnswerCard({
 
         {/* Switcher Tab: Tabel Data vs Grafik Otomatis (0 token) */}
         {grafikConfig.cocok && activeRows.length > 0 && (
-          <div className="flex items-center justify-between pt-1">
-            <div className="flex items-center gap-1 bg-surface-soft p-0.5 rounded-lg border border-hairline">
-              <button
-                type="button"
-                onClick={() => setActiveTab('table')}
-                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                  activeTab === 'table' ? 'bg-white shadow-xs text-ink' : 'text-muted hover:text-ink'
-                }`}
-              >
-                <TableIcon size={12} />
-                Tabel Data
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('chart')}
-                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                  activeTab === 'chart' ? 'bg-white shadow-xs text-ink' : 'text-muted hover:text-ink'
-                }`}
-              >
-                <BarChart2 size={12} />
-                Grafik
-              </button>
+          <div className="flex items-center justify-between pt-1 flex-wrap gap-2">
+            <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1 bg-surface-soft p-0.5 rounded-lg border border-hairline">
+                <button
+                  type="button"
+                  onClick={() => setUserTabPreference('table')}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                    activeTab === 'table' ? 'bg-white shadow-xs text-ink font-semibold border border-hairline' : 'text-muted hover:text-ink'
+                  }`}
+                >
+                  <TableIcon size={12} />
+                  <span>Tabel Data</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUserTabPreference('chart')}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                    activeTab === 'chart' ? 'bg-white shadow-xs text-primary font-semibold border border-hairline' : 'text-muted hover:text-ink'
+                  }`}
+                >
+                  <BarChart2 size={12} />
+                  <span>Grafik Visual</span>
+                  {grafikConfig.shouldDefaultChart && userTabPreference === null && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                  )}
+                </button>
+              </div>
+
+              {/* Sub-toggle tipe chart jika di tab chart */}
+              {activeTab === 'chart' && (
+                <div className="flex items-center gap-0.5 bg-surface-soft/80 p-0.5 rounded-md border border-hairline">
+                  <button
+                    type="button"
+                    title="Grafik Batang (Bar)"
+                    onClick={() => setChartType('bar')}
+                    className={`p-1 rounded text-xs transition-colors cursor-pointer ${
+                      chartType === 'bar' ? 'bg-white shadow-xs text-primary font-semibold' : 'text-muted hover:text-ink'
+                    }`}
+                  >
+                    <BarChart2 size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    title="Grafik Garis Tren (Line)"
+                    onClick={() => setChartType('line')}
+                    className={`p-1 rounded text-xs transition-colors cursor-pointer ${
+                      chartType === 'line' ? 'bg-white shadow-xs text-primary font-semibold' : 'text-muted hover:text-ink'
+                    }`}
+                  >
+                    <LineChartIcon size={13} />
+                  </button>
+                </div>
+              )}
             </div>
-            <span className="text-[11px] text-muted hidden sm:inline">
-              Visualisasi otomatis
+
+            <span className="text-[11px] text-muted flex items-center gap-1">
+              <Sparkles size={11} className="text-primary" />
+              <span>{grafikConfig.title} (0 Token)</span>
             </span>
           </div>
         )}
@@ -500,24 +590,71 @@ export default function AssistantAnswerCard({
               </p>
             )}
           >
-            <div className="border border-hairline rounded-lg p-3 bg-surface-soft/20">
-              <div className="h-64 w-full">
+            <div className="border border-hairline rounded-xl p-3.5 bg-surface-soft/30 shadow-xs space-y-2">
+              <div className="flex items-center justify-between text-xs pb-1 border-b border-hairline">
+                <span className="font-semibold text-ink flex items-center gap-1.5">
+                  <TrendingUp size={13} className="text-primary" />
+                  {grafikConfig.title}
+                </span>
+                <span className="text-[10px] text-muted font-mono bg-canvas px-1.5 py-0.5 rounded border border-hairline">
+                  {grafikConfig.chartData.length} data point
+                </span>
+              </div>
+              <div className="h-72 w-full pt-1">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={grafikConfig.chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                    <XAxis dataKey={grafikConfig.categoryCol} tick={{ fontSize: 11 }} />
-                    <YAxis tick={{ fontSize: 11 }} />
-                    <Tooltip content={<CustomChartTooltip />} />
-                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
-                    {grafikConfig.valueCols.map((col, idx) => (
-                      <Bar
-                        key={col}
-                        dataKey={col}
-                        fill={BAR_COLORS[idx % BAR_COLORS.length]}
-                        radius={[4, 4, 0, 0]}
+                  {chartType === 'line' ? (
+                    <LineChart data={grafikConfig.chartData} margin={{ top: 10, right: 15, left: 5, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                      <XAxis
+                        dataKey={grafikConfig.categoryCol}
+                        tick={{ fontSize: 11, fill: '#64748b' }}
+                        tickLine={{ stroke: '#cbd5e1' }}
                       />
-                    ))}
-                  </BarChart>
+                      <YAxis
+                        tick={{ fontSize: 11, fill: '#64748b' }}
+                        tickLine={{ stroke: '#cbd5e1' }}
+                        tickFormatter={(val) => formatCompactAxis(val, grafikConfig.hasCurrencyCol)}
+                      />
+                      <Tooltip content={<CustomChartTooltip />} />
+                      <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                      {grafikConfig.valueCols.map((col, idx) => (
+                        <Line
+                          key={col}
+                          type="monotone"
+                          dataKey={col}
+                          stroke={BAR_COLORS[idx % BAR_COLORS.length]}
+                          strokeWidth={2.5}
+                          dot={{ r: 3.5, strokeWidth: 1.5, fill: '#ffffff' }}
+                          activeDot={{ r: 6 }}
+                        />
+                      ))}
+                    </LineChart>
+                  ) : (
+                    <BarChart data={grafikConfig.chartData} margin={{ top: 10, right: 15, left: 5, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                      <XAxis
+                        dataKey={grafikConfig.categoryCol}
+                        tick={{ fontSize: 11, fill: '#64748b' }}
+                        tickLine={{ stroke: '#cbd5e1' }}
+                      />
+                      <YAxis
+                        tick={{ fontSize: 11, fill: '#64748b' }}
+                        tickLine={{ stroke: '#cbd5e1' }}
+                        tickFormatter={(val) => formatCompactAxis(val, grafikConfig.hasCurrencyCol)}
+                      />
+                      <Tooltip content={<CustomChartTooltip />} />
+                      <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                      {grafikConfig.valueCols.map((col, idx) => (
+                        <Bar
+                          key={col}
+                          dataKey={col}
+                          fill={BAR_COLORS[idx % BAR_COLORS.length]}
+                          radius={[4, 4, 0, 0]}
+                          maxBarSize={48}
+                        />
+                      ))}
+                    </BarChart>
+                  )}
                 </ResponsiveContainer>
               </div>
             </div>

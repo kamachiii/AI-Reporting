@@ -2,7 +2,7 @@
 
 > Dokumen kontinuitas: dibaca PERTAMA kali oleh AI/engineer yang melanjutkan kerja.
 > Update dokumen ini SETIAP selesai satu fase. Jangan hapus riwayat — tambahkan.
-> Terakhir diperbarui: 2026-09-05 (Arsitektur Proaktif Multi-Table 3S Query Fan-Out selesai — 542 test passed).
+> Terakhir diperbarui: 2026-09-05 (Auto-Adaptive Visual Charts 0-Token selesai — 542 test passed).
 
 ## 0. Cara cepat paham konteks (5 menit)
 
@@ -59,6 +59,7 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **Zero-Token Smart Insights & Chips** | selesai | LIVE | Engine analitik klien (Δ%, peak, bottom, total/avg) 0 token LLM + 3 chips rekomendasi kontekstual otomotif (sales, customer, workshop, spareparts); UI AssistantAnswerCard; 527 test backend lulus, build 0 error |
 | **Interactive Clarification Loop** | selesai | LIVE | Mesin deteksi ambiguitas pra-eksekusi (clarification_engine.py, <10ms, 0 token LLM); ClarificationCard interaktif 2S (Unit Kendaraan vs Sparepart); 535 test backend lulus |
 | **Proactive Multi-Table 3S (Query Fan-Out)** | selesai | LIVE | Single-shot multi-SQL prompt 3S (Sales, Service, Sparepart), eksekusi paralel asyncio.gather, ringkasan eksekutif gabungan, multi-tab switcher dinamis di UI; 542 test backend lulus, build 0 error |
+| **Auto-Adaptive Visual Charts (0-Token)** | selesai | LIVE | Client-side Recharts 0 token, auto-default time-series (tren kuartal/bulan/tahun), toggle dinamis Bar vs Line chart, formatting sumbu eksekutif (rb/jt/M/T), isolasi per-tab 3S; 542 test backend lulus, build 0 error |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -666,6 +667,45 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
     4. Navigasi tab berfungsi mulus, tabel dan SQL berganti sesuai tab yang aktif.
     5. Tangkapan layar tersimpan di `fanout_3s_unit_tab.png` dan `fanout_3s_service_tab.png`.
 
+## 3u. Detail Auto-Adaptive Visual Charts (Grafik Visual Otomatis 0-Token)
+
+- **Latar Belakang & Keunggulan Kompetitif**:
+  Kompetitor (Otobitz Vanna di `103.179.57.59:8501`) hanya menampilkan tabel teks mentah tanpa visualisasi grafis, atau membutuhkan panggilan tool ReAct tambahan yang lambat dan boros token (~18.840 token/pertanyaan). DMS AI Platform menghadirkan visualisasi grafis otomatis adaptif berbasis Recharts di sisi klien (browser) yang dieksekusi secara instan (0 ms latency jaringan LLM) dengan **0 token tambahan**.
+
+- **Fitur & Mekanisme Teknis**:
+  1. **Deteksi Kecocokan Visual Cerdas (`deteksiKecocokanGrafik`)**:
+     - Memeriksa baris data hasil SQL untuk mengidentifikasi kolom kategori/sumbu X (`categoryCol`) dan kolom metrik numerik (`valueCols`).
+     - Mendeteksi kueri deret waktu (*time-series*: kuartal, bulan, tahun, semester, tanggal) atau perbandingan multi-baris (>= 2 baris).
+     - Jika terdeteksi deret waktu atau perbandingan metrik multi-kategori, sistem secara proaktif menetapkan grafik visual sebagai tampilan *default* (`shouldDefaultChart: true`), disertai indikator titik berdenyut (*pulsating dot*) pada tab grafik.
+  2. **Format Sumbu Eksekutif Indonesia (`formatCompactAxis`)**:
+     - Angka nominal besar pada sumbu Y diformat ringkas dan elegan untuk eksekutif dealer:
+       - Jutaan: `1,2 jt` / `Rp 1,2 jt`
+       - Miliar: `69,8 M` / `Rp 69,8 M`
+       - Triliun: `10 T` / `Rp 10 T`
+       - Ribuan: `500 rb` / `Rp 500 rb`
+  3. **Sub-Toggle Interaktif Bar vs Line Chart**:
+     - Pengguna dapat beralih satu klik antara Grafik Batang (*Bar Chart*) dan Grafik Garis Tren (*Line Chart*).
+     - Garis tren dilengkapi kurva halus (*monotone*), titik data (*dots*), dan active dots saat hover.
+  4. **Custom Tooltip & Color Palette Eksekutif**:
+     - Tooltip interaktif menampilkan nilai lengkap berformat Rupiah dan ribuan Indonesia.
+     - Palet warna berstandar korporat otomotif (`#2563eb`, `#10b981`, `#f59e0b`, `#8b5cf6`, `#ec4899`, `#06b6d4`).
+  5. **Integrasi Penuh Multi-Tab 3S & Error Boundary**:
+     - Setiap tab operasional (*Unit Kendaraan*, *Jasa Servis Bengkel*, *Suku Cadang & Sparepart*) memiliki grafik visual independen sesuai skema kolom dan baris masing-masing.
+     - Dilindungi *Silent Error Boundary* sehingga bila terjadi anomali tipe data, antarmuka tetap menampilkan tabel dengan aman tanpa merusak pengalaman pengguna.
+
+- **Hasil Verifikasi**:
+  - Backend compile: `compileall app` lolos 100% (exit code 0).
+  - Backend test suite: `pytest tests/ -q` lolos 100% (**542 passed in 41.89s**).
+  - Frontend lint: `npm run lint` lolos (**0 errors, 0 warnings**).
+  - Frontend build: `npm run build` lolos (exit code 0, 1.25s).
+  - Live Browser Testing via Chrome DevTools MCP:
+    1. Kueri deret waktu: *"berikan rincian data penjualan per kuartal di tahun 2025 yang mencakup kuartal, jumlah unit terjual, total omzet penjualan, dan rata-rata harga jual unit"*.
+    2. Grafik otomatis aktif secara default dengan 4 data point.
+    3. Toggle ke Grafik Garis Tren (*Line Chart*) berfungsi sempurna dengan tooltip hover interaktif (`kuartal: 2`, `jumlah_unit_terjual: 73`, `total_omzet_penjualan: Rp 14.563.500.000`).
+    4. Toggle kembali ke Grafik Batang (*Bar Chart*) berfungsi responsif.
+    5. Toggle ke *Tabel Data* menampilkan tabel lengkap dengan format Rupiah.
+    6. Verifikasi pada kartu Multi-Tab 3S (*bagaimana performa transaksi tahun 2025*) juga mendukung grafik visual total omzet (sumbu Y hingga Rp 80 M).
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -718,6 +758,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Perbaikan Fitur Explain Naratif On-Demand & Penyelarasan Riwayat Chat** — SELESAI (lihat §3r).
 - [x] **Opsi 4: Interactive Clarification Loop (Human-in-the-Loop Dialog)** — SELESAI (lihat §3s).
 - [x] **Arsitektur Proaktif Multi-Table 3S (Sales, Service, Sparepart) dengan Query Fan-Out** — SELESAI (lihat §3t).
+- [x] **Auto-Adaptive Visual Charts (Grafik Visual Otomatis 0-Token)** — SELESAI (lihat §3u).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. **Opsi 1: Fitur Ekspor Laporan (Excel `.xlsx` & CSV)**:
      Tombol unduh hasil kueri ke spreadsheet langsung dari antarmuka User Chat dengan formatting angka akuntansi dan nama file dinamis.
