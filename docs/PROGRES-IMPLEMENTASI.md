@@ -2,7 +2,7 @@
 
 > Dokumen kontinuitas: dibaca PERTAMA kali oleh AI/engineer yang melanjutkan kerja.
 > Update dokumen ini SETIAP selesai satu fase. Jangan hapus riwayat — tambahkan.
-> Terakhir diperbarui: 2026-09-05 (Auto-Adaptive Visual Charts 0-Token selesai — 542 test passed).
+> Terakhir diperbarui: 2026-09-05 (Ekspor Excel Berformat & Grafik Asli + Pertanyaan Emas Dealer selesai — 548 test passed).
 
 ## 0. Cara cepat paham konteks (5 menit)
 
@@ -60,6 +60,7 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **Interactive Clarification Loop** | selesai | LIVE | Mesin deteksi ambiguitas pra-eksekusi (clarification_engine.py, <10ms, 0 token LLM); ClarificationCard interaktif 2S (Unit Kendaraan vs Sparepart); 535 test backend lulus |
 | **Proactive Multi-Table 3S (Query Fan-Out)** | selesai | LIVE | Single-shot multi-SQL prompt 3S (Sales, Service, Sparepart), eksekusi paralel asyncio.gather, ringkasan eksekutif gabungan, multi-tab switcher dinamis di UI; 542 test backend lulus, build 0 error |
 | **Auto-Adaptive Visual Charts (0-Token)** | selesai | LIVE | Client-side Recharts 0 token, auto-default time-series (tren kuartal/bulan/tahun), toggle dinamis Bar vs Line chart, formatting sumbu eksekutif (rb/jt/M/T), isolasi per-tab 3S; 542 test backend lulus, build 0 error |
+| **Ekspor Excel Berformat & Grafik Native + Pertanyaan Emas Dealer** | selesai | LIVE | Integrasi 32 KPI dealer dari acuan Design Dashboard (SPK, Unit Entry GR/BP, SA produktivitas, Stock Value, AR/AP Aging); Fitur ekspor Excel .xlsx dengan format akuntansi Indonesia & native openpyxl embedded chart; 548 test lulus, build 0 error |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -699,12 +700,54 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Frontend lint: `npm run lint` lolos (**0 errors, 0 warnings**).
   - Frontend build: `npm run build` lolos (exit code 0, 1.25s).
   - Live Browser Testing via Chrome DevTools MCP:
-    1. Kueri deret waktu: *"berikan rincian data penjualan per kuartal di tahun 2025 yang mencakup kuartal, jumlah unit terjual, total omzet penjualan, dan rata-rata harga jual unit"*.
-    2. Grafik otomatis aktif secara default dengan 4 data point.
-    3. Toggle ke Grafik Garis Tren (*Line Chart*) berfungsi sempurna dengan tooltip hover interaktif (`kuartal: 2`, `jumlah_unit_terjual: 73`, `total_omzet_penjualan: Rp 14.563.500.000`).
-    4. Toggle kembali ke Grafik Batang (*Bar Chart*) berfungsi responsif.
-    5. Toggle ke *Tabel Data* menampilkan tabel lengkap dengan format Rupiah.
-    6. Verifikasi pada kartu Multi-Tab 3S (*bagaimana performa transaksi tahun 2025*) juga mendukung grafik visual total omzet (sumbu Y hingga Rp 80 M).
+     - Kueri deret waktu: *"berikan rincian data penjualan per kuartal di tahun 2025 yang mencakup kuartal, jumlah unit terjual, total omzet penjualan, dan rata-rata harga jual unit"*.
+     - Grafik otomatis aktif secara default dengan 4 data point.
+     - Toggle ke Grafik Garis Tren (*Line Chart*) berfungsi sempurna dengan tooltip hover interaktif (`kuartal: 2`, `jumlah_unit_terjual: 73`, `total_omzet_penjualan: Rp 14.563.500.000`).
+     - Toggle kembali ke Grafik Batang (*Bar Chart*) berfungsi responsif.
+     - Toggle ke *Tabel Data* menampilkan tabel lengkap dengan format Rupiah.
+     - Verifikasi pada kartu Multi-Tab 3S (*bagaimana performa transaksi tahun 2025*) juga mendukung grafik visual total omzet (sumbu Y hingga Rp 80 M).
+
+### 3v. Ekspor Excel Berformat & Grafik Native + Integrasi Pertanyaan Emas Dealer (Commit TBA)
+
+- **Latar Belakang & Acuan Spesifikasi**:
+  - Berdasarkan dokumen acuan otomotif riil `20260327 - Design Dashboard.xlsx` (terdiri dari 4 sheet: *Dashboard Unit*, *Dashboard Bengkel*, *Data Unit*, *Data Bengkel* dengan 32 grafik visual KPI).
+  - User mengarahkan agar dashboard terpisah ditunda terlebih dahulu dan memprioritaskan:
+    1. Menjadikan metrik-metrik tersebut sebagai acuan **Pertanyaan Emas (Golden-Set)** kueri dealer otomotif.
+    2. Mengembangkan kemampuan ekspor ke Excel (`.xlsx`) yang tidak sekadar tabel mentah, melainkan file spreadsheet akuntansi berformat eksekutif lengkap dengan **Grafik Asli (Native Embedded Charts)** bawaan Excel.
+- **Komponen yang Dibuat & Diperbarui**:
+  1. **Domain Thesaurus & KPI Rules (`backend/app/services/automotive_thesaurus.py`)**:
+     - Menambahkan pemetaan intent & keyword 32 KPI dealer:
+       - *SPK & Pemesanan Unit*: SPK Total, Batal SPK, Unit Ready/Inden, Cara Pembayaran (Cash/Kredit), Leasing / Fincoy.
+       - *Bengkel GR/BP & Service Advisor*: Unit Entry GR vs BP, Service Advisor Productivity, Revenue Jasa vs Part vs Bahan, On-Time Delivery.
+       - *Keuangan & Piutang*: AR / AP Aging (<30, 31-60, >90 hari), Stock Aging, Gross Profit Margin.
+  2. **Service Ekspor Excel Berformat (`backend/app/services/report_exporter.py`)**:
+     - Dibangun menggunakan `openpyxl` murni tanpa ketergantungan LibreOffice/alat eksternal.
+     - *Header Eksekutif*: Judul laporan, kode cabang, dan stempel waktu ekspor di baris atas.
+     - *Styling Akuntansi*: Header tabel Navy Blue (`#1E3A8A`), font putih bold, border tipis, zebra-striping lembut (`#F8FAFC`).
+     - *Formatting Angka Indonesia*: Format Rupiah akuntansi `_("Rp "* #,##0_);_("Rp "* (#,##0);_("Rp "* "-"_);_(@_)`, format ribuan untuk kuantitas unit, auto-fit lebar kolom dinamis dengan padding.
+     - *Embedded Native Charts*:
+       - Otomatis mendeteksi dimensi deret waktu (kuartal, bulan, tanggal, tahun) -> membuat `LineChart` native Excel.
+       - Mendeteksi dimensi kategori diskret -> membuat `BarChart` native Excel.
+       - Menggunakan `Reference` cell Excel nyata sehingga grafik di dalam Excel tetap interaktif, dapat diedit, dan terhubung langsung ke cell data.
+     - *Robust Data Ingestion*: Menerima input data fleksibel (baik `list[dict]` maupun `list[list]` array-of-values) dari frontend.
+  3. **Endpoint API Backend (`backend/app/routers/chat.py`)**:
+     - `POST /chat/export-excel`: Dilindungi `require_user_role` dan otorisasi cabang (`allowed_branches`).
+     - Mengembalikan stream binary `Response` dengan MIME `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` dan header `Content-Disposition` nama file dinamis ramah pengguna.
+  4. **Pengujian Komprehensif (`backend/tests/test_report_exporter.py`)**:
+     - 6 unit & integrasi test baru: validasi parsing numerik/rupiah, uji chart deret waktu, uji chart kategorikal, penanganan tabel kosong, dan pengujian endpoint HTTP.
+     - Total test backend naik dari 542 menjadi **548 passed (100% lolos)**.
+  5. **Integrasi Frontend (`frontend/src/services/api.js` & `AssistantAnswerCard.jsx`)**:
+     - Menambahkan client method `api.exportExcel` dengan konfigurasi `responseType: 'blob'`.
+     - Menambahkan tombol *"Unduh Excel"* berdesain emerald elegan (`bg-emerald-50 text-emerald-800 border-emerald-200`) dengan icon `FileSpreadsheet` pada setiap kartu jawaban asisten yang memiliki data tabel.
+     - Integrasi download otomatis via browser blob URL dengan filename dari header response atau fallback sanitasi pertanyaan.
+- **Verifikasi Nyata**:
+  - Backend tests: 548 passed dalam 28.72s.
+  - Frontend lint: 0 errors, 0 warnings pada file baru/modifikasi.
+  - Frontend build: exit code 0 (770ms).
+  - Live Browser Testing via Chrome DevTools MCP:
+    - Tombol "Unduh Excel" aktif pada kartu chat.
+    - Trigger unduh kueri penjualan kuartal 2025 berhasil menghasilkan file `Laporan_berikan_rincian_data_penjualan_TST_01.xlsx` (7.362 bytes) dengan status HTTP 200.
+    - Verifikasi inspeksi file `.xlsx` membuktikan keberadaan chart native Excel (`Grafik Unit Kendaraan`) dan data terformat.
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
@@ -759,10 +802,9 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Opsi 4: Interactive Clarification Loop (Human-in-the-Loop Dialog)** — SELESAI (lihat §3s).
 - [x] **Arsitektur Proaktif Multi-Table 3S (Sales, Service, Sparepart) dengan Query Fan-Out** — SELESAI (lihat §3t).
 - [x] **Auto-Adaptive Visual Charts (Grafik Visual Otomatis 0-Token)** — SELESAI (lihat §3u).
+- [x] **Ekspor Excel Berformat & Grafik Native + Pertanyaan Emas Dealer (Opsi 1)** — SELESAI (lihat §3v).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
-  1. **Opsi 1: Fitur Ekspor Laporan (Excel `.xlsx` & CSV)**:
-     Tombol unduh hasil kueri ke spreadsheet langsung dari antarmuka User Chat dengan formatting angka akuntansi dan nama file dinamis.
-  2. **Opsi 5: Hardening & Persiapan Demo/Presentasi PKL**:
+  1. **Opsi 5: Hardening & Persiapan Demo/Presentasi PKL**:
      Optimasi UI Admin, metrik utilisasi AI per-cabang, dan skenario presentasi live demo.
 - [ ] Pembersihan repo (menunggu waktu khusus): `git rm --cached frontend/test-results/.last-run.json`
       (file ter-track padahal sudah di .gitignore); 3 folder `backup_*` root dipindah ke arsip eksternal.

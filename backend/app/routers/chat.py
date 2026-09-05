@@ -21,8 +21,11 @@ import logging
 import time
 from collections import defaultdict, deque
 
+import re
+from typing import Optional
+
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
@@ -269,4 +272,49 @@ async def chat_explain(payload: ChatExplainRequest,
     except Exception as e:
         logger.error("chat_explain error: %s", e)
         raise HTTPException(status_code=500, detail=f"Gagal membuat penjelasan naratif: {e}")
+
+
+class ChatExportExcelRequest(BaseModel):
+    branch_code: str = Field(min_length=1, max_length=50)
+    question: str = Field(default="Laporan Data Dealer", max_length=2000)
+    tab_name: Optional[str] = Field(default=None, max_length=100)
+    rows: list = Field(default_factory=list)
+    columns: list[str] = Field(default_factory=list)
+
+
+@router.post("/export-excel")
+async def chat_export_excel(payload: ChatExportExcelRequest,
+                            user: dict = Depends(require_user_role)):
+    """Ekspor hasil kueri ke file spreadsheet Excel (.xlsx) dengan format akuntansi dan chart native."""
+    cek_rate_limit(user["user_id"])
+    allowed = user.get("allowed_branches") or []
+    if payload.branch_code not in allowed:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Cabang '{payload.branch_code}' bukan penugasan Anda.")
+
+    try:
+        from app.services.report_exporter import generate_excel_report
+        excel_bytes = generate_excel_report(
+            question=payload.question,
+            branch_code=payload.branch_code,
+            tab_name=payload.tab_name,
+            rows=payload.rows,
+            columns=payload.columns
+        )
+
+        safe_q = re.sub(r'[^a-zA-Z0-9_-]', '_', payload.question[:30]).strip('_') or "Laporan"
+        tab_part = f"_{re.sub(r'[^a-zA-Z0-9_-]', '_', payload.tab_name)}" if payload.tab_name else ""
+        filename = f"Laporan_{safe_q}{tab_part}_{payload.branch_code}.xlsx"
+
+        return Response(
+            content=excel_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+    except Exception as e:
+        logger.error("chat_export_excel error: %s", e)
+        raise HTTPException(status_code=500, detail=f"Gagal mengekspor laporan Excel: {e}")
 

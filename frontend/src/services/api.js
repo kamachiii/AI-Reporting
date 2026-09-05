@@ -274,6 +274,18 @@ export const api = {
     });
     return response.data;
   },
+  exportExcel: async ({ branchCode, question, tabName, rows, columns }) => {
+    const response = await apiClient.post('/chat/export-excel', {
+      branch_code: branchCode,
+      question,
+      tab_name: tabName,
+      rows,
+      columns,
+    }, {
+      responseType: 'blob',
+    });
+    return response;
+  },
 
   // ==========================================
   // 6. ADMIN: GLOBAL KNOWLEDGE BASE (F3/F3.1)

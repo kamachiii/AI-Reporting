@@ -90,6 +90,53 @@ AUTOMOTIVE_DOMAIN_RULES = [
             "Kuartal 1 (Q1) = bulan 1-3, Kuartal 2 (Q2) = bulan 4-6, Kuartal 3 (Q3) = bulan 7-9, Kuartal 4 (Q4) = bulan 10-12.",
             "Untuk perbandingan tahun gunakan EXTRACT(YEAR FROM tanggal) atau DATE_TRUNC('year', tanggal)."
         ]
+    },
+    {
+        "category": "spk_dan_pemesanan",
+        "title": "Aturan Surat Pemesanan Kendaraan (SPK) & Batal SPK",
+        "keywords": [
+            "spk", "surat pesanan", "taking spk", "batal spk", "outstanding spk",
+            "pesanan kendaraan", "booking fee", "untt_pesanankendaraan"
+        ],
+        "primary_tables": ["untt_pesanankendaraan", "untt_penjualan", "glbm_customer"],
+        "guidelines": [
+            "Tabel utama SPK / pemesanan kendaraan adalah 'untt_pesanankendaraan'.",
+            "Untuk mengambil volume SPK masuk (Taking SPK) gunakan COUNT(untt_pesanankendaraan.nomor).",
+            "Untuk SPK Batal filter untt_pesanankendaraan.batal = true.",
+            "Untuk SPK Sah / Valid filter untt_pesanankendaraan.batal = false.",
+            "Untuk Outstanding SPK (SPK belum terbit faktur jual) gunakan NOT EXISTS atau LEFT JOIN ke untt_penjualan di mana untt_penjualan.nomor IS NULL."
+        ]
+    },
+    {
+        "category": "bengkel_gr_bp_dan_sa",
+        "title": "Aturan Bengkel GR vs BP & Produktivitas Service Advisor (SA)",
+        "keywords": [
+            "gr", "general repair", "bp", "body repair", "body paint", "unit entry",
+            "sa", "service advisor", "batal wo", "faktur servis", "womt_wo"
+        ],
+        "primary_tables": ["womt_wo", "womt_wopart", "womt_wojasa"],
+        "guidelines": [
+            "Unit entry mengukur jumlah unit kendaraan masuk servis: COUNT(womt_wo.nomor).",
+            "Tipe servis dipilah melalui jenis/kategori WO (GR untuk General Repair, BP untuk Body & Paint).",
+            "Produktivitas Service Advisor (SA) dikelompokkan berdasarkan kolom womt_wo.kode_sa atau womt_wo.nama_sa.",
+            "Batal Work Order (WO) diidentifikasi dengan womt_wo.batal = true.",
+            "Rata-rata revenue per faktur servis dihitung: SUM(nilai_total) / COUNT(nomor)."
+        ]
+    },
+    {
+        "category": "ar_ap_aging_keuangan",
+        "title": "Aturan Piutang (AR), Hutang (AP), dan Margin Profit Dealer",
+        "keywords": [
+            "ar", "piutang", "aging", "leasing", "ar leasing", "ar tunai",
+            "ap", "hutang", "supplier", "hpp", "profit", "diskon", "discount", "margin"
+        ],
+        "primary_tables": ["untt_penjualan", "womt_wo", "invt_pembelian"],
+        "guidelines": [
+            "Perhitungan Profit Penjualan Unit = untt_penjualan.hjakhir - COALESCE(untt_penjualan.hpp, 0).",
+            "Dampak Diskon Penjualan Unit dihitung dari kolom untt_penjualan.diskon atau (untt_penjualan.hargajual - untt_penjualan.hjakhir).",
+            "AR Leasing mengukur piutang ke institusi pembiayaan rekanan (Leasing A, B, C).",
+            "AP (Account Payable) mengukur hutang pembelian suku cadang (parts), bahan bengkel (oli/cat), dan ongkos pekerjaan luar (OPL) ke vendor/supplier."
+        ]
     }
 ]
 

@@ -3,7 +3,7 @@ import {
   AlertTriangle, Check, ChevronDown, ChevronRight, Database, Layers, Sparkles, X, Zap,
   BarChart2, LineChart as LineChartIcon, Table as TableIcon, Loader2, GraduationCap,
   TrendingUp, TrendingDown, Lightbulb, Compass, Award,
-  Car, Wrench, Package,
+  Car, Wrench, Package, FileSpreadsheet,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
@@ -271,6 +271,7 @@ export default function AssistantAnswerCard({
   const [trainingBusy, setTrainingBusy] = useState(false);
   const [trained, setTrained] = useState(false);
   const [activeDomainTab, setActiveDomainTab] = useState(0);
+  const [isExporting, setIsExporting] = useState(false);
 
   const isMultiTab = Boolean(answer.is_multi_tab && Array.isArray(answer.tabs) && answer.tabs.length > 1);
   const currentTab = (isMultiTab && answer.tabs[activeDomainTab]) ? answer.tabs[activeDomainTab] : answer;
@@ -343,6 +344,48 @@ export default function AssistantAnswerCard({
       toast.error('Gagal melatih AI.');
     } finally {
       setTrainingBusy(false);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    if (activeRows.length === 0) {
+      toast.error('Tidak ada data untuk diekspor');
+      return;
+    }
+    setIsExporting(true);
+    try {
+      const tabLabel = isMultiTab && currentTab ? currentTab.label : null;
+      const res = await api.exportExcel({
+        branchCode,
+        question: question || answer.question || 'Laporan Data Dealer',
+        tabName: tabLabel,
+        rows: activeRows,
+        columns: activeColumns,
+      });
+
+      const disposition = res.headers ? res.headers['content-disposition'] : null;
+      let filename = `Laporan_${branchCode}.xlsx`;
+      if (disposition && disposition.includes('filename=')) {
+        const matches = /filename="?([^"]+)"?/.exec(disposition);
+        if (matches && matches[1]) {
+          filename = matches[1];
+        }
+      }
+
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success('Laporan Excel berhasil diunduh!');
+    } catch (err) {
+      console.error('Gagal mengekspor Excel:', err);
+      toast.error('Gagal mengekspor file Excel');
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -508,38 +551,40 @@ export default function AssistantAnswerCard({
           </div>
         )}
 
-        {/* Switcher Tab: Tabel Data vs Grafik Otomatis (0 token) */}
-        {grafikConfig.cocok && activeRows.length > 0 && (
+        {/* Switcher Tab & Toolbar Aksi: Tabel Data vs Grafik Otomatis vs Unduh Excel */}
+        {activeRows.length > 0 && (
           <div className="flex items-center justify-between pt-1 flex-wrap gap-2">
-            <div className="flex items-center gap-1.5">
-              <div className="flex items-center gap-1 bg-surface-soft p-0.5 rounded-lg border border-hairline">
-                <button
-                  type="button"
-                  onClick={() => setUserTabPreference('table')}
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                    activeTab === 'table' ? 'bg-white shadow-xs text-ink font-semibold border border-hairline' : 'text-muted hover:text-ink'
-                  }`}
-                >
-                  <TableIcon size={12} />
-                  <span>Tabel Data</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setUserTabPreference('chart')}
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                    activeTab === 'chart' ? 'bg-white shadow-xs text-primary font-semibold border border-hairline' : 'text-muted hover:text-ink'
-                  }`}
-                >
-                  <BarChart2 size={12} />
-                  <span>Grafik Visual</span>
-                  {grafikConfig.shouldDefaultChart && userTabPreference === null && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                  )}
-                </button>
-              </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {grafikConfig.cocok && (
+                <div className="flex items-center gap-1 bg-surface-soft p-0.5 rounded-lg border border-hairline">
+                  <button
+                    type="button"
+                    onClick={() => setUserTabPreference('table')}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                      activeTab === 'table' ? 'bg-white shadow-xs text-ink font-semibold border border-hairline' : 'text-muted hover:text-ink'
+                    }`}
+                  >
+                    <TableIcon size={12} />
+                    <span>Tabel Data</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUserTabPreference('chart')}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                      activeTab === 'chart' ? 'bg-white shadow-xs text-primary font-semibold border border-hairline' : 'text-muted hover:text-ink'
+                    }`}
+                  >
+                    <BarChart2 size={12} />
+                    <span>Grafik Visual</span>
+                    {grafikConfig.shouldDefaultChart && userTabPreference === null && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                    )}
+                  </button>
+                </div>
+              )}
 
               {/* Sub-toggle tipe chart jika di tab chart */}
-              {activeTab === 'chart' && (
+              {grafikConfig.cocok && activeTab === 'chart' && (
                 <div className="flex items-center gap-0.5 bg-surface-soft/80 p-0.5 rounded-md border border-hairline">
                   <button
                     type="button"
@@ -563,12 +608,30 @@ export default function AssistantAnswerCard({
                   </button>
                 </div>
               )}
+
+              {/* Tombol Unduh Excel dengan Grafik Asli */}
+              <button
+                type="button"
+                onClick={handleExportExcel}
+                disabled={isExporting}
+                title="Unduh Spreadsheet Excel (.xlsx) Lengkap dengan Format Akuntansi & Grafik Asli"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-colors shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                {isExporting ? (
+                  <Loader2 size={12} className="animate-spin text-emerald-700" />
+                ) : (
+                  <FileSpreadsheet size={13} className="text-emerald-700" />
+                )}
+                <span>{isExporting ? 'Mengekspor...' : 'Unduh Excel'}</span>
+              </button>
             </div>
 
-            <span className="text-[11px] text-muted flex items-center gap-1">
-              <Sparkles size={11} className="text-primary" />
-              <span>{grafikConfig.title} (0 Token)</span>
-            </span>
+            {grafikConfig.cocok && (
+              <span className="text-[11px] text-muted flex items-center gap-1">
+                <Sparkles size={11} className="text-primary" />
+                <span>{grafikConfig.title} (0 Token)</span>
+              </span>
+            )}
           </div>
         )}
 
