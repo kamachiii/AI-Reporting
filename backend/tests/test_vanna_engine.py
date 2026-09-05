@@ -1,3 +1,4 @@
+import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -114,26 +115,52 @@ async def test_jalankan_mode_vanna_memory_replay():
 
 
 @pytest.mark.anyio
-async def test_jalankan_mode_vanna_clarification():
+async def test_jalankan_mode_vanna_fanout_3s():
     fake_core_pool = AsyncMock()
-    # SQL Memory miss
     fake_core_pool.fetchrow = AsyncMock(return_value=None)
     fake_core_pool.fetchval = AsyncMock(return_value=123)
     fake_core_pool.execute = AsyncMock()
 
+    class FakeRecord(dict):
+        pass
+
+    fake_conn = AsyncMock()
+    fake_conn.execute = AsyncMock()
+    fake_conn.fetch = AsyncMock(return_value=[
+        FakeRecord({"total": 100, "omzet": 50000000.0})
+    ])
+
+    fake_pool_tenant = MagicMock()
+    fake_pool_tenant.acquire.return_value = _AsyncContextManager(fake_conn)
     fake_tpm = AsyncMock()
+    fake_tpm.get_pool = AsyncMock(return_value=fake_pool_tenant)
+
     user = {"user_id": 1, "username": "testuser"}
 
-    with patch("app.services.vanna_engine.resolve_tenant", return_value={"tenant_id": 1, "branch_code": "TST_01"}):
+    llm_json = json.dumps({
+        "unit": "SELECT count(*) AS total_unit, sum(hjakhir) AS omzet FROM untt_penjualan WHERE batal = false;",
+        "service": "SELECT count(*) AS total_pkb, sum(total_biaya) AS pendapatan FROM womt_wo WHERE batal = false;",
+        "part": "SELECT count(*) AS total_item, sum(total_harga) AS total_part FROM womt_wopart;"
+    })
+
+    async def mock_llm(sys_msg, prompt, cfg):
+        return f"```json\n{llm_json}\n```"
+
+    with patch("app.services.vanna_engine.resolve_tenant", return_value={"tenant_id": 1, "branch_code": "TST_01"}), \
+         patch("app.services.vanna_engine.resolve_ai_config", return_value={}), \
+         patch("app.services.vanna_engine.ambil_konteks_vanna", return_value=("Context...", [])):
         res = await jalankan_mode_vanna(
-            fake_core_pool, fake_tpm, user, "berapa total penjualan tahun 2025", "TST_01"
+            fake_core_pool, fake_tpm, user, "berapa total penjualan tahun 2025", "TST_01",
+            llm_call_fn=mock_llm
         )
 
-        assert res["source"] == "clarification"
-        assert res["status"] == "clarification_needed"
-        assert "divisi bisnis dealer" in res["clarification_message"]
-        assert len(res["options"]) == 3
-        assert res["options"][0]["label"] == "Penjualan Unit Mobil"
-        assert res["options"][1]["label"] == "Penjualan Sparepart / Suku Cadang"
-        assert res["options"][2]["label"] == "Total Gabungan (Unit & Sparepart)"
+        assert res["is_multi_tab"] is True
+        assert len(res["tabs"]) == 3
+        assert res["tabs"][0]["id"] == "unit"
+        assert res["tabs"][1]["id"] == "service"
+        assert res["tabs"][2]["id"] == "part"
+        assert "Unit Kendaraan" in res["ringkasan"]
+        assert "Jasa Servis Bengkel" in res["ringkasan"]
+        assert "Suku Cadang" in res["ringkasan"]
+
 

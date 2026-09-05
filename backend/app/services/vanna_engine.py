@@ -26,6 +26,12 @@ from app.services.query_planner import AIConfigError, panggil_llm_default, resol
 from app.services.vanna_pgvector import cari_konteks_pgvector
 from app.services.automotive_thesaurus import deteksi_konteks_domain, susun_instruksi_domain
 from app.services.clarification_engine import cek_ambiguitas_pertanyaan
+from app.services.fanout_engine import (
+    cek_apakah_perlu_fanout,
+    susun_multi_sql_prompt,
+    ekstrak_multi_sql,
+    susun_ringkasan_eksekutif_multi,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -318,6 +324,119 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                 return response
             except Exception as e_mem:
                 logger.warning("Replay SQL memory gagal (%s), lanjut ke LLM...", e_mem)
+
+        # 0.4. Cek Kueri Makro Dealer untuk Proaktif Multi-Tab Fan-Out (3S)
+        fanout_info = cek_apakah_perlu_fanout(question)
+        if fanout_info:
+            ai_config = await resolve_ai_config(core_pool, user.get("username", ""), branch_code)
+            async with VANNA_SEMAPHORE:
+                context_text, _ = await ambil_konteks_vanna(core_pool, question, branch_code)
+                multi_prompt = susun_multi_sql_prompt(question, fanout_info, context_text)
+                panggil_fn = llm_call_fn or panggil_llm_default
+                system_msg = "You are a PostgreSQL expert for automotive DMS. Respond only with JSON containing SQL for each domain."
+                raw_output = await panggil_fn(system_msg, multi_prompt, ai_config)
+
+                domain_ids = [d["id"] for d in fanout_info["domains"]]
+                sql_dict = ekstrak_multi_sql(raw_output, domain_ids)
+
+                pool_tenant = await tenant_pool_manager.get_pool(tenant)
+
+                async def _eksekusi_subdomain(domain_def: dict, sql_query: str):
+                    if not sql_query:
+                        return {
+                            "id": domain_def["id"],
+                            "title": domain_def["title"],
+                            "icon": domain_def["icon"],
+                            "sql": "-- Kueri tidak dihasilkan",
+                            "columns": [],
+                            "rows": [],
+                            "row_count": 0,
+                            "raw_records": [],
+                            "error": "Kueri tidak dihasilkan"
+                        }
+                    async with pool_tenant.acquire() as conn:
+                        await conn.execute("SET statement_timeout = '15000'")
+                        try:
+                            records = await conn.fetch(sql_query)
+                            cols = list(records[0].keys()) if records else []
+                            converted = [[_konversi_nilai_vanna(v) for v in r.values()] for r in records[:500]]
+                            return {
+                                "id": domain_def["id"],
+                                "title": domain_def["title"],
+                                "icon": domain_def["icon"],
+                                "sql": sql_query,
+                                "columns": cols,
+                                "rows": converted,
+                                "row_count": len(records),
+                                "raw_records": [dict(r) for r in records[:10]],
+                                "error": None
+                            }
+                        except Exception as e:
+                            logger.warning("Eksekusi sub-domain %s gagal: %s", domain_def["id"], e)
+                            return {
+                                "id": domain_def["id"],
+                                "title": domain_def["title"],
+                                "icon": domain_def["icon"],
+                                "sql": sql_query,
+                                "columns": [],
+                                "rows": [],
+                                "row_count": 0,
+                                "raw_records": [],
+                                "error": str(e)
+                            }
+
+                tasks = [
+                    _eksekusi_subdomain(d, sql_dict.get(d["id"], ""))
+                    for d in fanout_info["domains"]
+                ]
+                tab_results = await asyncio.gather(*tasks)
+
+                durasi_ms = int((time.monotonic() - t0) * 1000)
+                ringkasan_multi = susun_ringkasan_eksekutif_multi(tab_results, question)
+
+                # Tab aktif default adalah tab pertama yang memiliki rows, atau tab pertama
+                default_tab = next((t for t in tab_results if t["rows"]), tab_results[0])
+
+                response = {
+                    "source": "vanna",
+                    "confidence": "A",
+                    "question": question,
+                    "is_multi_tab": True,
+                    "tabs": tab_results,
+                    "sql": default_tab["sql"],
+                    "params": [],
+                    "columns": default_tab["columns"],
+                    "rows": default_tab["rows"],
+                    "row_count": default_tab["row_count"],
+                    "truncated": False,
+                    "duration_ms": durasi_ms,
+                    "memory_id": None,
+                    "ringkasan": ringkasan_multi,
+                    "saran": [
+                        "Bandingkan performa antar divisi tahun ini",
+                        "Tampilkan rincian transaksi terbesar dari divisi utama",
+                        "Tampilkan tren bulanan untuk divisi ini"
+                    ],
+                    "metode": "fanout_multi_tab",
+                    "allow_explain": True
+                }
+
+                conv_id = await ambil_atau_buat_conversation(core_pool, user_id, branch_code, question)
+                await simpan_pesan(core_pool, conv_id, "user", question)
+                await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
+
+                await tulis_audit(
+                    core_pool,
+                    user_id=user_id,
+                    branch_code=branch_code,
+                    prompt_text=question,
+                    ai_json_filter={"mode": "vanna_fanout", "category": fanout_info["category"]},
+                    generated_sql=default_tab["sql"],
+                    execution_time_ms=durasi_ms,
+                    status="success",
+                    error_message=None
+                )
+                return response
 
         # 0.5. Cek Ambiguitas Domain Dealer (Interactive Clarification Loop)
         ambiguitas = cek_ambiguitas_pertanyaan(question)

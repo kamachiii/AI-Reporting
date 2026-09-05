@@ -3,6 +3,7 @@ import {
   AlertTriangle, Check, ChevronDown, ChevronRight, Database, Layers, Sparkles, X, Zap,
   BarChart2, Table as TableIcon, Loader2, GraduationCap,
   TrendingUp, TrendingDown, Lightbulb, Compass, Award,
+  Car, Wrench, Package,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
@@ -215,14 +216,22 @@ export default function AssistantAnswerCard({
   const [loadingExplain, setLoadingExplain] = useState(false);
   const [trainingBusy, setTrainingBusy] = useState(false);
   const [trained, setTrained] = useState(false);
+  const [activeDomainTab, setActiveDomainTab] = useState(0);
+
+  const isMultiTab = Boolean(answer.is_multi_tab && Array.isArray(answer.tabs) && answer.tabs.length > 1);
+  const currentTab = (isMultiTab && answer.tabs[activeDomainTab]) ? answer.tabs[activeDomainTab] : answer;
+
+  const activeRows = useMemo(() => currentTab.rows || [], [currentTab.rows]);
+  const activeColumns = useMemo(() => currentTab.columns || [], [currentTab.columns]);
+  const activeSql = currentTab.sql || answer.sql || '';
 
   const durasi = formatDurasi(answer.duration_ms);
   const terverifikasi = answer.source === 'memory' || memoryStatus === 'confirmed';
   const ditolak = memoryStatus === 'rejected';
 
   const smartInsights = useMemo(
-    () => hitungSmartInsights(answer.columns, answer.rows),
-    [answer.columns, answer.rows]
+    () => hitungSmartInsights(activeColumns, activeRows),
+    [activeColumns, activeRows]
   );
 
   const smartSaran = useMemo(() => {
@@ -230,15 +239,15 @@ export default function AssistantAnswerCard({
     if (Array.isArray(answer.saran) && answer.saran.length > 0) return answer.saran;
     return buatRekomendasiPertanyaan(
       question || answer.question || '',
-      answer.columns,
-      answer.rows,
-      answer.sql
+      activeColumns,
+      activeRows,
+      activeSql
     );
-  }, [ditolak, onAsk, answer.saran, question, answer.question, answer.columns, answer.rows, answer.sql]);
+  }, [ditolak, onAsk, answer.saran, question, answer.question, activeColumns, activeRows, activeSql]);
 
   const grafikConfig = useMemo(
-    () => deteksiKecocokanGrafik(answer.columns, answer.rows),
-    [answer.columns, answer.rows]
+    () => deteksiKecocokanGrafik(activeColumns, activeRows),
+    [activeColumns, activeRows]
   );
 
   const handleExplain = async () => {
@@ -249,8 +258,8 @@ export default function AssistantAnswerCard({
       const res = await api.explainChat({
         branchCode,
         question: qText,
-        sql: answer.sql || '-- query',
-        rows: answer.rows || [],
+        sql: activeSql || '-- query',
+        rows: activeRows || [],
       });
       setPenjelasan(res.narasi);
     } catch (err) {
@@ -268,7 +277,7 @@ export default function AssistantAnswerCard({
       await api.trainVanna({
         branchCode,
         question: question || answer.question || '',
-        sql: answer.sql,
+        sql: activeSql,
       });
       setTrained(true);
       toast.success('Jawaban berhasil dilatih ke AI (pgvector)!');
@@ -348,6 +357,43 @@ export default function AssistantAnswerCard({
           </div>
         )}
 
+        {/* Domain Tab Bar (Pilar 3S Multi-Table) */}
+        {isMultiTab && (
+          <div className="pt-1">
+            <div className="flex items-center gap-1.5 p-1 bg-surface-soft/80 rounded-xl border border-hairline overflow-x-auto">
+              {answer.tabs.map((tab, idx) => {
+                const isActive = activeDomainTab === idx;
+                return (
+                  <button
+                    key={tab.id || idx}
+                    type="button"
+                    onClick={() => {
+                      setActiveDomainTab(idx);
+                      setActiveTab('table');
+                    }}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer whitespace-nowrap ${
+                      isActive
+                        ? 'bg-white shadow-xs text-primary font-semibold border border-hairline'
+                        : 'text-muted hover:text-ink hover:bg-white/50'
+                    }`}
+                  >
+                    {tab.icon === 'Car' ? <Car size={13} /> :
+                     tab.icon === 'Wrench' ? <Wrench size={13} /> :
+                     tab.icon === 'Package' ? <Package size={13} /> :
+                     <Layers size={13} />}
+                    <span>{tab.title}</span>
+                    <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                      isActive ? 'bg-primary/10 text-primary' : 'bg-surface-card text-muted'
+                    }`}>
+                      {tab.row_count ?? tab.rows?.length ?? 0}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Smart Insights (Zero-Token Analisis Matematis) */}
         {smartInsights.hasInsights && (
           <div className="bg-canvas border border-hairline rounded-lg p-2.5 space-y-2 text-xs">
@@ -406,7 +452,7 @@ export default function AssistantAnswerCard({
         )}
 
         {/* Switcher Tab: Tabel Data vs Grafik Otomatis (0 token) */}
-        {grafikConfig.cocok && answer.rows.length > 0 && (
+        {grafikConfig.cocok && activeRows.length > 0 && (
           <div className="flex items-center justify-between pt-1">
             <div className="flex items-center gap-1 bg-surface-soft p-0.5 rounded-lg border border-hairline">
               <button
@@ -437,7 +483,7 @@ export default function AssistantAnswerCard({
         )}
 
         {/* Tampilan Konten: Grafik vs Tabel */}
-        {answer.rows.length === 0 ? (
+        {activeRows.length === 0 ? (
           <div className="border border-dashed border-hairline rounded-lg px-4 py-6 text-center">
             <Database size={18} className="mx-auto text-muted/60 mb-1" aria-hidden="true" />
             <p className="text-sm text-body font-medium">Tidak ada data</p>
@@ -481,7 +527,7 @@ export default function AssistantAnswerCard({
             <table className="w-full text-left text-sm">
               <thead className="bg-surface-soft text-xs text-muted">
                 <tr>
-                  {answer.columns.map((col) => (
+                  {activeColumns.map((col) => (
                     <th key={col} className="px-3 py-2 font-medium whitespace-nowrap">
                       {col}
                     </th>
@@ -489,7 +535,7 @@ export default function AssistantAnswerCard({
                 </tr>
               </thead>
               <tbody className="divide-y divide-hairline">
-                {answer.rows.map((row, i) => {
+                {activeRows.map((row, i) => {
                   const cells = Array.isArray(row) ? row : Object.values(row || {});
                   return (
                     <tr key={i} className="hover:bg-surface-soft/50 transition-colors">
@@ -498,7 +544,7 @@ export default function AssistantAnswerCard({
                           key={j}
                           className={`px-3 py-2 whitespace-nowrap ${j === 0 ? 'text-ink font-medium' : 'text-body'}`}
                         >
-                          {formatSel(cell, answer.columns?.[j])}
+                          {formatSel(cell, activeColumns?.[j])}
                         </td>
                       ))}
                     </tr>
@@ -527,11 +573,11 @@ export default function AssistantAnswerCard({
             aria-expanded={tampilSql}
           >
             {tampilSql ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-            Lihat SQL
+            {isMultiTab ? `Lihat SQL (${currentTab.title || 'Tab Aktif'})` : 'Lihat SQL'}
           </button>
           {tampilSql && (
             <pre className="mt-1.5 bg-canvas border border-hairline rounded-lg p-3 text-[11px] leading-relaxed font-mono text-body overflow-x-auto whitespace-pre-wrap break-words">
-              {answer.sql}
+              {activeSql}
             </pre>
           )}
         </div>

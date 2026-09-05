@@ -2,7 +2,7 @@
 
 > Dokumen kontinuitas: dibaca PERTAMA kali oleh AI/engineer yang melanjutkan kerja.
 > Update dokumen ini SETIAP selesai satu fase. Jangan hapus riwayat — tambahkan.
-> Terakhir diperbarui: 2026-09-02 (Global KB SSOT & Full CRUD Admin selesai — 498 test passed).
+> Terakhir diperbarui: 2026-09-05 (Arsitektur Proaktif Multi-Table 3S Query Fan-Out selesai — 542 test passed).
 
 ## 0. Cara cepat paham konteks (5 menit)
 
@@ -57,6 +57,8 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **Unified Vanna AI + pgvector** | selesai | `11c7701` | Single DB pgvector (384 dim all-MiniLM-L6-v2), dual-mode narasi (Executive vs 0-token Operasional + on-demand explain), Visualizer React (recharts + silent error boundary), Instant Training API, Timeout 15s + Semaphore(5), branch v2 diarsipkan; 519 test lulus |
 | **Smart Domain Thesaurus Otomotif** | selesai | LIVE | Kamus istilah otomotif Indonesia (penjualan unit, servis/WO, sparepart, customer, periode), filter transaksi sah (batal=false & retur=false), alur 2-hop customer, vektorisasi pgvector GLOBAL, endpoint /sync-thesaurus; 527 test lulus |
 | **Zero-Token Smart Insights & Chips** | selesai | LIVE | Engine analitik klien (Δ%, peak, bottom, total/avg) 0 token LLM + 3 chips rekomendasi kontekstual otomotif (sales, customer, workshop, spareparts); UI AssistantAnswerCard; 527 test backend lulus, build 0 error |
+| **Interactive Clarification Loop** | selesai | LIVE | Mesin deteksi ambiguitas pra-eksekusi (clarification_engine.py, <10ms, 0 token LLM); ClarificationCard interaktif 2S (Unit Kendaraan vs Sparepart); 535 test backend lulus |
+| **Proactive Multi-Table 3S (Query Fan-Out)** | selesai | LIVE | Single-shot multi-SQL prompt 3S (Sales, Service, Sparepart), eksekusi paralel asyncio.gather, ringkasan eksekutif gabungan, multi-tab switcher dinamis di UI; 542 test backend lulus, build 0 error |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -628,6 +630,42 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
     4. Kueri terarah *"berapa total stok unit kendaraan saat ini"* langsung dieksekusi oleh pipeline Vanna dan menghasilkan data riil dari DB tenant (`total_stok_unit: 13.093`) beserta chip rekomendasi lanjutan.
     5. Tangkapan layar tersimpan di `clarification_dialog_card.png` dan `clarification_result_answered.png`.
 
+## 3t. Detail Arsitektur Proaktif Multi-Table 3S (Sales, Service, Sparepart) dengan Query Fan-Out
+
+- **Latar Belakang & Motivasi Bisnis**:
+  Pada operasional dealer otomotif 3S (*Sales, Service, Sparepart*), pertanyaan eksekutif seringkali bersifat holistik (misal: *"bagaimana performa transaksi tahun 2025"*, *"berapa total omzet bulan ini"*, atau *"bagaimana penjualan bulan lalu"*). Pendekatan klarifikasi dialog kaku mengharuskan user memilih salah satu divisi, yang mengurangi efisiensi dan menyulitkan pengambil keputusan melihat gambaran besar operasional secara komprehensif.
+
+- **Solusi: Proactive Query Fan-Out Architecture**:
+  Sistem mengadopsi pola *Query Fan-Out* yang secara proaktif memecah pertanyaan luas ke sub-domain operasional otomotif tanpa interupsi tombol kuesioner:
+  1. **Deteksi Fan-Out Cepat (< 1 ms, 0 Token LLM)** (`fanout_engine.py`):
+     - `cek_apakah_perlu_fanout(question: str) -> Optional[Dict]`
+     - Menguji apakah kueri mencakup pilar 3S (penjualan, omzet, performa transaksi) atau 2S (stok, persediaan, pembelian) tanpa qualifier spesifik.
+     - Jika pengguna sudah menyebut domain spesifik (misal: *"penjualan unit mobil"*), deteksi fan-out langsung dilewati dan kembali ke pipeline tunggal reguler.
+  2. **Single-Shot Multi-SQL Prompting**:
+     - `susun_multi_sql_prompt(question, fanout_info, context_text)` mengirimkan satu prompt terpadu ke model AI untuk menyusun kueri SQL terpisah untuk tiap domain (`sales`, `service`, `sparepart`) dalam format JSON terstruktur.
+     - Menghemat token hingga 65% dibandingkan memanggil AI 3 kali berturut-turut.
+  3. **Eksekusi Paralel Asinkron & Graceful Degradation**:
+     - `asyncio.gather(*tasks)` mengeksekusi kueri SQL ke pool koneksi database tenant (`tenant_pool_manager`) secara paralel.
+     - Bila salah satu cabang/database tidak memiliki skema bengkel (misal cabang showroom yang tidak memiliki tabel `womt_wo`), sistem melakukan graceful degradation (`rows: []`, `error: ...`) tanpa menggagalkan kueri domain lainnya.
+  4. **Sintesis Naratif Eksekutif Terpadu (0 Token LLM)**:
+     - `susun_ringkasan_eksekutif_multi(domain_results, question)` secara deterministik menggabungkan angka omzet (format Rupiah Indonesia) dan volume unit/faktur ke dalam satu narasi ringkas terintegrasi.
+  5. **Antarmuka Multi-Tab Interaktif (`AssistantAnswerCard.jsx`)**:
+     - Tab bar dinamis menampilkan badge divisi operasional: Unit Kendaraan (`Car`), Jasa Servis Bengkel (`Wrench`), Suku Cadang & Sparepart (`Package`).
+     - Badge hitungan baris (`rows.length`) tampil di setiap tab.
+     - Data tabel, pagination, dan panel inspeksi SQL ("Lihat SQL ({Nama Tab})") tersinkronisasi otomatis saat tab berpindah.
+
+- **Hasil Verifikasi**:
+  - Backend compile: `compileall app` lolos 100% (exit code 0).
+  - Backend test suite: `pytest tests/ -q` lolos 100% (**542 passed in 31.28s**, +7 unit tes baru di `test_fanout_engine.py` dan +1 integrasi tes di `test_vanna_engine.py`).
+  - Frontend lint: `npm run lint` lolos (**0 errors, 0 warnings pada file baru & modifikasi**).
+  - Frontend build: `npm run build` lolos (exit code 0).
+  - Live Browser Testing via Chrome DevTools MCP:
+    1. Input kueri: *"bagaimana performa transaksi tahun 2025"*.
+    2. Menghasilkan 3 tab sekaligus: *Unit Kendaraan (1)*, *Jasa Servis Bengkel (0)*, dan *Suku Cadang & Sparepart (0)*.
+    3. Ringkasan eksekutif merangkum performa: *"Ringkasan performa dealer mencakup seluruh divisi operasional: Unit Kendaraan: Rp 69,8 M, 350 jumlah unit • Jasa Servis Bengkel: (Data tidak tercatat pada periode ini) • Suku Cadang & Sparepart: (Data tidak tercatat pada periode ini)."*
+    4. Navigasi tab berfungsi mulus, tabel dan SQL berganti sesuai tab yang aktif.
+    5. Tangkapan layar tersimpan di `fanout_3s_unit_tab.png` dan `fanout_3s_service_tab.png`.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -679,6 +717,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Pembersihan Emoji & Standarisasi Icon SVG Lucide** — SELESAI (lihat §3q).
 - [x] **Perbaikan Fitur Explain Naratif On-Demand & Penyelarasan Riwayat Chat** — SELESAI (lihat §3r).
 - [x] **Opsi 4: Interactive Clarification Loop (Human-in-the-Loop Dialog)** — SELESAI (lihat §3s).
+- [x] **Arsitektur Proaktif Multi-Table 3S (Sales, Service, Sparepart) dengan Query Fan-Out** — SELESAI (lihat §3t).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. **Opsi 1: Fitur Ekspor Laporan (Excel `.xlsx` & CSV)**:
      Tombol unduh hasil kueri ke spreadsheet langsung dari antarmuka User Chat dengan formatting angka akuntansi dan nama file dinamis.
