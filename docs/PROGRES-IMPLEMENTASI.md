@@ -61,6 +61,7 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **Proactive Multi-Table 3S (Query Fan-Out)** | selesai | LIVE | Single-shot multi-SQL prompt 3S (Sales, Service, Sparepart), eksekusi paralel asyncio.gather, ringkasan eksekutif gabungan, multi-tab switcher dinamis di UI; 542 test backend lulus, build 0 error |
 | **Auto-Adaptive Visual Charts (0-Token)** | selesai | LIVE | Client-side Recharts 0 token, auto-default time-series (tren kuartal/bulan/tahun), toggle dinamis Bar vs Line chart, formatting sumbu eksekutif (rb/jt/M/T), isolasi per-tab 3S; 542 test backend lulus, build 0 error |
 | **Ekspor Excel Berformat & Grafik Native + Pertanyaan Emas Dealer** | selesai | LIVE | Integrasi 32 KPI dealer dari acuan Design Dashboard (SPK, Unit Entry GR/BP, SA produktivitas, Stock Value, AR/AP Aging); Fitur ekspor Excel .xlsx dengan format akuntansi Indonesia & native openpyxl embedded chart; 548 test lulus, build 0 error |
+| **Metrik Utilisasi AI Admin & Skenario Demo PKL (Opsi 5)** | selesai | LIVE | Dashboard analitik AI admin (overview, tren Recharts 7-hari, kuota token cabang real-time), modal ubah kuota cabang, dokumen panduan sidang PKL; 554 test backend lulus, lint 0 error, build 0 error |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -749,6 +750,35 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
     - Trigger unduh kueri penjualan kuartal 2025 berhasil menghasilkan file `Laporan_berikan_rincian_data_penjualan_TST_01.xlsx` (7.362 bytes) dengan status HTTP 200.
     - Verifikasi inspeksi file `.xlsx` membuktikan keberadaan chart native Excel (`Grafik Unit Kendaraan`) dan data terformat.
 
+### 3w. Metrik Utilisasi AI Admin & Skenario Live Demo Sidang PKL (Commit TBA)
+
+- **Latar Belakang & Kebutuhan**:
+  - Menyediakan visibilitas penuh bagi administrator / manajemen dealer terhadap konsumsi token LLM, efisiensi arsitektur deterministik (SQL Memory 0-token savings), durasi eksekusi kueri, dan pemantauan batas kuota token harian per-cabang.
+  - Mempersiapkan panduan skenario demonstrasi langsung (*live demo*) komprehensif untuk sidang PKL dengan skrip interaktif, matriks keunggulan kompetitor, dan antisipasi pertanyaan penguji.
+- **Komponen yang Dibuat & Diperbarui**:
+  1. **Backend Router AI Metrics (`backend/app/routers/admin/ai_metrics.py`)**:
+     - `GET /admin/ai-metrics/overview`: Agregasi total kueri, sukses/gagal/ditolak verifier, memory hit, estimasi konsumsi token AI, penghematan token memory replay, rata-rata latensi (ms), dan success rate %.
+     - `GET /admin/ai-metrics/timeline`: Deret waktu kueri dan token 7 hari terakhir (LLM vs Memory Replay 0-Token).
+     - `GET /admin/ai-metrics/branch-usage`: Status utilisasi kuota harian per cabang (`daily_token_quota`), token terpakai hari ini, persentase kuota, status kuota (`ok`, `warning`, `critical`, `exceeded`).
+     - `PATCH /admin/ai-metrics/branch-quota/{branch_code}`: Pembaruan batas kuota token harian cabang oleh Administrator.
+  2. **Frontend Analitik AI Admin (`AuditLogTab.jsx` & `BranchQuotaModal.jsx`)**:
+     - 4 Kartu Metrik Eksekutif (Total Kueri AI, Penghematan Memory, Konsumsi Token AI, Rata-rata Durasi).
+     - Sub-tab switcher: *"Analitik & Kuota Cabang"* (Visualisasi Area Chart Recharts 7 hari + Tabel Kuota Cabang dengan progress bar dinamis) vs *"Log Aktivitas Kueri"* (Tabel detail audit logs).
+     - Modal Ubah Kuota Cabang dengan preset 1-klik (`25.000`, `50.000`, `100.000`, `250.000`) dan pembaruan real-time ke database.
+     - Kepatuhan lint React 19 mutlak (0 error, 0 warning pada file baru/modifikasi).
+  3. **Dokumen Panduan Sidang PKL (`docs/PANDUAN-DEMO-SIDANG-PKL.md`)**:
+     - Matriks perbandingan teknis DMS AI vs Solusi Kompetitor (18.840 token vs ~500-1500 token, deterministik vs halusinasi angka).
+     - 7 Skenario demonstrasi langsung langkah-demi-langkah (Penjualan kuartal, Ekspor Excel ber-chart native, Multi-Table 3S Fan-Out, Interactive Clarification, SQL Memory Replay, Uji Verifier Keamanan, dan Panel Admin).
+     - Panduan antisipasi tanya-jawab dosen penguji / pembimbing PKL.
+- **Verifikasi Nyata**:
+  - Backend tests: **554 passed dalam 30.25s** (100% lulus).
+  - Frontend lint: 0 errors, 0 warnings pada seluruh file baru/modifikasi.
+  - Frontend build: exit code 0 (808ms).
+  - Live Browser Testing via Chrome DevTools MCP:
+    - Login admin berhasil.
+    - Dashboard memuat data 222 pertanyaan nyata, area chart 7 hari merender data riil.
+    - Update kuota cabang `TST_01` dari 50.000 ke 100.000 token teruji sukses secara real-time.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -803,9 +833,10 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Arsitektur Proaktif Multi-Table 3S (Sales, Service, Sparepart) dengan Query Fan-Out** — SELESAI (lihat §3t).
 - [x] **Auto-Adaptive Visual Charts (Grafik Visual Otomatis 0-Token)** — SELESAI (lihat §3u).
 - [x] **Ekspor Excel Berformat & Grafik Native + Pertanyaan Emas Dealer (Opsi 1)** — SELESAI (lihat §3v).
+- [x] **Metrik Utilisasi AI Admin & Skenario Live Demo Sidang PKL (Opsi 5)** — SELESAI (lihat §3w).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
-  1. **Opsi 5: Hardening & Persiapan Demo/Presentasi PKL**:
-     Optimasi UI Admin, metrik utilisasi AI per-cabang, dan skenario presentasi live demo.
+  1. **Dedicated Executive Dashboard Page**: Halaman KPI visual 32 chart otomatis tanpa kueri chat (acuan file Excel).
+  2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.
 - [ ] Pembersihan repo (menunggu waktu khusus): `git rm --cached frontend/test-results/.last-run.json`
       (file ter-track padahal sudah di .gitignore); 3 folder `backup_*` root dipindah ke arsip eksternal.
 

@@ -192,6 +192,24 @@ export const api = {
     const response = await apiClient.get('/admin/audit-logs', { params });
     return response.data;
   },
+  getAIMetricsOverview: async () => {
+    const response = await apiClient.get('/admin/ai-metrics/overview');
+    return response.data;
+  },
+  getAIMetricsTimeline: async (days = 7) => {
+    const response = await apiClient.get('/admin/ai-metrics/timeline', { params: { days } });
+    return response.data;
+  },
+  getAIMetricsBranchUsage: async () => {
+    const response = await apiClient.get('/admin/ai-metrics/branch-usage');
+    return response.data;
+  },
+  updateBranchQuota: async (branchCode, dailyTokenQuota) => {
+    const response = await apiClient.patch(`/admin/ai-metrics/branch-quota/${branchCode}`, {
+      daily_token_quota: dailyTokenQuota,
+    });
+    return response.data;
+  },
   createAIConfig: async (data) => {
     const response = await apiClient.post('/admin/ai-configs', data);
     return response.data;
