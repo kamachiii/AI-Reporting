@@ -71,9 +71,93 @@ function bersihkanRingkasan(teks) {
   });
 }
 
-/** Sel tabel: null/undefined tampil sebagai garis, angka dan uang diformat id-ID rapi. */
+/**
+ * Format cerdas tanggal dan waktu Indonesia (tanpa pergeseran zona waktu):
+ * 1. Hanya tanggal: jika nilai berupa tanggal murni atau waktu jam 00:00:00 (cth: "11 Nov 2025")
+ * 2. Hanya waktu: jika nilai berupa waktu saja (cth: "14:30")
+ * 3. Keduanya: jika terdapat tanggal dan waktu nyata bukan jam 00:00:00 (cth: "11 Nov 2025, 14:35")
+ */
+function formatTanggalWaktu(nilai) {
+  if (nilai === null || nilai === undefined) return null;
+  if (typeof nilai !== 'string' && !(nilai instanceof Date)) return null;
+  const str = typeof nilai === 'string' ? nilai.trim() : nilai.toISOString();
+  if (!str) return null;
+
+  // 1. Waktu saja: HH:mm:ss atau HH:mm
+  const timeOnly = str.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?$/);
+  if (timeOnly) {
+    const hh = parseInt(timeOnly[1], 10);
+    const mm = parseInt(timeOnly[2], 10);
+    const ss = timeOnly[3] !== undefined ? parseInt(timeOnly[3], 10) : 0;
+    if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59 && ss >= 0 && ss <= 59) {
+      const hhStr = String(hh).padStart(2, '0');
+      const mmStr = String(mm).padStart(2, '0');
+      return ss > 0 ? `${hhStr}:${mmStr}:${String(ss).padStart(2, '0')}` : `${hhStr}:${mmStr}`;
+    }
+  }
+
+  // 2. Format ISO: YYYY-MM-DD atau YYYY/MM/DD
+  const isoMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}(?::?\d{2})?)?)?$/);
+  if (isoMatch) {
+    const year = parseInt(isoMatch[1], 10);
+    const month = parseInt(isoMatch[2], 10);
+    const day = parseInt(isoMatch[3], 10);
+    if (year >= 1900 && year <= 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      // Gunakan local constructor (year, month - 1, day) untuk mencegah pergeseran zona waktu
+      const d = new Date(year, month - 1, day);
+      const dateFormatted = d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+      const hasTime = isoMatch[4] !== undefined && (
+        parseInt(isoMatch[4], 10) !== 0
+        || parseInt(isoMatch[5], 10) !== 0
+        || (isoMatch[6] !== undefined && parseInt(isoMatch[6], 10) !== 0)
+      );
+      if (hasTime) {
+        const hh = String(parseInt(isoMatch[4], 10)).padStart(2, '0');
+        const mm = String(parseInt(isoMatch[5], 10)).padStart(2, '0');
+        const ss = isoMatch[6] !== undefined ? parseInt(isoMatch[6], 10) : 0;
+        const timeStr = ss > 0 ? `${hh}:${mm}:${String(ss).padStart(2, '0')}` : `${hh}:${mm}`;
+        return `${dateFormatted}, ${timeStr}`;
+      }
+      return dateFormatted;
+    }
+  }
+
+  // 3. Format DD/MM/YYYY atau DD-MM-YYYY
+  const dmyMatch = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:[T\s](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (dmyMatch) {
+    const day = parseInt(dmyMatch[1], 10);
+    const month = parseInt(dmyMatch[2], 10);
+    const year = parseInt(dmyMatch[3], 10);
+    if (year >= 1900 && year <= 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      const d = new Date(year, month - 1, day);
+      const dateFormatted = d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+      const hasTime = dmyMatch[4] !== undefined && (
+        parseInt(dmyMatch[4], 10) !== 0
+        || parseInt(dmyMatch[5], 10) !== 0
+        || (dmyMatch[6] !== undefined && parseInt(dmyMatch[6], 10) !== 0)
+      );
+      if (hasTime) {
+        const hh = String(parseInt(dmyMatch[4], 10)).padStart(2, '0');
+        const mm = String(parseInt(dmyMatch[5], 10)).padStart(2, '0');
+        const ss = dmyMatch[6] !== undefined ? parseInt(dmyMatch[6], 10) : 0;
+        const timeStr = ss > 0 ? `${hh}:${mm}:${String(ss).padStart(2, '0')}` : `${hh}:${mm}`;
+        return `${dateFormatted}, ${timeStr}`;
+      }
+      return dateFormatted;
+    }
+  }
+
+  return null;
+}
+
+/** Sel tabel: null/undefined tampil sebagai garis, tanggal/waktu, angka dan uang diformat id-ID rapi. */
 function formatSel(nilai, colName = '') {
   if (nilai === null || nilai === undefined) return '—';
+
+  // Format otomatis tanggal dan waktu (cerdas: tanggal saja, waktu saja, atau keduanya)
+  const tglWaktu = formatTanggalWaktu(nilai);
+  if (tglWaktu !== null) return tglWaktu;
+
   const isAngka = typeof nilai === 'number'
     || (typeof nilai === 'string' && nilai.trim() !== '' && !Number.isNaN(Number(nilai)));
 
@@ -592,7 +676,12 @@ export default function AssistantAnswerCard({
     const headerLine = activeColumns.join('\t');
     const rowLines = activeRows.map((row) => {
       const cells = Array.isArray(row) ? row : activeColumns.map((c) => row[c]);
-      return cells.map((c) => (c === null || c === undefined ? '' : String(c))).join('\t');
+      return cells.map((c) => {
+        if (c === null || c === undefined) return '';
+        const tglWaktu = formatTanggalWaktu(c);
+        if (tglWaktu !== null) return tglWaktu;
+        return String(c);
+      }).join('\t');
     });
     const tsv = [headerLine, ...rowLines].join('\n');
     navigator.clipboard.writeText(tsv).then(() => {
@@ -1050,12 +1139,17 @@ export default function AssistantAnswerCard({
                       return (
                         <tr key={i} className="hover:bg-surface-card/40 transition-colors">
                           {cells.map((cell, j) => {
-                            const isNum = typeof cell === 'number' || (typeof cell === 'string' && cell.trim() !== '' && !Number.isNaN(Number(cell)));
+                            const isDateOrTime = formatTanggalWaktu(cell) !== null;
+                            const isNum = !isDateOrTime && (typeof cell === 'number' || (typeof cell === 'string' && cell.trim() !== '' && !Number.isNaN(Number(cell))));
                             return (
                               <td
                                 key={j}
                                 className={`px-3 py-2 whitespace-nowrap ${
-                                  isNum ? 'text-right font-mono tabular-nums text-ink' : (j === 0 ? 'text-ink font-medium' : 'text-body')
+                                  isNum
+                                    ? 'text-right font-mono tabular-nums text-ink'
+                                    : isDateOrTime
+                                      ? 'text-left font-mono tabular-nums text-body'
+                                      : (j === 0 ? 'text-ink font-medium' : 'text-body')
                                 }`}
                               >
                                 {formatSel(cell, activeColumns?.[j])}

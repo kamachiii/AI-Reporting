@@ -8,7 +8,7 @@ Menghasilkan file spreadsheet profesional berbasis openpyxl yang dilengkapi:
 """
 import io
 import re
-from datetime import datetime
+from datetime import date, datetime, time
 from typing import Any, Optional
 
 import openpyxl
@@ -80,6 +80,91 @@ def _parse_numeric(val: Any) -> tuple[bool, Optional[float]]:
         except ValueError:
             return False, None
     return False, None
+
+
+def _parse_date_or_time(val: Any) -> tuple[bool, Any, Optional[str]]:
+    """Deteksi dan konversi nilai tanggal / waktu untuk sel Excel dengan format akurat.
+
+    Aturan:
+    1. Tanggal saja (atau datetime jam 00:00:00): objek date, format 'DD/MM/YYYY'.
+    2. Tanggal dan waktu (jam nyata bukan 00:00:00): objek datetime, format 'DD/MM/YYYY HH:MM' (atau HH:MM:SS jika ada detik).
+    3. Waktu saja: objek time, format 'HH:MM' (atau 'HH:MM:SS' jika ada detik).
+    """
+    if val is None:
+        return False, None, None
+
+    if isinstance(val, (datetime, date, time)):
+        if isinstance(val, datetime):
+            if val.hour == 0 and val.minute == 0 and val.second == 0:
+                return True, val.date(), 'DD/MM/YYYY'
+            fmt = 'DD/MM/YYYY HH:MM:SS' if val.second > 0 else 'DD/MM/YYYY HH:MM'
+            return True, val, fmt
+        elif isinstance(val, date):
+            return True, val, 'DD/MM/YYYY'
+        elif isinstance(val, time):
+            fmt = 'HH:MM:SS' if val.second > 0 else 'HH:MM'
+            return True, val, fmt
+
+    if not isinstance(val, str):
+        return False, None, None
+
+    s = val.strip()
+    if not s:
+        return False, None, None
+
+    # 1. Waktu saja (HH:mm:ss atau HH:mm)
+    m_time = re.match(r'^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?$', s)
+    if m_time:
+        hh = int(m_time.group(1))
+        mm = int(m_time.group(2))
+        ss = int(m_time.group(3)) if m_time.group(3) is not None else 0
+        if 0 <= hh <= 23 and 0 <= mm <= 59 and 0 <= ss <= 59:
+            fmt = 'HH:MM:SS' if ss > 0 else 'HH:MM'
+            return True, time(hh, mm, ss), fmt
+
+    # 2. Format ISO: YYYY-MM-DD atau YYYY/MM/DD
+    m_iso = re.match(r'^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}(?::?\d{2})?)?)?$', s)
+    if m_iso:
+        y, m, d = int(m_iso.group(1)), int(m_iso.group(2)), int(m_iso.group(3))
+        if 1900 <= y <= 2100 and 1 <= m <= 12 and 1 <= d <= 31:
+            try:
+                has_time = m_iso.group(4) is not None and (
+                    int(m_iso.group(4)) != 0
+                    or int(m_iso.group(5)) != 0
+                    or (m_iso.group(6) is not None and int(m_iso.group(6)) != 0)
+                )
+                if has_time:
+                    hh = int(m_iso.group(4))
+                    mm = int(m_iso.group(5))
+                    ss = int(m_iso.group(6)) if m_iso.group(6) is not None else 0
+                    fmt = 'DD/MM/YYYY HH:MM:SS' if ss > 0 else 'DD/MM/YYYY HH:MM'
+                    return True, datetime(y, m, d, hh, mm, ss), fmt
+                return True, date(y, m, d), 'DD/MM/YYYY'
+            except ValueError:
+                pass
+
+    # 3. Format DD/MM/YYYY atau DD-MM-YYYY
+    m_dmy = re.match(r'^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:[T\s](\d{1,2}):(\d{2})(?::(\d{2}))?)?$', s)
+    if m_dmy:
+        d, m, y = int(m_dmy.group(1)), int(m_dmy.group(2)), int(m_dmy.group(3))
+        if 1900 <= y <= 2100 and 1 <= m <= 12 and 1 <= d <= 31:
+            try:
+                has_time = m_dmy.group(4) is not None and (
+                    int(m_dmy.group(4)) != 0
+                    or int(m_dmy.group(5)) != 0
+                    or (m_dmy.group(6) is not None and int(m_dmy.group(6)) != 0)
+                )
+                if has_time:
+                    hh = int(m_dmy.group(4))
+                    mm = int(m_dmy.group(5))
+                    ss = int(m_dmy.group(6)) if m_dmy.group(6) is not None else 0
+                    fmt = 'DD/MM/YYYY HH:MM:SS' if ss > 0 else 'DD/MM/YYYY HH:MM'
+                    return True, datetime(y, m, d, hh, mm, ss), fmt
+                return True, date(y, m, d), 'DD/MM/YYYY'
+            except ValueError:
+                pass
+
+    return False, None, None
 
 
 def generate_excel_report(
@@ -197,6 +282,8 @@ def generate_excel_report(
             cell.fill = row_fill
 
             is_num, num_val = _parse_numeric(raw_val)
+            is_dt, dt_val, dt_fmt = _parse_date_or_time(raw_val)
+
             if is_num and c_idx in numeric_cols:
                 cell.value = num_val
                 cell.alignment = Alignment(horizontal="right", vertical="center")
@@ -204,6 +291,10 @@ def generate_excel_report(
                     cell.number_format = currency_fmt
                 else:
                     cell.number_format = integer_fmt
+            elif is_dt:
+                cell.value = dt_val
+                cell.number_format = dt_fmt
+                cell.alignment = Alignment(horizontal="center", vertical="center")
             else:
                 cell.value = str(raw_val) if raw_val is not None else "-"
                 cell.alignment = Alignment(
