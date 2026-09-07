@@ -470,14 +470,17 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
         if fanout_info:
             ai_config = await resolve_ai_config(core_pool, user.get("username", ""), branch_code)
             async with VANNA_SEMAPHORE:
-                context_text, _ = await ambil_konteks_vanna(core_pool, question, branch_code)
-                multi_prompt = susun_multi_sql_prompt(question, fanout_info, context_text)
-                panggil_fn = llm_call_fn or panggil_llm_default
-                system_msg = "You are a PostgreSQL expert for automotive DMS. Respond only with JSON containing SQL for each domain."
-                raw_output = await panggil_fn(system_msg, multi_prompt, ai_config)
+                if all("sql" in d and d["sql"] for d in fanout_info["domains"]):
+                    sql_dict = {d["id"]: d["sql"] for d in fanout_info["domains"]}
+                else:
+                    context_text, _ = await ambil_konteks_vanna(core_pool, question, branch_code)
+                    multi_prompt = susun_multi_sql_prompt(question, fanout_info, context_text)
+                    panggil_fn = llm_call_fn or panggil_llm_default
+                    system_msg = "You are a PostgreSQL expert for automotive DMS. Respond only with JSON containing SQL for each domain."
+                    raw_output = await panggil_fn(system_msg, multi_prompt, ai_config)
 
-                domain_ids = [d["id"] for d in fanout_info["domains"]]
-                sql_dict = ekstrak_multi_sql(raw_output, domain_ids)
+                    domain_ids = [d["id"] for d in fanout_info["domains"]]
+                    sql_dict = ekstrak_multi_sql(raw_output, domain_ids)
 
                 pool_tenant = await tenant_pool_manager.get_pool(tenant)
 

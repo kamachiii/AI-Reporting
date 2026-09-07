@@ -151,10 +151,12 @@ def susun_multi_sql_prompt(question: str, fanout_info: Dict[str, Any], context_t
     for d in domains:
         d_id = d["id"]
         json_keys.append(f'"{d_id}": "SELECT ..."')
+        focus_text = d.get('focus', d.get('title', ''))
+        hint_text = d.get('hint', '')
         domain_instructions.append(
             f"- Sub-Domain '{d_id}' ({d['title']}):\n"
-            f"  Fokus: {d['focus']}\n"
-            f"  Petunjuk: {d['hint']}"
+            f"  Fokus: {focus_text}\n"
+            f"  Petunjuk: {hint_text}"
         )
         
     domain_text = "\n".join(domain_instructions)
