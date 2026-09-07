@@ -17,8 +17,10 @@ FANOUT_RULES: List[Dict[str, Any]] = [
     {
         "category": "penjualan",
         "trigger_patterns": [
-            r"\b(?:penjualan|omzet|omset|pendapatan|revenue|performa|transaksi)\b",
-            r"\b(?:berapa|total|data|rekap|ringkasan)\s+(?:penjualan|omzet|omset|pendapatan)\b",
+            r"\b(?:penjualan|omzet|omset|pendapatan|revenue|performa|peforma|transaksi)\b",
+            r"\b(?:berapa|total|data|rekap|ringkasan|bandingkan)\s+(?:penjualan|omzet|omset|pendapatan|performa|peforma|divisi)\b",
+            r"\b(?:tiap|setiap|antar|per|semua|lintas)\s+divisi\b",
+            r"\b(?:divisi)\b",
         ],
         # Jika salah satu qualifier ini ada, pertanyaan SUDAH SPESIFIK -> Jalankan single query normal!
         "qualifiers": [
@@ -242,8 +244,8 @@ def cek_apakah_perlu_komparasi(question: str) -> bool:
     q_lower = (question or "").lower()
     patterns = [
         r"\b(?:bandingkan|komparasi|perbandingan|kontribusi|versus|vs)\b",
-        r"\b(?:antar|lintas)\s+divisi\b",
-        r"\bperforma\s+divisi\b",
+        r"\b(?:antar|lintas|tiap|per|semua)\s+divisi\b",
+        r"\b(?:performa|peforma)\s+(?:antar|tiap|per|semua)?\s*divisi\b",
     ]
     return any(re.search(p, q_lower) for p in patterns)
 

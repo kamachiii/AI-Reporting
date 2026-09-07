@@ -560,9 +560,6 @@ export default function UserWorkspace({ user, onLogout }) {
                 <span className="text-xs font-sans font-normal text-body group-hover:text-ink tracking-tight">
                   Riwayat Chat
                 </span>
-                <kbd className="hidden sm:inline-block font-mono text-[9px] text-muted-soft px-1 py-0.2 rounded bg-canvas border border-hairline/70">
-                  Ctrl+B
-                </kbd>
               </motion.button>
             )}
           </AnimatePresence>
