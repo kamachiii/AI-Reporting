@@ -1159,6 +1159,47 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Frontend lint: `npm run lint` **0 errors** (100% lulus).
   - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 1.38s).
 
+### 3ai. Strukturisasi Knowledge Base 3S: Global KB vs Tenant Database KB & Sinkronisasi Pgvector (2026-09-07)
+
+- **Latar Belakang & Permasalahan**:
+  1. **Kesalahan AI pada Analisis Multi-Divisi**: Pertanyaan komparasi divisi per tahun sebelumnya berisiko hanya mengeksekusi tabel penjualan unit (`untt_penjualan`) tanpa menghubungkan data servis bengkel (`srvt_wo`) dan suku cadang (`srvt_wodetail`).
+  2. **Tuntutan Presisi Multi-Tenant**: Tenant `TST_01` terhubung ke database `backup_demo_otobitzcloud` dengan **2.387 tabel**. Tanpa pemisahan tegas antara pengetahuan universal (Global KB) dan skema fisik spesifik (Tenant KB), AI dapat mengalami kebingungan semantik dan memilih tabel/kolom yang salah.
+
+- **Implementasi Arsitektur Knowledge Base Dua Tingkat (Global vs Tenant)**:
+  1. **Global Knowledge Base (Public Automotive Domain Knowledge)**:
+     - **Tujuan**: Menyediakan prinsip bisnis otomotif 3S (Sales, Service, Sparepart) universal yang berlaku lintas semua tenant dealer.
+     - **Tabel Penyimpanan**: `global_knowledge_base` dan `tenant_vector_kb` (`branch_code = 'GLOBAL'`).
+     - **Automotive Domain Thesaurus (`automotive_thesaurus.py`)**:
+       - Menambahkan kategori aturan baru `komparasi_divisi_3s`: menegaskan bahwa analisis divisi wajib merangkum Penjualan Unit Kendaraan (`untt_penjualan`), Jasa Servis Bengkel (`srvt_wo`), dan Pemakaian Suku Cadang (`srvt_wodetail.part > 0`).
+       - Memperbaiki aturan stok gudang bengkel: rumus sisa stok adalah `stockawal + masuk - keluar` dari `srvt_stockparts` (bukan saldoakhir).
+       - Menambahkan aturan penjualan sparepart bengkel melalui kolom `srvt_wodetail.part` (> 0).
+     - **8 Golden Few-Shot Dealership Templates**:
+       1. Komparasi performa tahunan 3 pilar divisi (Sales, Service, Sparepart).
+       2. Tren omzet dan volume penjualan unit kendaraan bulanan (`batal = false`, `retur = false`).
+       3. Tren unit entry dan total biaya estimasi servis bengkel bulanan (`srvt_wo.batal = false`).
+       4. Top 10 suku cadang terlaris berdasarkan nilai pemakaian di bengkel (`srvt_wodetail.part`).
+       5. Top 10 customer dengan pembelian unit terbanyak via 2-hop SPK (`untt_penjualan -> untt_pesanankendaraan -> glbm_customer`).
+       6. Perbandingan pembelian unit kendaraan tahun 2025 vs 2026 (`untt_pembelian.tglinvoice`).
+       7. Stok unit kendaraan ready berdasarkan tipe mobil (`untt_datakendaraan -> untm_tipe`).
+       8. Sisa stok suku cadang gudang bengkel yang menipis/kritis (`stockawal + masuk - keluar <= 5`).
+     - **Vektorisasi Pgvector**: Seluruh 8 template SQL dan 9 aturan thesaurus berhasil divektorisasi ke `tenant_vector_kb` (IDs 2416–2423 + 9 thesaurus).
+
+  2. **Tenant Database Knowledge Base (`tenants.knowledge_base` untuk TST_01)**:
+     - **Tujuan**: Menampung spesifikasi teknis fisik khusus database `backup_demo_otobitzcloud`.
+     - **Allowlist Ketat (12 Tabel Operasional dari 2.387 Tabel)**:
+       `untt_penjualan`, `untt_pembelian`, `untt_pesanankendaraan`, `untt_datakendaraan`, `untm_tipe`, `untm_model`, `srvt_wo`, `srvt_wodetail`, `srvt_stockparts`, `glbm_customer`, `glbm_cabang`, `vw_untt_penjualan`.
+     - **Catatan Kolom Fisik Lengkap**: Deskripsi semantik operasional untuk semua kolom kunci di 12 tabel (misal: `hjakhir`, `hpunit`, `totalestimasibiaya`, `jasa`, `part`, `cogs`, `tglinvoice`, `thnpembuatan`).
+     - **Pemetaan Relasi Eksplisit**: Mendefinisikan jalur join 2-hop untuk data customer dari transaksi penjualan (`untt_penjualan.nomor_pesanan -> untt_pesanankendaraan.nomor -> glbm_customer.nomor`), relasi WO ke customer dan unit kendaraan, serta relasi tipe mobil ke model kendaraan.
+     - **Glossary Bisnis Spesifik**: Istilah-istilah percakapan dealer yang dipetakan langsung ke ekspresi SQL PostgreSQL.
+
+- **Hasil Pengujian & Verifikasi Nyata**:
+  - Seluruh 8 Golden Queries diuji langsung ke tenant database `backup_demo_otobitzcloud` (PostgreSQL port 5432) dan menghasilkan **100% SUKSES** dengan data nyata yang akurat.
+  - Pengujian kueri *"bandingkan peforma tiap divisi dalam tiap tahunnya"* melalui `cari_konteks_pgvector` membuktikan bahwa pgvector secara akurat mengambil panduan 3S dan mendeteksi tabel `untt_penjualan`, `srvt_wo`, `srvt_wodetail`, dan `srvt_stockparts` pada peringkat teratas.
+  - Backend compileall: **exit 0**.
+  - Backend pytest: **558 passed in 41.37s** (100% lulus).
+  - Frontend lint: `npm run lint` **0 errors** (100% lulus).
+  - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 1.15s).
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -1219,6 +1260,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Fix Format Mata Uang vs Kuantitas & Total Transaksi** — SELESAI (lihat §3y).
 - [x] **Manajemen Riwayat Chat Multi-Sesi, Tabel Pintar Interaktif & Penyelarasan Skema Bengkel Riil** — SELESAI (lihat §3z).
 - [x] **Penerapan Claude Editorial Design System & Eliminasi AI-Slop (DESIGN-claude.md)** — SELESAI (lihat §3aa).
+- [x] **Strukturisasi Knowledge Base 3S: Global KB vs Tenant Database KB & Sinkronisasi Pgvector** — SELESAI (lihat §3ai).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. *Dedicated Executive Dashboard Page*: Ditutup/dibatalkan atas arahan pengguna untuk mempertahankan identitas murni Conversational AI Assistant.
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.

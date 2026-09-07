@@ -49,6 +49,25 @@ AUTOMOTIVE_DOMAIN_RULES = [
         ]
     },
     {
+        "category": "komparasi_divisi_3s",
+        "title": "Aturan Komparasi Performa Multi-Divisi (3S: Sales, Service, Sparepart)",
+        "keywords": [
+            "divisi", "peforma", "performa", "antar divisi", "tiap divisi", "setiap divisi",
+            "per divisi", "semua divisi", "3s", "sales service sparepart", "komparasi divisi",
+            "performa tahunan", "kinerja divisi"
+        ],
+        "primary_tables": ["untt_penjualan", "srvt_wo", "srvt_wodetail", "srvt_stockparts"],
+        "guidelines": [
+            "Dalam ekosistem dealer otomotif 3S, terdapat 3 pilar divisi utama:",
+            "  1. Divisi Penjualan / Sales (Unit Kendaraan): 'untt_penjualan' (omzet: SUM(hjakhir), unit: COUNT(nomor), filter batal = false AND retur = false).",
+            "  2. Divisi Servis Bengkel / Service (Jasa & Perbaikan): 'srvt_wo' (omzet: SUM(totalestimasibiaya), unit entry: COUNT(nomor), filter batal = false).",
+            "  3. Divisi Suku Cadang / Sparepart: 'srvt_wodetail' (penjualan suku cadang bengkel: SUM(part) WHERE part > 0) atau 'srvt_stockparts' untuk inventori fisik gudang.",
+            "Pertanyaan yang meminta komparasi performa antar divisi dalam tiap tahunnya TIDAK BISA hanya dijawab dengan data penjualan unit.",
+            "Data harus disajikan komprehensif mencakup pilar Penjualan Unit Kendaraan, Jasa Servis Bengkel, dan Penjualan Suku Cadang.",
+            "Untuk agregasi per tahun gunakan EXTRACT(YEAR FROM tanggal) atau DATE_TRUNC('year', tanggal)."
+        ]
+    },
+    {
         "category": "suku_cadang_inventori",
         "title": "Aturan Sparepart, Suku Cadang, & Inventori Gudang",
         "keywords": [
@@ -56,10 +75,12 @@ AUTOMOTIVE_DOMAIN_RULES = [
             "pelumas", "item", "stok", "stock", "inventori", "gudang", "pembelian",
             "invt", "prtt", "partcounter", "pembebananpart"
         ],
-        "primary_tables": ["srvt_partcounterfakturdetail", "srvt_stockparts", "invt_item"],
+        "primary_tables": ["srvt_partcounterfakturdetail", "srvt_stockparts", "srvt_wodetail", "invt_item"],
         "guidelines": [
             "Tabel transaksi penjualan sparepart counter adalah 'srvt_partcounterfakturdetail' (kolom: nomor_faktur, kode_parts, qty, harga, subtotal).",
-            "Tabel stok suku cadang gudang bengkel adalah 'srvt_stockparts' (kolom: kodepart, namapart, saldoakhir, hargabeliterakhir).",
+            "Tabel pemakaian suku cadang pada pekerjaan bengkel (Work Order) adalah 'srvt_wodetail' (kolom: part untuk nilai nominal uang sparepart, filter part > 0).",
+            "Tabel stok fisik suku cadang gudang bengkel adalah 'srvt_stockparts' (kolom: kode_parts, namapart, stockawal, masuk, keluar, hargabeliterakhir).",
+            "Rumus menghitung sisa stok fisik sparepart di gudang adalah: stockawal + masuk - keluar (BUKAN kolom saldoakhir).",
             "Tabel master katalog barang adalah 'invt_item' (atau 'srvt_stockparts')."
         ]
     },
