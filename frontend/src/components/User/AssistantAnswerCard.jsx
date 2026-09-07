@@ -311,13 +311,22 @@ export default function AssistantAnswerCard({
 
   const smartSaran = useMemo(() => {
     if (ditolak || !onAsk) return [];
-    if (Array.isArray(answer.saran) && answer.saran.length > 0) return answer.saran;
-    return buatRekomendasiPertanyaan(
-      question || answer.question || '',
-      activeColumns,
-      activeRows,
-      activeSql
-    );
+    const rawSaran = (Array.isArray(answer.saran) && answer.saran.length > 0)
+      ? answer.saran
+      : buatRekomendasiPertanyaan(
+          question || answer.question || '',
+          activeColumns,
+          activeRows,
+          activeSql
+        );
+    const curQ = (question || answer.question || '').toLowerCase().trim();
+    return (rawSaran || [])
+      .filter((s) => {
+        if (!s || typeof s !== 'string') return false;
+        const sLower = s.toLowerCase().trim();
+        return sLower !== curQ && !sLower.includes(curQ) && !curQ.includes(sLower);
+      })
+      .slice(0, 3);
   }, [ditolak, onAsk, answer.saran, question, answer.question, activeColumns, activeRows, activeSql]);
 
   const grafikConfig = useMemo(

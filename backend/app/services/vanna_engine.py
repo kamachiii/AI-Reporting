@@ -31,6 +31,8 @@ from app.services.fanout_engine import (
     susun_multi_sql_prompt,
     ekstrak_multi_sql,
     susun_ringkasan_eksekutif_multi,
+    cek_apakah_perlu_komparasi,
+    susun_tab_komparasi_divisi,
 )
 
 logger = logging.getLogger(__name__)
@@ -186,11 +188,13 @@ def _konversi_nilai_vanna(v):
     return _konversi_nilai(v)
 
 
-def _format_ringkasan_otomatis(rows: list, columns: list) -> str:
+def _format_ringkasan_otomatis(rows: list, columns: list, question: str = "") -> str:
     """Ringkasan naratif deterministik otomatis tanpa panggil LLM lagi (hemat 100% token)."""
     n = len(rows)
     if n == 0:
         return "Tidak ada data yang ditemukan untuk kueri ini."
+
+    base_summary = ""
     if n == 1:
         r = rows[0]
         items = []
@@ -200,10 +204,10 @@ def _format_ringkasan_otomatis(rows: list, columns: list) -> str:
                 items.append(f"{k}: Rp {int(val_conv):,}".replace(",", "."))
             else:
                 items.append(f"{k}: {val_conv}")
-        return f"Ditemukan 1 baris hasil ({', '.join(items)})."
+        base_summary = f"Ditemukan 1 baris hasil ({', '.join(items)})."
     
     # Deteksi apakah ini perbandingan tahunan / periode
-    if "tahun" in columns:
+    elif "tahun" in columns:
         parts = []
         for r in rows[:4]:
             thn = r.get("tahun")
@@ -226,9 +230,23 @@ def _format_ringkasan_otomatis(rows: list, columns: list) -> str:
                 else:
                     parts.append(f"Tahun {int(thn)}")
         if parts:
-            return f"Perbandingan per tahun: {', '.join(parts)}."
+            base_summary = f"Perbandingan per tahun: {', '.join(parts)}."
+        else:
+            base_summary = f"Berhasil menampilkan {n} baris data dari database."
+    else:
+        base_summary = f"Berhasil menampilkan {n} baris data dari database."
 
-    return f"Berhasil menampilkan {n} baris data dari database."
+    # Smart Context Note untuk Data Tahun Berjalan (2026 vs 2025/2024)
+    q_lower = (question or "").lower()
+    is_current_year_query = any(w in q_lower for w in ["tahun ini", "2026", "saat ini", "berjalan"])
+    if is_current_year_query and n <= 10:
+        base_summary += (
+            "\n\nCatatan Analitik: Data transaksi tahun berjalan (2026) di sistem baru tercatat "
+            "hingga pertengahan tahun (Juni 2026). Untuk analisis tahunan komprehensif, Anda juga "
+            "dapat meninjau performa tahun penuh terakhir (2025 atau 2024)."
+        )
+
+    return base_summary
 
 
 async def resolve_ai_config_for_tenant(core_pool, user_id: int, tenant_id: int) -> dict:
@@ -281,7 +299,7 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                 durasi_ms = int((time.monotonic() - t0) * 1000)
                 columns = [k for k in db_rows[0].keys()] if db_rows else []
                 rows = [[_konversi_nilai_vanna(v) for v in r.values()] for r in db_rows[:500]]
-                ringkasan = entri_memori["ringkasan"] or _format_ringkasan_otomatis(db_rows[:500], columns)
+                ringkasan = entri_memori["ringkasan"] or _format_ringkasan_otomatis(db_rows[:500], columns, question)
 
                 try:
                     await tandai_memory_dipakai(core_pool, entri_memori["id"])
@@ -395,10 +413,35 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                 tabs_with_data = [t for t in tab_results if (t.get("row_count") or len(t.get("rows") or [])) > 0]
                 has_multiple_tabs = len(tabs_with_data) > 1
                 active_tabs = tabs_with_data if tabs_with_data else tab_results
+
+                # Jika pertanyaan meminta komparasi/perbandingan, tambahkan Tab Komparasi Konsolidasi Sejajar
+                if cek_apakah_perlu_komparasi(question) and tabs_with_data:
+                    komparasi_tab = susun_tab_komparasi_divisi(tabs_with_data, question)
+                    if komparasi_tab:
+                        active_tabs = [komparasi_tab] + [t for t in tabs_with_data if t["id"] != "komparasi"]
+                        has_multiple_tabs = True
+
                 default_tab = active_tabs[0]
 
                 durasi_ms = int((time.monotonic() - t0) * 1000)
                 ringkasan_multi = susun_ringkasan_eksekutif_multi(active_tabs, question)
+
+                # Rekomendasi saran pertanyaan kontekstual (Anti Self-Referencing / De-duplikasi kueri user)
+                saran_list = []
+                q_clean = question.lower().strip()
+                potential_saran = [
+                    "Tampilkan tren bulanan penjualan unit tahun ini",
+                    "Tampilkan rincian servis bengkel dengan estimasi biaya terbesar",
+                    "Bandingkan performa divisi dengan tahun penuh 2025",
+                    "Tampilkan 5 customer dengan transaksi terbesar tahun ini",
+                    "Tampilkan ringkasan pendapatan jasa servis bengkel per kuartal"
+                ]
+                for s in potential_saran:
+                    s_clean = s.lower().strip()
+                    if s_clean != q_clean and q_clean not in s_clean and s_clean not in q_clean:
+                        saran_list.append(s)
+                    if len(saran_list) >= 3:
+                        break
 
                 response = {
                     "source": "vanna",
@@ -415,11 +458,7 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                     "duration_ms": durasi_ms,
                     "memory_id": None,
                     "ringkasan": ringkasan_multi,
-                    "saran": [
-                        "Bandingkan performa antar divisi tahun ini",
-                        "Tampilkan rincian transaksi terbesar dari divisi utama",
-                        "Tampilkan tren bulanan untuk divisi ini"
-                    ],
+                    "saran": saran_list,
                     "metode": "fanout_multi_tab" if has_multiple_tabs else "fanout_single_tab",
                     "allow_explain": True
                 }
@@ -558,11 +597,11 @@ Berikan ringkasan naratif eksekutif singkat (2-3 kalimat) dalam bahasa Indonesia
                     allow_explain = False
                 except Exception as e_narr:
                     logger.warning("Gagal membuat narasi eksekutif: %s", e_narr)
-                    ringkasan = _format_ringkasan_otomatis(db_rows[:500], columns)
+                    ringkasan = _format_ringkasan_otomatis(db_rows[:500], columns, question)
                     allow_explain = True
             else:
                 # Mode Operasional: Ringkasan lokal cepat (0 token) + Tombol Jelaskan Lebih Dalam aktif
-                ringkasan = _format_ringkasan_otomatis(db_rows[:500], columns)
+                ringkasan = _format_ringkasan_otomatis(db_rows[:500], columns, question)
                 allow_explain = True
 
             response = {

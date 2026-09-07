@@ -6,6 +6,8 @@ from app.services.fanout_engine import (
     susun_multi_sql_prompt,
     ekstrak_multi_sql,
     susun_ringkasan_eksekutif_multi,
+    cek_apakah_perlu_komparasi,
+    susun_tab_komparasi_divisi,
 )
 
 
@@ -92,3 +94,69 @@ def test_susun_ringkasan_eksekutif_multi():
     assert "Rp 452,8 M" in summary
     assert "Rp 18,4 M" in summary
     assert "Rp 26,1 M" in summary
+
+
+def test_cek_apakah_perlu_komparasi():
+    assert cek_apakah_perlu_komparasi("Bandingkan performa antar divisi tahun ini") is True
+    assert cek_apakah_perlu_komparasi("Komparasi omzet unit vs servis") is True
+    assert cek_apakah_perlu_komparasi("Berapa kontribusi masing-masing divisi?") is True
+    assert cek_apakah_perlu_komparasi("Berapa total penjualan tahun 2025?") is False
+
+
+def test_susun_tab_komparasi_divisi():
+    domain_results = [
+        {
+            "id": "unit",
+            "title": "Unit Kendaraan",
+            "columns": ["bulan", "jumlah_unit_terjual", "total_omzet_unit"],
+            "rows": [["2026-06", 3, 900_000_000]],
+            "row_count": 1,
+            "raw_records": [{"bulan": "2026-06", "jumlah_unit_terjual": 3, "total_omzet_unit": 900_000_000}],
+            "sql": "SELECT ... untt_penjualan",
+            "error": None
+        },
+        {
+            "id": "service",
+            "title": "Jasa Servis Bengkel",
+            "columns": ["bulan", "jumlah_pkb", "total_pendapatan_jasa"],
+            "rows": [["2026-06", 10, 100_000_000]],
+            "row_count": 1,
+            "raw_records": [{"bulan": "2026-06", "jumlah_pkb": 10, "total_pendapatan_jasa": 100_000_000}],
+            "sql": "SELECT ... srvt_wo",
+            "error": None
+        }
+    ]
+    komparasi = susun_tab_komparasi_divisi(domain_results, "Bandingkan performa antar divisi")
+    assert komparasi is not None
+    assert komparasi["id"] == "komparasi"
+    assert komparasi["title"] == "Komparasi Antar Divisi"
+    assert "divisi" in komparasi["columns"]
+    assert "total_omzet" in komparasi["columns"]
+    assert "kontribusi_omzet" in komparasi["columns"]
+    assert len(komparasi["rows"]) == 2
+    # Cek kontribusi persentase
+    unit_row = next(r for r in komparasi["rows"] if r[0] == "Unit Kendaraan")
+    assert unit_row[1] == 3
+    assert unit_row[2] == 900_000_000
+    assert unit_row[3] == "90,0%"
+
+    serv_row = next(r for r in komparasi["rows"] if r[0] == "Jasa Servis Bengkel")
+    assert serv_row[1] == 10
+    assert serv_row[2] == 100_000_000
+    assert serv_row[3] == "10,0%"
+
+
+def test_smart_context_note_tahun_berjalan():
+    domain_results = [
+        {
+            "title": "Unit Kendaraan",
+            "columns": ["bulan", "jumlah_unit", "omzet"],
+            "rows": [["2026-06", 3, 944900000]],
+            "row_count": 1
+        }
+    ]
+    summary = susun_ringkasan_eksekutif_multi(domain_results, "Bandingkan performa antar divisi tahun ini")
+    assert "Catatan Analitik" in summary
+    assert "2026" in summary
+    assert "2025 atau 2024" in summary
+

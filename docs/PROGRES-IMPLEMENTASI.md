@@ -799,6 +799,36 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Frontend build: `npm run build` lolos (exit code 0).
   - Backend tests: `pytest tests/ -q` lolos 100% (**554 passed in 41.27s**).
 
+## 3y. Penyempurnaan Analisis Multi-Divisi: Koreksi Skema Riil Dealer, Tab Komparasi Sejajar, De-duplikasi Chip & Smart Context Note
+
+- **Latar Belakang & Investigasi Masalah**:
+  Pada kueri eksekutif lintas divisi seperti *"Bandingkan performa antar divisi tahun ini"*, ditemukan sejumlah kekurangan kualitas:
+  1. *Salah Nama Tabel Bengkel & Part*: Prompt generator membisikkan tabel `womt_wo` dan `womt_wopart` (error `relation does not exist`), padahal tabel nyata dealer di PostgreSQL adalah `srvt_wo` (138.000+ data WO) dan `srvt_wodetail` (927.000+ data detail transaksi).
+  2. *Ketiadaan Tabel Komparasi Antar Divisi*: Hasil sebelumnya hanya menampilkan data mentah per-divisi tanpa menyandingkan perbandingan volume, omzet, dan kontribusi persentase antar divisi.
+  3. *Chip Saran Mengulang Pertanyaan Sendiri*: Tombol saran lanjutan di bawah jawaban merekomendasikan kembali *"Bandingkan performa antar divisi tahun ini"* (identik dengan pertanyaan user).
+  4. *Ketiadaan Konteks Tahun Berjalan*: Data transaksi tahun berjalan (2026) di database demo baru tercatat hingga Juni 2026 (3 transaksi unit), membingungkan eksekutif tanpa adanya catatan konteks tahunan.
+- **Implementasi Solusi Terpadu**:
+  1. **Koreksi Referensi Skema Dealer Nyata (`fanout_engine.py` & KB `tabel_diizinkan`)**:
+     - Memperbarui hint divisi Servis ke `srvt_wo` (`totalestimasibiaya`, `nomor`) dan `srvt_wodetail` (`jasa`, `part`).
+     - Memperbarui hint Part ke `srvt_wodetail` (`part > 0`) dan `srvt_stockparts`.
+     - Menambahkan `srvt_wodetail` dan `srvt_stockparts` ke array `tabel_diizinkan` di Knowledge Base core DB.
+  2. **Tab Komparasi Sejajar Antar Divisi (`susun_tab_komparasi_divisi`)**:
+     - Otomatis membuat tab utama *"Komparasi Antar Divisi"* dengan kolom: `["divisi", "total_transaksi", "total_omzet", "kontribusi_omzet"]`.
+     - Mengagregasi volume dan omzet dari seluruh divisi dengan persentase kontribusi (misal: Unit Kendaraan 100,0%, Jasa Servis Bengkel 0,0%).
+     - Komponen visual chart Recharts otomatis mendeteksi kolom komparasi dan langsung merender **Grafik Batang Perbandingan Antar Divisi**.
+  3. **De-duplikasi Ketat Saran Pertanyaan (Anti Self-Referencing)**:
+     - Di backend (`vanna_engine.py`): Saran di-generate secara dinamis dan membuang string yang identik atau tumpang tindih dengan pertanyaan user.
+     - Di frontend (`AssistantAnswerCard.jsx`): Memo `smartSaran` memfilter pertanyaan aktif sebelum merender chip tombol ke UI.
+  4. **Smart Context Note untuk Tahun Berjalan (2026 vs 2025/2024)**:
+     - Jika kueri menargetkan tahun berjalan (`2026` / *"tahun ini"*) dan volume transaksi masih minim ($\le 10$), ringkasan eksekutif menyematkan catatan cerdas:
+       `Catatan Analitik: Data transaksi tahun berjalan (2026) di sistem baru tercatat hingga pertengahan tahun (Juni 2026). Untuk analisis tahunan komprehensif, Anda juga dapat meninjau performa tahun penuh terakhir (2025 atau 2024).`
+- **Hasil Verifikasi**:
+  - Backend compile: `compileall app` lolos 100% (exit code 0).
+  - Backend tests: `pytest tests/ -q` lolos 100% (**557 passed in 36.39s**, +3 unit test baru di `test_fanout_engine.py`).
+  - Frontend lint: `npm run lint` lolos (**0 errors, 0 warnings pada file baru/modifikasi**).
+  - Frontend build: `npm run build` lolos (exit code 0).
+  - Live query verification: Kueri *"Bandingkan performa antar divisi tahun ini"* sukses menghasilkan 3 tab, dengan Tab 1 berupa Komparasi Antar Divisi, Tab 2 Unit, Tab 3 Servis, narasi dengan Smart Context Note, dan chip saran kontekstual yang bersih.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -855,6 +885,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Ekspor Excel Berformat & Grafik Native + Pertanyaan Emas Dealer (Opsi 1)** — SELESAI (lihat §3v).
 - [x] **Metrik Utilisasi AI Admin & Skenario Live Demo Sidang PKL (Opsi 5)** — SELESAI (lihat §3w).
 - [x] **Optimasi UI Multi-Table 3S: Tab Bar Dinamis & Pembersihan Tab Kosong** — SELESAI (lihat §3x).
+- [x] **Penyempurnaan Analisis Multi-Divisi: Koreksi Skema Riil Dealer, Tab Komparasi Sejajar, De-duplikasi Chip & Smart Context Note** — SELESAI (lihat §3y).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. **Dedicated Executive Dashboard Page**: Halaman KPI visual 32 chart otomatis tanpa kueri chat (acuan file Excel).
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.

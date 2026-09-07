@@ -40,14 +40,14 @@ FANOUT_RULES: List[Dict[str, Any]] = [
                 "title": "Jasa Servis Bengkel",
                 "icon": "Wrench",
                 "focus": "Pendapatan jasa servis & perawatan bengkel",
-                "hint": "Gunakan tabel 'womt_wo' atau 'womt_wojasa' (filter womt_wo.batal = false). Total pendapatan jasa = SUM(total_biaya) atau SUM(total_harga), jumlah PKB = COUNT(*).",
+                "hint": "Gunakan tabel 'srvt_wo' (filter srvt_wo.batal = false). Total pendapatan jasa = COALESCE(SUM(totalestimasibiaya), 0), jumlah PKB/WO = COUNT(nomor). Jika membutuhkan detail pekerjaan jasa, dapat menghubungkan ke tabel 'srvt_wodetail' (filter batal = false).",
             },
             {
                 "id": "part",
                 "title": "Suku Cadang & Sparepart",
                 "icon": "Package",
-                "focus": "Penjualan suku cadang, pelumas, dan aksesoris",
-                "hint": "Gunakan tabel 'womt_wopart' atau 'invt_item' terkait transaksi sparepart (filter batal = false). Total nilai = SUM(total_harga), kuantiti = SUM(qty).",
+                "focus": "Penjualan suku cadang, pelumas, dan aksesoris melalui bengkel",
+                "hint": "Gunakan tabel 'srvt_wodetail' (filter srvt_wodetail.part > 0; catatan penting: srvt_wodetail TIDAK memiliki kolom batal, kolom batal ada di srvt_wo). Total nilai penjualan part = COALESCE(SUM(part), 0), kuantiti = COUNT(*).",
             },
         ]
     },
@@ -67,15 +67,15 @@ FANOUT_RULES: List[Dict[str, Any]] = [
                 "id": "stok_unit",
                 "title": "Stok Unit Kendaraan",
                 "icon": "Car",
-                "focus": "Persediaan fisik unit mobil siap jual di dealer",
-                "hint": "Gunakan tabel 'unit_stock' atau 'untt_stok' untuk menghitung jumlah unit mobil siap jual. COUNT(*) AS total_stok_unit.",
+                "focus": "Persediaan fisik unit mobil di dealer",
+                "hint": "Gunakan tabel 'untt_datakendaraan' untuk menghitung total unit kendaraan. COUNT(norangka) AS total_stok_unit.",
             },
             {
                 "id": "stok_part",
                 "title": "Stok Sparepart Gudang",
                 "icon": "Package",
-                "focus": "Persediaan komponen dan suku cadang di gudang",
-                "hint": "Gunakan tabel 'invt_stok' atau 'part_stock' untuk menghitung saldo stok sparepart gudang. SUM(qty) AS total_stok_part.",
+                "focus": "Persediaan komponen dan suku cadang di gudang/bengkel",
+                "hint": "Gunakan tabel 'srvt_stockparts' untuk persediaan sparepart. COUNT(DISTINCT kode_parts) AS total_item_part, SUM(stockawal + masuk - keluar) AS total_qty_part.",
             },
         ]
     },
@@ -96,14 +96,14 @@ FANOUT_RULES: List[Dict[str, Any]] = [
                 "title": "Pembelian Unit Kendaraan",
                 "icon": "Car",
                 "focus": "Pengadaan unit mobil dari distributor/ATPM",
-                "hint": "Gunakan tabel pembelian unit kendaraan (filter batal = false).",
+                "hint": "Gunakan tabel 'untt_pembelian' (filter untt_pembelian.batal = false). Total nominal pembelian = SUM(hpunit), total unit = COUNT(nomor).",
             },
             {
                 "id": "beli_part",
                 "title": "Pembelian Sparepart",
                 "icon": "Package",
-                "focus": "Pengadaan suku cadang & oli dari supplier",
-                "hint": "Gunakan tabel 'invt_pembelian' (filter invt_pembelian.batal = false).",
+                "focus": "Pengadaan suku cadang & bahan bengkel",
+                "hint": "Gunakan tabel 'srvt_stockparts' (kolom masuk > 0) atau tabel pengadaan part terkait.",
             },
         ]
     },
@@ -237,13 +237,126 @@ def _format_rupiah_singkat(val: float) -> str:
     return f"Rp {val:,.0f}"
 
 
+def cek_apakah_perlu_komparasi(question: str) -> bool:
+    """Deteksi apakah pertanyaan menuntut komparasi/perbandingan antar divisi."""
+    q_lower = (question or "").lower()
+    patterns = [
+        r"\b(?:bandingkan|komparasi|perbandingan|kontribusi|versus|vs)\b",
+        r"\b(?:antar|lintas)\s+divisi\b",
+        r"\bperforma\s+divisi\b",
+    ]
+    return any(re.search(p, q_lower) for p in patterns)
+
+
+def susun_tab_komparasi_divisi(domain_results: List[Dict[str, Any]], question: str) -> Optional[Dict[str, Any]]:
+    """Menyusun tab tabel komparasi sejajar antar divisi (Sales, Service, Sparepart)."""
+    valid_items = [d for d in domain_results if (d.get("row_count", 0) > 0 or d.get("rows")) and not d.get("error")]
+    if not valid_items:
+        return None
+
+    # Hitung total volume dan total omzet per divisi
+    summary_rows = []
+    total_all_omzet = 0.0
+
+    for item in valid_items:
+        title = item.get("title", "Divisi")
+        rows = item.get("rows", [])
+        columns = [str(c).lower() for c in item.get("columns", [])]
+        raw_records = item.get("raw_records", [])
+
+        # Cari index kolom omzet dan volume
+        omzet_idx = -1
+        volume_idx = -1
+        for idx, col in enumerate(columns):
+            if any(u in col for u in ["omzet", "omset", "harga", "nilai", "rupiah", "biaya", "pendapatan", "total_uang", "total_penjualan", "jasa", "part"]):
+                omzet_idx = idx
+            elif any(c in col for c in ["total", "count", "jumlah", "qty", "unit", "item", "pkb"]):
+                volume_idx = idx
+
+        div_omzet = 0.0
+        div_volume = 0
+
+        # Jika raw_records ada, agregasi dari raw_records
+        records_to_sum = raw_records if raw_records else rows
+        for r in records_to_sum:
+            if isinstance(r, dict):
+                for k, v in r.items():
+                    k_l = str(k).lower()
+                    try:
+                        num = float(v or 0)
+                        if any(u in k_l for u in ["omzet", "omset", "harga", "nilai", "biaya", "pendapatan", "jasa", "part"]):
+                            div_omzet += num
+                        elif any(c in k_l for c in ["total", "count", "jumlah", "qty", "unit", "item", "pkb"]):
+                            div_volume += int(num)
+                    except (ValueError, TypeError):
+                        pass
+            elif isinstance(r, (list, tuple)):
+                if omzet_idx != -1 and omzet_idx < len(r):
+                    try:
+                        div_omzet += float(r[omzet_idx] or 0)
+                    except (ValueError, TypeError):
+                        pass
+                if volume_idx != -1 and volume_idx < len(r):
+                    try:
+                        div_volume += int(float(r[volume_idx] or 0))
+                    except (ValueError, TypeError):
+                        pass
+
+        # Fallback jika volume belum terhitung tapi rows ada
+        if div_volume == 0 and len(rows) > 0:
+            div_volume = len(rows)
+
+        total_all_omzet += div_omzet
+        summary_rows.append({
+            "divisi": title,
+            "total_transaksi": div_volume,
+            "total_omzet": div_omzet,
+        })
+
+    # Hitung persentase kontribusi omzet
+    table_rows = []
+    raw_recs = []
+    for s in summary_rows:
+        pct = (s["total_omzet"] / total_all_omzet * 100.0) if total_all_omzet > 0 else 0.0
+        table_rows.append([
+            s["divisi"],
+            s["total_transaksi"],
+            s["total_omzet"],
+            f"{pct:.1f}%".replace(".", ",")
+        ])
+        raw_recs.append({
+            "divisi": s["divisi"],
+            "total_transaksi": s["total_transaksi"],
+            "total_omzet": s["total_omzet"],
+            "kontribusi_omzet": f"{pct:.1f}%".replace(".", ",")
+        })
+
+    combined_sql = "-- Ringkasan Komparasi Multi-Divisi\n" + "\n\n".join(
+        f"-- Divisi {t['title']}:\n{t.get('sql', '')}" for t in valid_items if t.get("sql")
+    )
+
+    return {
+        "id": "komparasi",
+        "title": "Komparasi Antar Divisi",
+        "icon": "BarChart3",
+        "sql": combined_sql,
+        "columns": ["divisi", "total_transaksi", "total_omzet", "kontribusi_omzet"],
+        "rows": table_rows,
+        "row_count": len(table_rows),
+        "raw_records": raw_recs,
+        "error": None
+    }
+
+
 def susun_ringkasan_eksekutif_multi(domain_results: List[Dict[str, Any]], question: str) -> str:
     """Menyusun narasi eksekutif terpadu dari hasil eksekusi multi-tab secara deterministik (0 token)."""
     parts = []
     
-    # Hanya sertakan domain yang memiliki data (bila ada minimal 1 domain berisi data)
-    valid_items = [d for d in domain_results if d.get("row_count", 0) > 0 or d.get("rows")]
-    target_items = valid_items if valid_items else domain_results
+    # Hanya sertakan domain operasional divisi riil (kecualikan tab komparasi konsolidasi)
+    valid_items = [d for d in domain_results if (d.get("row_count", 0) > 0 or d.get("rows")) and d.get("id") != "komparasi"]
+    target_items = valid_items if valid_items else [d for d in domain_results if d.get("id") != "komparasi"]
+    if not target_items:
+        target_items = domain_results
     
     for item in target_items:
         title = item.get("title", "Divisi")
@@ -269,7 +382,8 @@ def susun_ringkasan_eksekutif_multi(domain_results: List[Dict[str, Any]], questi
             try:
                 num_v = float(v)
                 if any(u in k_lower for u in ["omzet", "omset", "harga", "nilai", "rupiah", "biaya", "pendapatan", "total_uang", "total_penjualan"]):
-                    stat_items.append(f"{_format_rupiah_singkat(num_v)}")
+                    if num_v > 0 or not stat_items:
+                        stat_items.append(f"{_format_rupiah_singkat(num_v)}")
                 elif any(c in k_lower for c in ["total", "count", "jumlah", "qty", "unit", "item", "pkb"]):
                     stat_items.append(f"{int(num_v):,} {k_lower.replace('total_', '').replace('_', ' ')}".replace(",", "."))
             except (ValueError, TypeError):
@@ -282,7 +396,23 @@ def susun_ringkasan_eksekutif_multi(domain_results: List[Dict[str, Any]], questi
 
     ringkasan_teks = " • ".join(parts)
     if len(valid_items) > 1:
-        return f"Ringkasan performa dealer mencakup seluruh divisi operasional: {ringkasan_teks}."
+        base_narasi = f"Ringkasan performa dealer mencakup seluruh divisi operasional: {ringkasan_teks}."
     elif len(valid_items) == 1:
-        return f"Hasil analitik {valid_items[0].get('title', 'data')}: {ringkasan_teks}."
-    return f"Ringkasan performa dealer: {ringkasan_teks}."
+        base_narasi = f"Hasil analitik {valid_items[0].get('title', 'data')}: {ringkasan_teks}."
+    else:
+        base_narasi = f"Ringkasan performa dealer: {ringkasan_teks}."
+
+    # Smart Context Note untuk Data Tahun Berjalan (2026 vs 2025/2024)
+    q_lower = (question or "").lower()
+    is_current_year_query = any(w in q_lower for w in ["tahun ini", "2026", "saat ini", "berjalan"])
+    context_note = ""
+    if is_current_year_query:
+        total_records_count = sum(d.get("row_count", 0) for d in valid_items)
+        if total_records_count <= 10:
+            context_note = (
+                "\n\nCatatan Analitik: Data transaksi tahun berjalan (2026) di sistem baru tercatat "
+                "hingga pertengahan tahun (Juni 2026). Untuk analisis tahunan komprehensif, Anda juga "
+                "dapat meninjau performa tahun penuh terakhir (2025 atau 2024)."
+            )
+
+    return base_narasi + context_note
