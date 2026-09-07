@@ -70,7 +70,8 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **Restorasi Icon Bot Warm Coral & Struktur Narasi Analisis** | selesai | `d3e3a51` | Mengembalikan icon Bot warm coral di header & message bubble (menghilangkan kotak hitam [DMS] & [AI]), font ringkasan sans-serif tajam, dan pemecahan narasi analisis eksekutif menjadi paragraf terstruktur + callout rekomendasi tanpa efek semut berbaris |
 | **Penyempurnaan Visual & UX Editorial** | selesai | `95a105f` | Warm user bubble (anti-pitch-black), palet chart terracotta #cc785c, deduplikasi judul toolbar, smart insights label Bulan (bukan Baris), prompt deck sans-serif, login card warm surface, tombol Coba Lagi pada error |
 | **Redesign Sidebar History Chat Editorial & Fix Hydration** | selesai | `04ec492` | Redesign sidebar gaya Claude.ai (header compact h-14, button Percakapan Baru tactile, search terintegrasi, timestamp item, delete pill inline, empty state ramah); Fix parsing array getConversations agar riwayat ter-render nyata |
-| **Floating Edge Handle Sidebar (Zero Layout Shift Navbar)** | selesai | LIVE | Menghapus tombol toggle dari navbar atas agar logo dan judul tidak pernah terdorong/bergeser; Menggantinya dengan Floating Edge Tab Handle di tepi layar kiri gaya Linear & Cursor |
+| **Floating Edge Handle Sidebar (Zero Layout Shift Navbar)** | selesai | `2b2cb55` | Menghapus tombol toggle dari navbar atas agar logo dan judul tidak pernah terdorong/bergeser; Menggantinya dengan Floating Edge Tab Handle di tepi layar kiri gaya Linear & Cursor |
+| **Animasi Halus Sidebar & Tipografi Ringan (Non-Bold)** | selesai | LIVE | Integrasi AnimatePresence & motion.aside untuk animasi slide mulus buka/tutup sidebar dan floating handle; Mengganti ketebalan font dari font-medium/semibold menjadi font-normal yang tipis, tajam, dan elegan |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -1072,6 +1073,28 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Backend pytest: **558 passed in 37.42s** (100% lulus).
   - Frontend lint: `npm run lint` **0 errors** (100% lulus).
   - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 846ms).
+
+### 3af. Animasi Slide Mulus (Framer Motion) & Tipografi Ringan Non-Bold (2026-09-07)
+
+- **Masalah yang Diatasi**:
+  1. **Hilangnya Animasi**: Sidebar sebelumnya langsung hilang atau muncul seketika secara mendadak (`return null`), tanpa animasi geser (*slide transition*), begitu pula tombol *floating edge handle*.
+  2. **Ketebalan Teks (Bold)**: Penggunaan `font-medium` dan `font-semibold` pada item percakapan aktif, tombol, dan header sidebar membuat tipografi terlihat tebal/berat di monitor, tidak sesuai dengan estetika editorial tipis dan elegan.
+
+- **Solusi & Perubahan**:
+  1. **Animasi Slide Mulus Sidebar (`ChatHistorySidebar.jsx` & `UserWorkspace.jsx`)**:
+     - Membungkus sidebar dalam `<AnimatePresence initial={false}>` dan komponen `<motion.aside>`.
+     - Mengatur transisi geser horizontal (`width: 0 -> 288px`, `opacity: 0 -> 1`) dengan kurva cubic-bezier halus (`[0.16, 1, 0.3, 1]`) selama 220ms.
+     - Mengunci tata letak konten dalam kontainer `w-72 shrink-0` agar teks tidak mengalami kompresi teks (*squish*) saat proses animasi berlangsung.
+  2. **Animasi Geser Masuk Floating Handle (`UserWorkspace.jsx`)**:
+     - Menggunakan `<AnimatePresence>` dan `<motion.button>` dengan animasi geser horizontal dari tepi kiri (`x: -30 -> 0`).
+  3. **Penghapusan Teks Bold/Tebal (Font-Normal Refinement)**:
+     - Mengubah seluruh label (judul percakapan, header "Arsip Percakapan", tombol "Percakapan Baru", dan teks "Riwayat Chat") menjadi `font-normal`.
+     - Teks kini tampil sangat tipis, tajam, dan elegan (*crisp editorial typography*).
+
+- **Hasil Verifikasi**:
+  - Backend pytest: **558 passed in 37.42s** (100% lulus).
+  - Frontend lint: `npm run lint` **0 errors** (100% lulus).
+  - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 938ms).
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 

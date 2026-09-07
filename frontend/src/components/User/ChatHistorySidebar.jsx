@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { motion } from 'framer-motion';
 import {
   MessageSquare, MessageSquarePlus, Trash2, Search, PanelLeftClose,
   History, Bot, X,
@@ -79,41 +80,46 @@ export default function ChatHistorySidebar({
   }
 
   return (
-    <aside
-      className="w-72 border-r border-hairline bg-surface-card flex flex-col h-full shrink-0 transition-all duration-200 select-none"
+    <motion.aside
+      initial={{ width: 0, opacity: 0 }}
+      animate={{ width: 288, opacity: 1 }}
+      exit={{ width: 0, opacity: 0 }}
+      transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+      className="border-r border-hairline bg-surface-card flex flex-col h-full shrink-0 select-none overflow-hidden"
       aria-label="Riwayat Percakapan"
     >
-      {/* Header Sidebar: Compact & Refined */}
-      <div className="h-14 px-3.5 border-b border-hairline/70 flex items-center justify-between bg-surface-card shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-primary/10 text-primary flex items-center justify-center border border-primary/20 shrink-0">
-            <History size={13} />
-          </div>
-          <span className="text-xs font-serif font-medium text-ink tracking-tight">
-            Arsip Percakapan
-          </span>
-          {conversations.length > 0 && (
-            <span className="text-[10px] font-mono px-1.5 py-0.5 bg-canvas border border-hairline rounded-full text-muted-soft">
-              {conversations.length}
+      <div className="w-72 flex flex-col h-full shrink-0">
+        {/* Header Sidebar: Compact & Refined */}
+        <div className="h-14 px-3.5 border-b border-hairline/70 flex items-center justify-between bg-surface-card shrink-0">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-md bg-primary/10 text-primary flex items-center justify-center border border-primary/20 shrink-0">
+              <History size={13} />
+            </div>
+            <span className="text-xs font-serif font-normal text-ink tracking-tight">
+              Arsip Percakapan
             </span>
-          )}
+            {conversations.length > 0 && (
+              <span className="text-[10px] font-mono px-1.5 py-0.5 bg-canvas border border-hairline rounded-full text-muted-soft font-normal">
+                {conversations.length}
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onToggleOpen}
+            title="Ciutkan Sidebar"
+            className="p-1.5 rounded-md text-muted hover:text-ink hover:bg-surface-cream-strong transition-colors cursor-pointer"
+          >
+            <PanelLeftClose size={15} />
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onToggleOpen}
-          title="Ciutkan Sidebar"
-          className="p-1.5 rounded-md text-muted hover:text-ink hover:bg-surface-cream-strong transition-colors cursor-pointer"
-        >
-          <PanelLeftClose size={15} />
-        </button>
-      </div>
 
       {/* Action Bar: Sleek New Chat Button & Search */}
       <div className="p-3 border-b border-hairline/60 space-y-2 shrink-0">
         <button
           type="button"
           onClick={onNewChat}
-          className="w-full flex items-center justify-between h-9 px-3 rounded-lg bg-canvas hover:bg-surface-cream-strong border border-hairline text-xs font-medium text-ink transition-all shadow-2xs group cursor-pointer hover:border-primary/40"
+          className="w-full flex items-center justify-between h-9 px-3 rounded-lg bg-canvas hover:bg-surface-cream-strong border border-hairline text-xs font-normal text-body hover:text-ink transition-all shadow-2xs group cursor-pointer hover:border-primary/40"
         >
           <span className="flex items-center gap-2">
             <MessageSquarePlus size={14} className="text-primary group-hover:scale-105 transition-transform" />
@@ -132,7 +138,7 @@ export default function ChatHistorySidebar({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Cari topik percakapan…"
-              className="w-full h-8 pl-8 pr-7 text-xs bg-canvas/70 hover:bg-canvas focus:bg-canvas border border-hairline rounded-lg text-ink placeholder:text-muted-soft focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition-all font-sans"
+              className="w-full h-8 pl-8 pr-7 text-xs bg-canvas/70 hover:bg-canvas focus:bg-canvas border border-hairline rounded-lg text-ink placeholder:text-muted-soft focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition-all font-sans font-normal"
             />
             {searchQuery && (
               <button
@@ -155,7 +161,7 @@ export default function ChatHistorySidebar({
               <Bot size={20} />
             </div>
             <div className="space-y-1">
-              <p className="text-xs font-serif font-medium text-ink">
+              <p className="text-xs font-serif font-normal text-ink">
                 {searchQuery ? 'Topik Tidak Ditemukan' : 'Arsip Masih Kosong'}
               </p>
               <p className="text-[11px] text-muted-soft leading-relaxed max-w-[200px] mx-auto font-sans">
@@ -170,9 +176,9 @@ export default function ChatHistorySidebar({
             if (items.length === 0) return null;
             return (
               <div key={groupName} className="space-y-1">
-                <div className="px-2 pt-2 pb-1 text-[10px] font-mono uppercase tracking-wider text-muted-soft font-semibold flex items-center justify-between">
+                <div className="px-2 pt-2 pb-1 text-[10px] font-mono uppercase tracking-wider text-muted-soft font-normal flex items-center justify-between">
                   <span>{groupName}</span>
-                  <span className="text-[9px] text-muted-soft/80">{items.length}</span>
+                  <span className="text-[9px] text-muted-soft/80 font-normal">{items.length}</span>
                 </div>
                 {items.map((conv) => {
                   const isActive = activeId === conv.id;
@@ -184,8 +190,8 @@ export default function ChatHistorySidebar({
                       key={conv.id}
                       className={`group relative flex items-center justify-between rounded-lg px-2.5 py-2 transition-all cursor-pointer ${
                         isActive
-                          ? 'bg-surface-cream-strong text-ink font-medium border border-hairline/80 shadow-2xs'
-                          : 'text-body hover:text-ink hover:bg-surface-cream-strong/60 border border-transparent'
+                          ? 'bg-surface-cream-strong text-ink font-normal border border-hairline/80 shadow-2xs'
+                          : 'text-body hover:text-ink hover:bg-surface-cream-strong/60 border border-transparent font-normal'
                       }`}
                       onClick={() => !isConfirmingDelete && onSelectConversation(conv.id)}
                     >
@@ -196,7 +202,7 @@ export default function ChatHistorySidebar({
                           <MessageSquare size={13} className="shrink-0 text-muted-soft group-hover:text-ink transition-colors" />
                         )}
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-xs tracking-tight font-sans" title={conv.title}>
+                          <p className="truncate text-xs tracking-tight font-sans font-normal" title={conv.title}>
                             {conv.title || 'Percakapan Tanpa Judul'}
                           </p>
                         </div>
@@ -293,6 +299,7 @@ export default function ChatHistorySidebar({
           )}
         </div>
       )}
-    </aside>
+      </div>
+    </motion.aside>
   );
 }

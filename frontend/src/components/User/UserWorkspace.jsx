@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
   Check, Loader2, LogOut, Send, Bot, RotateCcw,
@@ -513,34 +513,44 @@ export default function UserWorkspace({ user, onLogout }) {
       </header>
 
       {/* Main Container: Sidebar Riwayat (Kiri) + Area Chat (Kanan) */}
-      <div className="flex-1 flex overflow-hidden">
-        <ChatHistorySidebar
-          conversations={conversations}
-          activeId={activeConversationId}
-          onSelectConversation={handleSelectConversation}
-          onNewChat={handleNewChat}
-          onDeleteConversation={handleDeleteConversation}
-          onClearAll={handleClearAllConversations}
-          isOpen={sidebarOpen}
-          onToggleOpen={() => setSidebarOpen((prev) => !prev)}
-        />
+      <div className="flex-1 flex overflow-hidden relative">
+        <AnimatePresence initial={false}>
+          {sidebarOpen && (
+            <ChatHistorySidebar
+              conversations={conversations}
+              activeId={activeConversationId}
+              onSelectConversation={handleSelectConversation}
+              onNewChat={handleNewChat}
+              onDeleteConversation={handleDeleteConversation}
+              onClearAll={handleClearAllConversations}
+              isOpen={sidebarOpen}
+              onToggleOpen={() => setSidebarOpen(false)}
+            />
+          )}
+        </AnimatePresence>
 
         <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden relative">
           {/* Floating Edge Handle: Membuka sidebar dari tepi layar tanpa menggeser navbar (Gaya Linear & Cursor) */}
-          {!sidebarOpen && (
-            <button
-              type="button"
-              onClick={() => setSidebarOpen(true)}
-              title="Buka Riwayat Percakapan"
-              aria-label="Buka Riwayat Percakapan"
-              className="absolute left-0 top-3 z-30 group flex items-center gap-2 pl-2.5 pr-3.5 py-1.5 bg-surface-card hover:bg-surface-cream-strong border-y border-r border-hairline rounded-r-xl shadow-xs hover:shadow-sm text-muted hover:text-ink transition-all cursor-pointer select-none"
-            >
-              <PanelLeftOpen size={14} className="text-primary group-hover:scale-110 transition-transform" />
-              <span className="text-xs font-sans font-medium text-ink tracking-tight">
-                Riwayat Chat
-              </span>
-            </button>
-          )}
+          <AnimatePresence>
+            {!sidebarOpen && (
+              <motion.button
+                initial={{ x: -30, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: -30, opacity: 0 }}
+                transition={{ duration: 0.2, ease: 'easeOut' }}
+                type="button"
+                onClick={() => setSidebarOpen(true)}
+                title="Buka Riwayat Percakapan"
+                aria-label="Buka Riwayat Percakapan"
+                className="absolute left-0 top-3 z-30 group flex items-center gap-2 pl-2.5 pr-3 py-1.5 bg-surface-card hover:bg-surface-cream-strong border-y border-r border-hairline rounded-r-xl shadow-xs hover:shadow-sm text-body hover:text-ink transition-colors cursor-pointer select-none"
+              >
+                <PanelLeftOpen size={14} className="text-primary group-hover:scale-105 transition-transform" />
+                <span className="text-xs font-sans font-normal text-body hover:text-ink tracking-tight">
+                  Riwayat Chat
+                </span>
+              </motion.button>
+            )}
+          </AnimatePresence>
 
           {/* Area percakapan */}
           <main className="flex-1 overflow-y-auto">
