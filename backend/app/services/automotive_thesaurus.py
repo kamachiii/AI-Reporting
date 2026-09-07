@@ -49,22 +49,20 @@ AUTOMOTIVE_DOMAIN_RULES = [
         ]
     },
     {
-        "category": "komparasi_divisi_3s",
-        "title": "Aturan Komparasi Performa Multi-Divisi (3S: Sales, Service, Sparepart)",
+        "category": "komparasi_performa_tahunan",
+        "title": "Aturan Komparasi Performa & Tren Operasional Tahunan",
         "keywords": [
-            "divisi", "peforma", "performa", "antar divisi", "tiap divisi", "setiap divisi",
-            "per divisi", "semua divisi", "3s", "sales service sparepart", "komparasi divisi",
-            "performa tahunan", "kinerja divisi"
+            "peforma", "performa", "komparasi", "tahunan", "kinerja", "tren tahunan",
+            "performa tahunan", "rekap tahunan", "divisi", "tiap divisi", "antar divisi"
         ],
         "primary_tables": ["untt_penjualan", "srvt_wo", "srvt_wodetail", "srvt_stockparts"],
         "guidelines": [
-            "Dalam ekosistem dealer otomotif 3S, terdapat 3 pilar divisi utama:",
-            "  1. Divisi Penjualan / Sales (Unit Kendaraan): 'untt_penjualan' (omzet: SUM(hjakhir), unit: COUNT(nomor), filter batal = false AND retur = false).",
-            "  2. Divisi Servis Bengkel / Service (Jasa & Perbaikan): 'srvt_wo' (omzet: SUM(totalestimasibiaya), unit entry: COUNT(nomor), filter batal = false).",
-            "  3. Divisi Suku Cadang / Sparepart: 'srvt_wodetail' (penjualan suku cadang bengkel: SUM(part) WHERE part > 0) atau 'srvt_stockparts' untuk inventori fisik gudang.",
-            "Pertanyaan yang meminta komparasi performa antar divisi dalam tiap tahunnya TIDAK BISA hanya dijawab dengan data penjualan unit.",
-            "Data harus disajikan komprehensif mencakup pilar Penjualan Unit Kendaraan, Jasa Servis Bengkel, dan Penjualan Suku Cadang.",
-            "Untuk agregasi per tahun gunakan EXTRACT(YEAR FROM tanggal) atau DATE_TRUNC('year', tanggal)."
+            "Untuk pertanyaan yang meminta perbandingan performa tahunan atau komparasi antar fungsi/divisi:",
+            "  - Sajikan data dalam satu kueri terpadu yang menggabungkan metrik utama per tahun (EXTRACT(YEAR FROM tanggal)).",
+            "  - Metrik penjualan unit: dari 'untt_penjualan' (omzet: SUM(hjakhir), unit: COUNT(nomor), filter batal = false AND retur = false).",
+            "  - Metrik servis bengkel: dari 'srvt_wo' (omzet: SUM(totalestimasibiaya), kunjungan: COUNT(nomor), filter batal = false).",
+            "  - Metrik suku cadang: dari 'srvt_wodetail' (penjualan part: SUM(part) WHERE part > 0).",
+            "Hasil disajikan langsung sebagai satu tabel komparasi tahunan yang rapi dan mudah dibaca."
         ]
     },
     {

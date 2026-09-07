@@ -17,10 +17,8 @@ FANOUT_RULES: List[Dict[str, Any]] = [
     {
         "category": "penjualan",
         "trigger_patterns": [
-            r"\b(?:penjualan|omzet|omset|pendapatan|revenue|performa|peforma|transaksi)\b",
-            r"\b(?:berapa|total|data|rekap|ringkasan|bandingkan)\s+(?:penjualan|omzet|omset|pendapatan|performa|peforma|divisi)\b",
-            r"\b(?:tiap|setiap|antar|per|semua|lintas)\s+divisi\b",
-            r"\b(?:divisi)\b",
+            r"\b(?:penjualan|omzet|omset|pendapatan|revenue|transaksi)\b",
+            r"\b(?:berapa|total|data|rekap|ringkasan)\s+(?:penjualan|omzet|omset|pendapatan)\b",
         ],
         # Jika salah satu qualifier ini ada, pertanyaan SUDAH SPESIFIK -> Jalankan single query normal!
         "qualifiers": [

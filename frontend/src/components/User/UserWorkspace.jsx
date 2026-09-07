@@ -49,10 +49,10 @@ const PROMPT_SUGGESTIONS = [
     desc: 'Inventori part, slow vs fast-moving',
   },
   {
-    category: 'Komparasi Lintas Divisi',
+    category: 'Komparasi Kinerja Tahunan',
     icon: BarChart3,
-    query: 'Bandingkan performa antar divisi tahun ini',
-    desc: 'Sinergi pilar 3S (Sales, Service, Sparepart)',
+    query: 'Bandingkan performa penjualan unit per tahun',
+    desc: 'Perbandingan performa operasional tahun ke tahun',
   },
 ];
 

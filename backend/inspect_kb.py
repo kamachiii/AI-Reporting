@@ -49,10 +49,26 @@ async def main():
             categories[prefix] = categories.get(prefix, 0) + 1
         print("Table prefixes in tenant DB:", categories)
 
+        cols = await tconn.fetch("""
+            SELECT table_name, column_name, data_type 
+            FROM information_schema.columns 
+            WHERE column_name ILIKE '%divisi%' AND table_schema = 'public'
+            ORDER BY table_name, column_name
+        """)
+        print("=== COLUMNS CONTAINING DIVISI ===")
+        for c in cols:
+            print(f"{c['table_name']}.{c['column_name']} ({c['data_type']})")
+
+        tbls = await tconn.fetch("""
+            SELECT table_name FROM information_schema.tables 
+            WHERE table_schema = 'public' AND table_name ILIKE '%divisi%'
+        """)
+        print("\n=== TABLES CONTAINING DIVISI ===")
+        for t in tbls:
+            print(t['table_name'])
+
         queries = [
             ("Q1: Komparasi Divisi 3S", """
-                SELECT 
-                    tahun,
                     COALESCE(SUM(omzet_unit), 0) AS omzet_penjualan_unit,
                     COALESCE(SUM(unit_terjual), 0) AS volume_unit_terjual,
                     COALESCE(SUM(omzet_servis), 0) AS omzet_servis_bengkel,

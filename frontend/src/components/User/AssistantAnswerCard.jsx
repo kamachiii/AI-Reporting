@@ -667,7 +667,7 @@ export default function AssistantAnswerCard({
           </div>
         )}
 
-        {/* Domain Tab Bar (Pilar 3S Multi-Table) - HANYA tampil jika minimal 2 tabel memiliki data */}
+        {/* Multi-Domain Tab Bar - HANYA tampil jika minimal 2 tabel memiliki data */}
         {isMultiTab && (
           <div className="pt-1">
             <div className="flex items-center gap-1.5 p-1 bg-surface-card rounded-md border border-hairline overflow-x-auto">

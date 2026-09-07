@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 GOLDEN_TEMPLATES = [
     {
         "question": "Bandingkan performa tiap divisi dalam tiap tahunnya",
-        "category": "komparasi_divisi_3s",
-        "title": "Komparasi Performa Tahunan 3 Pilar Divisi Dealer (Sales, Service, Sparepart)",
+        "category": "komparasi_performa_tahunan",
+        "title": "Komparasi Performa Tahunan Operasional",
         "tables": ["untt_penjualan", "srvt_wo", "srvt_wodetail"],
         "sql": """SELECT 
     tahun,
@@ -320,7 +320,7 @@ TENANT_KB_TST_01 = {
     "glossary": [
         {
             "istilah": "performa divisi",
-            "arti": "Komparasi performa 3S dealer: Unit Penjualan (untt_penjualan), Servis Bengkel (srvt_wo), dan Suku Cadang Bengkel (srvt_wodetail.part > 0)"
+            "arti": "Performa operasional gabungan: Penjualan Unit (untt_penjualan), Servis Bengkel (srvt_wo), dan Suku Cadang Bengkel (srvt_wodetail.part > 0)"
         },
         {
             "istilah": "unit entry",
