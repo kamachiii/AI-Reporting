@@ -295,14 +295,17 @@ Salah satu kelemahan terbesar LLM adalah **halusinasi angka** saat meringkas dat
 
 ## 8. Sisa Kerja & Roadmap Pengembangan Lanjutan
 
-Bagi programmer yang melanjutkan repo ini, berikut adalah daftar fitur yang sudah dirancang pada arsitektur v2 namun belum diimplementasikan:
+Fitur yang telah selesai diimplementasikan meliputi:
+- **Auto-Adaptive Visual Charts (0-Token)**: Grafik Recharts interaktif dinamis (Bar/Line toggle).
+- **Ekspor Excel Berformat & Grafik Asli (`openpyxl`)**: Unduh file `.xlsx` akuntansi dengan native embedded charts.
+- **Interactive Clarification Loop (0-Token)**: Dialog klarifikasi instan pra-eksekusi untuk istilah ambigu (misal Oli Unit vs Sparepart).
+- **Arsitektur Proaktif Multi-Table 3S (Query Fan-Out)**: Analisis komprehensif Sales, Service, Sparepart dalam 1 kueri paralel.
+- **Admin AI Metrics & Quota Management**: Dashboard analitik utilisasi token, tren 7-hari, dan kontrol kuota per-cabang real-time.
 
-1. **Fitur Ekspor Laporan (F5)**:
-   - Membuat endpoint backend untuk mengekspor tabel hasil query AI ke format **Excel (`.xlsx`)**, **CSV**, dan cetak rapi **PDF**.
-   - Menambahkan tombol ekspor pada komponen `AssistantAnswerCard.jsx` di frontend.
-2. **Interactive Clarification Loop (Human-in-the-Loop Dialog)**:
-   - Jika Planner LLM menemukan ambiguitas istilah yang belum terdaftar di Knowledge Base (misal: "harga total" punya beberapa kemungkinan kolom), sistem menahan eksekusi dan mengembalikan response `status: "needs_clarification"`.
-   - Frontend merender bubble interaktif berisi opsi klarifikasi agar user memilih sebelum query dibuat.
-3. **Hardening Multi-Instance & Rate Limiting (F6)**:
-   - Mengganti in-memory rate limiter dengan Redis-backed rate limiting untuk kesiapan deployment multi-replica (horizontal scaling).
-   - Menegakkan kuota token harian per-tenant menggunakan kolom yang sudah tersedia pada tabel `tenants.daily_token_quota`.
+Daftar backlog / opsi pengembangan berikutnya:
+1. **Dedicated Executive Dashboard Page**:
+   - Halaman khusus dashboard eksekutif (grid widget 32 KPI dealer dari acuan file Excel `20260327 - Design Dashboard.xlsx`) yang langsung menyajikan metrik tanpa harus mengajukan pertanyaan chat.
+2. **Ekspor PDF Laporan Eksekutif Siap Cetak (Sisa F5)**:
+   - Fitur ekspor/cetak laporan PDF formal dengan kop dealer, ringkasan naratif, tabel angka, dan tanda tangan pejabat dealer.
+3. **Hardening Multi-Instance Skala Enterprise (Sisa F6)**:
+   - Redis Distributed Rate Limiter & Distributed Schema Cache untuk kesiapan deployment multi-replica (horizontal scaling).

@@ -391,18 +391,21 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                 ]
                 tab_results = await asyncio.gather(*tasks)
 
-                durasi_ms = int((time.monotonic() - t0) * 1000)
-                ringkasan_multi = susun_ringkasan_eksekutif_multi(tab_results, question)
+                # Filter hanya tab yang memiliki data nyata (>0 baris)
+                tabs_with_data = [t for t in tab_results if (t.get("row_count") or len(t.get("rows") or [])) > 0]
+                has_multiple_tabs = len(tabs_with_data) > 1
+                active_tabs = tabs_with_data if tabs_with_data else tab_results
+                default_tab = active_tabs[0]
 
-                # Tab aktif default adalah tab pertama yang memiliki rows, atau tab pertama
-                default_tab = next((t for t in tab_results if t["rows"]), tab_results[0])
+                durasi_ms = int((time.monotonic() - t0) * 1000)
+                ringkasan_multi = susun_ringkasan_eksekutif_multi(active_tabs, question)
 
                 response = {
                     "source": "vanna",
                     "confidence": "A",
                     "question": question,
-                    "is_multi_tab": True,
-                    "tabs": tab_results,
+                    "is_multi_tab": has_multiple_tabs,
+                    "tabs": active_tabs,
                     "sql": default_tab["sql"],
                     "params": [],
                     "columns": default_tab["columns"],
@@ -417,7 +420,7 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                         "Tampilkan rincian transaksi terbesar dari divisi utama",
                         "Tampilkan tren bulanan untuk divisi ini"
                     ],
-                    "metode": "fanout_multi_tab",
+                    "metode": "fanout_multi_tab" if has_multiple_tabs else "fanout_single_tab",
                     "allow_explain": True
                 }
 

@@ -122,17 +122,18 @@ user (allowed_branches) → /chat/query
 Detail kontrak & keputusan: `PROGRESS §3a–3g`.
 
 ## 7. Sisa kerja / keputusan terbuka
-
-- **F5** — mode laporan + export PDF (belum mulai).
-- **F6** — hardening: kuota token harian per tenant (kolom sudah ada), Redis rate limit
-  (rate limit sekarang in-memory single-instance), cache skema, metrik mingguan ke admin.
+ 
+- **Backlog Tertunda (Tercatat untuk Dilanjutkan)**:
+  - **Dedicated Executive Dashboard Page**: Halaman KPI visual 32 chart otomatis tanpa kueri chat (berdasarkan acuan `20260327 - Design Dashboard.xlsx`).
+  - **F5 Mode Laporan Eksekutif PDF**: Fitur cetak/ekspor PDF formal bertandatangan (ekspor Excel `.xlsx` akuntansi + chart native sudah tuntas di `7e90f73`).
+  - **F6 Hardening Skala Besar**: Redis Distributed Rate Limiter & Distributed Schema Cache (penegakan kuota token harian per tenant & dashboard metrik admin sudah tuntas di `94da6b0`).
 - Keputusan terbuka desain: `PERANCANGAN-PIPELINE-AI-v2.md` §11 (normalisasi replay
   masih longgar: lowercase+strip tanda baca — pertanyaan beda kapitalisasi-angka dianggap
   beda; retensi; number check numerik).
 - Kebersihan repo (butuh approval user): `git rm --cached frontend/test-results/.last-run.json`
   (ter-track padahal di-gitignore, selalu muncul modified); 3 folder `backup_*/` di root
   sebaiknya dipindah keluar repo; `backend/backups/` berisi dump pg_dump yang menumpuk.
-- README perlu sinkronisasi endpoint baru (KB, tier2, eval, chat).
+- README perlu sinkronisasi endpoint baru (KB, tier2, eval, chat, export-excel, ai-metrics).
 
 ## 8. Jebakan yang pernah nyata (detail & pelajaran: PROGRESS §4)
 
@@ -148,4 +149,4 @@ Detail kontrak & keputusan: `PROGRESS §3a–3g`.
 ---
 
 *File ini di-maintain seperti kode: ubah lewat commit, jangan edit diam-diam di production
-branch. Terakhir diperbarui: 2026-09-02 (setelah F2.7 eval harness — head `2466052`).*
+branch. Terakhir diperbarui: 2026-09-07 (setelah Opsi 5 Admin Metrics & Quota — commit `94da6b0`).*

@@ -779,6 +779,26 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
     - Dashboard memuat data 222 pertanyaan nyata, area chart 7 hari merender data riil.
     - Update kuota cabang `TST_01` dari 50.000 ke 100.000 token teruji sukses secara real-time.
 
+## 3x. Optimasi UI Multi-Table 3S: Tab Bar Dinamis & Pembersihan Tab Kosong (0 Baris)
+
+- **Latar Belakang & Masalah Pengguna**:
+  Pada kueri Fan-Out multi-domain 3S, tidak semua kueri menghasilkan data di ketiga divisi (*Unit Kendaraan*, *Jasa Servis Bengkel*, *Suku Cadang & Sparepart*). Sebelumnya, sistem tetap memunculkan tab bar dengan tab bertuliskan `(0)` baris meskipun hanya 1 divisi yang memiliki data (misal: Unit Kendaraan memiliki 11 baris, sedangkan Jasa Servis dan Suku Cadang 0 baris). Hal ini membingungkan eksekutif karena tab bar memakan ruang layar dan menampilkan tab kosong yang tidak relevan.
+- **Solusi & Implementasi Teknis**:
+  1. **Frontend Client-Side Filtering (`AssistantAnswerCard.jsx`)**:
+     - Menambahkan filter reaktif `validTabs` yang hanya menyaring tab dengan `row_count > 0` atau `rows.length > 0`.
+     - Variabel `isMultiTab` diatur secara ketat: `validTabs.length > 1`.
+     - Tab bar HANYA dirender jika `isMultiTab === true` (artinya ada minimal 2 tabel/divisi yang memiliki data riil).
+     - Jika hanya 1 tabel yang memiliki data (`validTabs.length === 1`), tab bar sepenuhnya **disembunyikan** (hilang), dan konten tabel/grafik/ekspor Excel langsung otomatis mengikat ke `validTabs[0]`.
+     - Sanitasi riwayat chat lama (*backward compatible*): kueri historis yang tersimpan di database dengan status `is_multi_tab: true` dan tab 0 baris secara otomatis dibersihkan di sisi tampilan pengguna tanpa perlu migrasi DB.
+  2. **Backend Optimization (`vanna_engine.py` & `fanout_engine.py`)**:
+     - `tabs_with_data` menyaring hasil eksekusi paralel hanya untuk tab yang memiliki baris data.
+     - Mengatur flag `is_multi_tab: False` dan `metode: "fanout_single_tab"` jika data hanya ditemukan pada $\le 1$ divisi.
+     - `susun_ringkasan_eksekutif_multi` menyesuaikan narasi eksekutif secara adaptif: jika hanya 1 divisi yang ada, narasi difokuskan pada divisi tersebut tanpa menyebutkan divisi kosong lainnya.
+- **Hasil Verifikasi**:
+  - Frontend lint: `npm run lint` lolos 100% (0 error, 0 warning pada komponen).
+  - Frontend build: `npm run build` lolos (exit code 0).
+  - Backend tests: `pytest tests/ -q` lolos 100% (**554 passed in 41.27s**).
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -834,6 +854,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Auto-Adaptive Visual Charts (Grafik Visual Otomatis 0-Token)** — SELESAI (lihat §3u).
 - [x] **Ekspor Excel Berformat & Grafik Native + Pertanyaan Emas Dealer (Opsi 1)** — SELESAI (lihat §3v).
 - [x] **Metrik Utilisasi AI Admin & Skenario Live Demo Sidang PKL (Opsi 5)** — SELESAI (lihat §3w).
+- [x] **Optimasi UI Multi-Table 3S: Tab Bar Dinamis & Pembersihan Tab Kosong** — SELESAI (lihat §3x).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. **Dedicated Executive Dashboard Page**: Halaman KPI visual 32 chart otomatis tanpa kueri chat (acuan file Excel).
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.

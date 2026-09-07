@@ -241,7 +241,11 @@ def susun_ringkasan_eksekutif_multi(domain_results: List[Dict[str, Any]], questi
     """Menyusun narasi eksekutif terpadu dari hasil eksekusi multi-tab secara deterministik (0 token)."""
     parts = []
     
-    for item in domain_results:
+    # Hanya sertakan domain yang memiliki data (bila ada minimal 1 domain berisi data)
+    valid_items = [d for d in domain_results if d.get("row_count", 0) > 0 or d.get("rows")]
+    target_items = valid_items if valid_items else domain_results
+    
+    for item in target_items:
         title = item.get("title", "Divisi")
         rows = item.get("raw_records", []) or item.get("rows", [])
         columns = item.get("columns", [])
@@ -277,4 +281,8 @@ def susun_ringkasan_eksekutif_multi(domain_results: List[Dict[str, Any]], questi
             parts.append(f"{title}: {len(rows)} baris data")
 
     ringkasan_teks = " • ".join(parts)
-    return f"Ringkasan performa dealer mencakup seluruh divisi operasional: {ringkasan_teks}."
+    if len(valid_items) > 1:
+        return f"Ringkasan performa dealer mencakup seluruh divisi operasional: {ringkasan_teks}."
+    elif len(valid_items) == 1:
+        return f"Hasil analitik {valid_items[0].get('title', 'data')}: {ringkasan_teks}."
+    return f"Ringkasan performa dealer: {ringkasan_teks}."

@@ -273,8 +273,28 @@ export default function AssistantAnswerCard({
   const [activeDomainTab, setActiveDomainTab] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
 
-  const isMultiTab = Boolean(answer.is_multi_tab && Array.isArray(answer.tabs) && answer.tabs.length > 1);
-  const currentTab = (isMultiTab && answer.tabs[activeDomainTab]) ? answer.tabs[activeDomainTab] : answer;
+  // Filter hanya tab yang memiliki data nyata (>0 baris)
+  const validTabs = useMemo(() => {
+    if (!answer.is_multi_tab || !Array.isArray(answer.tabs)) return [];
+    return answer.tabs.filter((tab) => {
+      const rowCount = tab.row_count ?? tab.rows?.length ?? 0;
+      return rowCount > 0;
+    });
+  }, [answer.is_multi_tab, answer.tabs]);
+
+  // Bar tab HANYA aktif jika ada minimal 2 tabel/domain yang memiliki data
+  const isMultiTab = validTabs.length > 1;
+
+  // Jika hanya ada 1 tab berisi data, langsung pakai tab tersebut; jika >= 2 pakai tab yang diklik user
+  const currentTab = useMemo(() => {
+    if (isMultiTab) {
+      return validTabs[activeDomainTab] || validTabs[0];
+    }
+    if (validTabs.length === 1) {
+      return validTabs[0];
+    }
+    return (answer.tabs && answer.tabs[0]) || answer;
+  }, [isMultiTab, validTabs, activeDomainTab, answer]);
 
   const activeRows = useMemo(() => currentTab.rows || [], [currentTab.rows]);
   const activeColumns = useMemo(() => currentTab.columns || [], [currentTab.columns]);
@@ -458,12 +478,12 @@ export default function AssistantAnswerCard({
           </div>
         )}
 
-        {/* Domain Tab Bar (Pilar 3S Multi-Table) */}
+        {/* Domain Tab Bar (Pilar 3S Multi-Table) - HANYA tampil jika minimal 2 tabel memiliki data */}
         {isMultiTab && (
           <div className="pt-1">
             <div className="flex items-center gap-1.5 p-1 bg-surface-soft/80 rounded-xl border border-hairline overflow-x-auto">
-              {answer.tabs.map((tab, idx) => {
-                const isActive = activeDomainTab === idx;
+              {validTabs.map((tab, idx) => {
+                const isActive = (activeDomainTab >= validTabs.length ? 0 : activeDomainTab) === idx;
                 return (
                   <button
                     key={tab.id || idx}
