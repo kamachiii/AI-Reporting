@@ -729,9 +729,15 @@ Hasil Data (sampel 5 baris pertama):
 {json.dumps(sample_rows, default=str)}
 Total Baris: {len(rows)}
 
-Sebagai senior business analyst dealer, buatkan analisis naratif bisnis yang mendalam, profesional, dan mudah dipahami dalam bahasa Indonesia untuk membantu manajemen dealer mengambil keputusan.
+Sebagai senior business analyst dealer, buatkan analisis naratif bisnis yang mendalam, profesional, dan SANGAT MUDAH DIBACA dalam bahasa Indonesia untuk membantu manajemen dealer mengambil keputusan.
+
+PANDUAN FORMAT TAMPILAN:
+- JANGAN menuliskan satu paragraf panjang yang padat tanpa jeda baris.
+- Pisahkan penjelasan menjadi 2-3 paragraf pendek dengan baris baru ganda (\\n\\n).
+- Jika ada poin rekomendasi tindakan, awali dengan 'Rekomendasi:' pada paragraf terpisah dan gunakan poin bertitik (• ) agar mudah dicerna eksekutif.
+
 Format respons HARUS berupa JSON murni dengan kunci 'narasi':
-{{"narasi": "tulis analisis naratif di sini..."}}"""
+{{"narasi": "tulis analisis naratif terstruktur di sini..."}}"""
 
     raw_output = await panggil_fn(
         "You are a senior business data analyst. Always respond in pure JSON format with a 'narasi' key.",

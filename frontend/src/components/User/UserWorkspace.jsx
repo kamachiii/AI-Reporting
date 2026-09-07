@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
-  Check, Loader2, LogOut, Send,
+  Check, Loader2, LogOut, Send, Bot,
   PanelLeftOpen, MessageSquarePlus,
   Car, Wrench, Package, BarChart3, ShieldCheck, ArrowRight,
 } from 'lucide-react';
@@ -217,8 +217,8 @@ function MessageBubble({
       className="py-2 w-full space-y-1.5"
     >
       <div className="flex items-center gap-2 text-[11px] text-muted-soft font-medium pl-0.5">
-        <div className="w-4 h-4 rounded-sm bg-surface-dark text-on-dark flex items-center justify-center font-serif font-medium text-[9px] select-none">
-          AI
+        <div className="w-5 h-5 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0 border border-primary/20">
+          <Bot size={13} />
         </div>
         <span className="font-medium text-ink">Intelijen Dealer AI</span>
         <span className="text-hairline">•</span>
@@ -465,15 +465,15 @@ export default function UserWorkspace({ user, onLogout }) {
               </button>
             )}
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-md bg-surface-dark text-on-dark flex items-center justify-center font-serif font-medium text-xs tracking-wider shadow-2xs border border-surface-dark/90 select-none">
-                DMS
+              <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center border border-primary/20 shrink-0 shadow-2xs">
+                <Bot size={18} />
               </div>
               <div>
-                <h1 className="font-serif text-base sm:text-lg text-ink font-normal tracking-tight leading-none">
+                <h1 className="font-serif text-base sm:text-lg text-ink font-medium tracking-tight leading-none">
                   DMS AI Platform
                 </h1>
                 <p className="text-[11px] text-muted-soft mt-0.5 font-sans">
-                  Asisten Intelijen Basis Data Dealer
+                  Asisten Laporan Dealer
                 </p>
               </div>
             </div>

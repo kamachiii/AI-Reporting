@@ -258,6 +258,90 @@ function CustomChartTooltip({ active, payload, label }) {
   return null;
 }
 
+/** Format narasi analisis eksekutif agar terstruktur rapi, tidak menjadi semut berbaris. */
+function FormattedExecutiveAnalysis({ text }) {
+  if (!text) return null;
+
+  // Pisahkan teks berdasarkan baris baru ganda bila ada
+  let paragraphs = text
+    .split(/\n\n+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  // Jika AI mengembalikan 1 paragraf panjang tanpa \n\n (teks padat berbaris):
+  if (paragraphs.length === 1 && paragraphs[0].length > 160) {
+    const splitRegex = /(?=\b(?:Namun,|Jika angka nol|Jika hanya masalah|Jika benar tidak|Langkah pertama|Rekomendasi:)\b)/g;
+    const parts = paragraphs[0].split(splitRegex).map((p) => p.trim()).filter(Boolean);
+    if (parts.length > 1) {
+      paragraphs = parts;
+    }
+  }
+
+  return (
+    <div className="space-y-3 text-sm text-body leading-relaxed font-sans">
+      {paragraphs.map((para, idx) => {
+        const isRekomendasi = /^Rekomendasi:/i.test(para);
+        const isList = para.split('\n').some((l) => /^[•\-*]|\d+\.\s/.test(l.trim()));
+
+        if (isRekomendasi) {
+          const rawContent = para.replace(/^Rekomendasi:\s*/i, '');
+          const bulletItems = rawContent
+            .split(/(?:\r?\n|(?<=[^\s])\s*•|\s+•\s+)/)
+            .map((b) => b.replace(/^[•\-*]\s*/, '').trim())
+            .filter(Boolean);
+
+          return (
+            <div
+              key={idx}
+              className="p-4 rounded-md bg-primary/5 border-l-2 border-primary border-y border-r border-hairline/60 space-y-2.5 mt-2"
+            >
+              <div className="text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-1.5">
+                <Compass size={13} />
+                <span>Rekomendasi Tindakan Strategis</span>
+              </div>
+              {bulletItems.length > 1 ? (
+                <ul className="space-y-1.5 pl-0.5">
+                  {bulletItems.map((item, bIdx) => (
+                    <li key={bIdx} className="flex items-start gap-2 text-sm text-ink">
+                      <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0 mt-2" />
+                      <span className="leading-relaxed">{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-ink text-sm leading-relaxed">{rawContent}</p>
+              )}
+            </div>
+          );
+        }
+
+        if (isList) {
+          const lines = para.split('\n').map((l) => l.trim()).filter(Boolean);
+          return (
+            <ul key={idx} className="space-y-1.5 pl-1">
+              {lines.map((line, lIdx) => {
+                const cleaned = line.replace(/^[•\-*]\s*|\d+\.\s*/, '');
+                return (
+                  <li key={lIdx} className="flex items-start gap-2 text-sm text-body">
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary/70 shrink-0 mt-2" />
+                    <span>{cleaned}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          );
+        }
+
+        return (
+          <p key={idx} className="text-body leading-relaxed">
+            {para}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function AssistantAnswerCard({
   answer,
   question,
@@ -547,11 +631,11 @@ export default function AssistantAnswerCard({
 
         {/* Ringkasan Eksekutif Callout */}
         {answer.ringkasan && (
-          <div className="border-l-2 border-primary pl-3.5 py-1.5 bg-surface-card/50 rounded-r-md">
-            <div className="text-[10px] font-mono text-muted uppercase tracking-wider mb-0.5">
+          <div className="border-l-2 border-primary pl-3.5 py-2 bg-surface-card/60 rounded-r-md">
+            <div className="text-[10px] font-mono text-muted uppercase tracking-wider mb-1">
               Ringkasan Eksekutif
             </div>
-            <p className="font-serif italic text-[15px] sm:text-[16px] leading-relaxed text-ink font-normal">
+            <p className="font-sans text-sm sm:text-[15px] leading-relaxed text-ink font-medium">
               {bersihkanRingkasan(answer.ringkasan)}
             </p>
           </div>
@@ -572,14 +656,14 @@ export default function AssistantAnswerCard({
           </div>
         )}
 
-        {/* Hasil Narasi Analisis Eksekutif On-Demand */}
+        {/* Hasil Narasi Analisis Eksekutif On-Demand (Terformat rapi tanpa semut berbaris) */}
         {penjelasan && (
-          <div className="bg-surface-card/70 border border-hairline rounded-lg p-3.5 text-xs leading-relaxed text-ink space-y-1.5 animate-fadeIn">
-            <div className="flex items-center gap-1.5 text-ink font-medium text-[11px] uppercase tracking-wider">
+          <div className="bg-surface-card/70 border border-hairline rounded-lg p-4 space-y-3 animate-fadeIn">
+            <div className="flex items-center gap-1.5 text-ink font-medium text-xs uppercase tracking-wider border-b border-hairline/60 pb-2">
               <Lightbulb size={13} className="text-primary" />
               <span>Analisis Eksekutif Data</span>
             </div>
-            <p className="whitespace-pre-wrap text-body font-sans leading-relaxed">{penjelasan}</p>
+            <FormattedExecutiveAnalysis text={penjelasan} />
           </div>
         )}
 

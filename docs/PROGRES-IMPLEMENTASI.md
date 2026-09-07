@@ -65,7 +65,9 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **Penyempurnaan Analisis Multi-Divisi** | selesai | LIVE | Koreksi skema riil dealer (srvt/pwt1/inv1), komparasi sejajar, smart context note, de-duplikasi chip; 557 test backend lulus |
 | **Fix Format Mata Uang vs Kuantitas & Total Transaksi** | selesai | LIVE | Perbaikan deteksi kolom: hapus total_transaksi dari UANG_KEYWORDS, tambahkan kuantiti, transaksi, unit ke KUANTITAS_KEYWORDS di UI, smartInsights, dan Excel exporter; 557 test lulus |
 | **Manajemen Riwayat Chat & Tabel Pintar** | selesai | `348ef57` | Sidebar riwayat multi-sesi (+ Chat Baru, ganti sesi, hapus riwayat per sesi / semua); Tabel cerdas di kartu jawaban (search filter, sorting kolom asc/desc, paginasi mini 10/25/50/semua, salin tabel TSV/Excel); Koreksi skema bengkel riil srvt_wo & srvt_wodetail (138k & 927k rows); Ekstraksi robust JSON SQL; 558 test lulus |
-| **Redesign Anti-AI-Slop & Executive Command Deck** | selesai | LIVE | Instalasi 2 skill baru (anti-ai-slop-design & web-design-guidelines); Eliminasi pola AI slop (bot avatar raksasa, badge spam 0-token, tombol warna-warni inkonsisten); Command Deck 4 kartu analitis dealer; Precision Dossier & Tabular Numbers; 558 test lulus, lint 0 error, build 0 error |
+| **Redesign Anti-AI-Slop & Executive Command Deck** | selesai | `0d6b68e` | Instalasi 2 skill baru (anti-ai-slop-design & web-design-guidelines); Eliminasi pola AI slop (bot avatar raksasa, badge spam 0-token, tombol warna-warni inkonsisten); Command Deck 4 kartu analitis dealer; Precision Dossier & Tabular Numbers; 558 test lulus, lint 0 error, build 0 error |
+| **Penerapan Claude Editorial Design System** | selesai | `d88610c` | Penerapan design system DESIGN-claude.md: palet terracotta #cc785c & warm canvas #faf9f5, tipografi Cormorant Garamond & Inter, Claude code-window-card dengan Apple window controls, category tabs, and active state cream; 558 test lulus, lint 0 error, build 0 error |
+| **Restorasi Icon Bot Warm Coral & Struktur Narasi Analisis** | selesai | LIVE | Mengembalikan icon Bot warm coral di header & message bubble (menghilangkan kotak hitam [DMS] & [AI]), font ringkasan sans-serif tajam, dan pemecahan narasi analisis eksekutif menjadi paragraf terstruktur + callout rekomendasi tanpa efek semut berbaris |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -976,6 +978,31 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Visual Browser Verification via Chrome DevTools MCP:
     - Terverifikasi pada viewport desktop nyata di `http://localhost:5173/`.
     - Tangkapan layar hero, dossier eksekutif, dark code window card, dan table view membuktikan antarmuka editorial hangat dan bebas AI-slop secara nyata.
+
+### 3ab. Restorasi Icon Bot Warm Coral, Tipografi Ringkasan, & Struktur Analisis Narasi (2026-09-07)
+
+- **Masalah yang Diatasi**:
+  1. **Gambar 1 (Top Navigation Brand)**: Kotak hitam monogram `[DMS]` membuat header terasa kaku dan kehilangan ikonografi ramah asisten bot.
+  2. **Gambar 2 (Assistant Message Header)**: Monogram hitam `[AI]` dipertanyakan user karena menggunakan warna hitam solid dan bukan icon bot.
+  3. **Gambar 3 (Keterbacaan Ringkasan & Analisis "Semut Berbaris")**: Font ringkasan Cormorant Garamond italic sulit dibaca cepat di monitor resolusi standar, dan teks penjelasan naratif eksekutif berupa satu paragraf raksasa tanpa jeda baris yang padat seperti semut berbaris.
+
+- **Solusi & Perubahan**:
+  1. **Restorasi Icon Bot & Brand Header (`UserWorkspace.jsx` & `LoginModal.jsx`)**:
+     - Menggantikan monogram kotak hitam `[DMS]` di top-nav dan login dengan kontainer icon `Bot` (`lucide-react`) hangat berlatar coral lembut (`bg-primary/10 text-primary border border-primary/20 shadow-2xs`).
+     - Menstandarkan subjudul menjadi `Asisten Laporan Dealer`.
+  2. **Restorasi Icon Bot pada Bubble Asisten (`UserWorkspace.jsx`)**:
+     - Menggantikan kotak hitam `[AI]` dengan kontainer `<div className="w-5 h-5 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0 border border-primary/20"><Bot size={13} /></div>`.
+  3. **Keterbacaan Ringkasan Eksekutif (`AssistantAnswerCard.jsx`)**:
+     - Mengganti gaya font dari serif italic miring menjadi sans-serif tegas (`font-sans text-sm sm:text-[15px] leading-relaxed text-ink font-medium`).
+  4. **Struktur Naratif Analisis Eksekutif Bebas Semut Berbaris (`AssistantAnswerCard.jsx` & `vanna_engine.py`)**:
+     - Backend: Memperketat prompt `buat_penjelasan_naratif` di `vanna_engine.py` untuk mewajibkan 2–3 paragraf pendek dengan pemisah `\n\n`, serta baris terpisah untuk bullet rekomendasi.
+     - Frontend: Mengimplementasikan helper `FormattedExecutiveAnalysis` yang secara cerdas mendeteksi kalimat transisi, memecah paragraf panjang, mengisolasi `Rekomendasi:` ke dalam dedicated callout box dengan icon `Compass` dan border coral, serta merender daftar bullet poin dengan dot bulat rapi.
+
+- **Hasil Verifikasi**:
+  - Backend pytest: **558 passed** (100% lulus).
+  - Frontend lint: `npm run lint` **0 errors** (100% lulus).
+  - Frontend build: `npm run build` exit code 0 (**100% lulus**).
+  - Browser DevTools live testing: Tangkapan layar membuktikan brand bot coral, ringkasan sans-serif tajam, dan narasi analisis terstruktur rapi.
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 

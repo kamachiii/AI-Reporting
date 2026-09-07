@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Bot } from 'lucide-react';
 import { api } from '../services/api';
 import { notify } from '../utils/notification';
 
@@ -31,14 +32,14 @@ export default function LoginModal({ onLoginSuccess }) {
     <div className="min-h-screen flex items-center justify-center bg-canvas px-4">
       <div className="w-full max-w-md bg-white rounded-xl border border-hairline p-8 shadow-xs space-y-6">
         <div className="text-center">
-          <div className="inline-flex items-center justify-center w-11 h-11 rounded-lg bg-surface-dark text-on-dark font-serif font-medium text-base tracking-wider mb-4 border border-surface-dark/90 shadow-2xs select-none">
-            DMS
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 text-primary mb-4 border border-primary/20 shadow-2xs">
+            <Bot className="w-6 h-6 text-primary" />
           </div>
           <h1 className="font-serif text-3xl text-ink font-normal tracking-tight">
             DMS AI Platform
           </h1>
           <p className="text-muted text-xs mt-1.5 font-sans">
-            Asisten Intelijen Basis Data Dealer
+            Asisten Laporan Dealer
           </p>
         </div>
 
