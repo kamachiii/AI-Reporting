@@ -1230,6 +1230,31 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - `npm run lint`: 0 error
   - `npm run build`: exit 0
 
+### 3ak. Format Otomatis Cerdas Tanggal dan Waktu pada Tabel dan Ekspor Excel (commit: 4d8d635)
+
+- **Masalah**:
+  - Tanggal invoice (`tglinvoice`) dan kolom timestamp lainnya dari PostgreSQL tampil mentah berupa format ISO string (misal `2025-11-11T00:00:00`, `2026-07-10T00:00:00`).
+  - Pengguna meminta format otomatis cerdas:
+    1. Hanya tanggal: jika nilai berupa tanggal atau jam 00:00:00 (cth: `11 Nov 2025`).
+    2. Hanya waktu: jika nilai berupa waktu saja (cth: `14:30`).
+    3. Keduanya: jika terdapat tanggal dan waktu nyata bukan jam 00:00:00 (cth: `11 Nov 2025, 14:35`).
+    4. Bebas pergeseran zona waktu (tidak boleh bergeser hari akibat konversi UTC).
+
+- **Solusi & Implementasi**:
+  1. **Frontend (`AssistantAnswerCard.jsx`)**:
+     - `formatTanggalWaktu(nilai)`: regex parser akurat tanpa UTC drift (menggunakan konstruktor lokal `new Date(year, month - 1, day)`).
+     - Otomatis membedakan waktu saja, tanggal saja (`00:00:00` diabaikan menjadi tanggal murni), dan tanggal beserta waktu.
+     - Terintegrasi langsung pada `formatSel`, fungsi salin clipboard (`handleCopyTable`), serta styling sel tabel `td` dengan `font-mono tabular-nums text-left text-body`.
+  2. **Backend Ekspor Excel (`report_exporter.py`)**:
+     - `_parse_date_or_time(val)`: mengonversi string ISO/date menjadi objek Python native `datetime.date`, `datetime.datetime`, atau `datetime.time` dengan format Excel akuntansi yang tepat (`DD/MM/YYYY`, `DD/MM/YYYY HH:MM`, `HH:MM`).
+     - Sel Excel kini dikenali sebagai tipe tanggal/waktu asli oleh Microsoft Excel, memungkinkan filter tanggal dan agregasi otomatis.
+
+- **Verifikasi Nyata**:
+  - Backend compile & pytest: **562 passed** (exit code 0).
+  - Frontend lint: **0 error** (exit code 0).
+  - Frontend build: **exit code 0**.
+  - Browser DevTools MCP Live: tabel `tglinvoice` terverifikasi merender `11 Nov 2025`, `05 Nov 2025`, `10 Jul 2026`, `29 Jun 2026` secara rapi dan konsisten.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -1291,6 +1316,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Manajemen Riwayat Chat Multi-Sesi, Tabel Pintar Interaktif & Penyelarasan Skema Bengkel Riil** — SELESAI (lihat §3z).
 - [x] **Penerapan Claude Editorial Design System & Eliminasi AI-Slop (DESIGN-claude.md)** — SELESAI (lihat §3aa).
 - [x] **Strukturisasi Knowledge Base 3S: Global KB vs Tenant Database KB & Sinkronisasi Pgvector** — SELESAI (lihat §3ai).
+- [x] **Format Otomatis Cerdas Tanggal dan Waktu pada Tabel dan Ekspor Excel** — SELESAI (lihat §3ak).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. *Dedicated Executive Dashboard Page*: Ditutup/dibatalkan atas arahan pengguna untuk mempertahankan identitas murni Conversational AI Assistant.
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.
