@@ -300,7 +300,7 @@ export default function UserWorkspace({ user, onLogout }) {
     if (!bCode) return [];
     try {
       const data = await api.getConversations(bCode);
-      const list = data.conversations || [];
+      const list = Array.isArray(data) ? data : (data?.conversations || []);
       setConversations(list);
       return list;
     } catch {

@@ -68,7 +68,8 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **Redesign Anti-AI-Slop & Executive Command Deck** | selesai | `0d6b68e` | Instalasi 2 skill baru (anti-ai-slop-design & web-design-guidelines); Eliminasi pola AI slop (bot avatar raksasa, badge spam 0-token, tombol warna-warni inkonsisten); Command Deck 4 kartu analitis dealer; Precision Dossier & Tabular Numbers; 558 test lulus, lint 0 error, build 0 error |
 | **Penerapan Claude Editorial Design System** | selesai | `d88610c` | Penerapan design system DESIGN-claude.md: palet terracotta #cc785c & warm canvas #faf9f5, tipografi Cormorant Garamond & Inter, Claude code-window-card dengan Apple window controls, category tabs, and active state cream; 558 test lulus, lint 0 error, build 0 error |
 | **Restorasi Icon Bot Warm Coral & Struktur Narasi Analisis** | selesai | `d3e3a51` | Mengembalikan icon Bot warm coral di header & message bubble (menghilangkan kotak hitam [DMS] & [AI]), font ringkasan sans-serif tajam, dan pemecahan narasi analisis eksekutif menjadi paragraf terstruktur + callout rekomendasi tanpa efek semut berbaris |
-| **Penyempurnaan Visual & UX Editorial** | selesai | LIVE | Warm user bubble (anti-pitch-black), palet chart terracotta #cc785c, deduplikasi judul toolbar, smart insights label Bulan (bukan Baris), prompt deck sans-serif, login card warm surface, tombol Coba Lagi pada error |
+| **Penyempurnaan Visual & UX Editorial** | selesai | `95a105f` | Warm user bubble (anti-pitch-black), palet chart terracotta #cc785c, deduplikasi judul toolbar, smart insights label Bulan (bukan Baris), prompt deck sans-serif, login card warm surface, tombol Coba Lagi pada error |
+| **Redesign Sidebar History Chat Editorial & Fix Hydration** | selesai | LIVE | Redesign sidebar gaya Claude.ai (header compact h-14, button Percakapan Baru tactile, search terintegrasi, timestamp item, delete pill inline, empty state ramah); Fix parsing array getConversations agar riwayat ter-render nyata |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -1029,6 +1030,28 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Backend pytest: **558 passed in 40.95s** (100% lulus).
   - Frontend lint: `npm run lint` **0 errors** (100% lulus).
   - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 2.64s).
+
+### 3ad. Redesign Sidebar History Chat Bergaya Claude Editorial & Fix Hydration Array (2026-09-07)
+
+- **Masalah yang Diatasi**:
+  1. **Tampilan Sidebar Kaku & Boros Ruang**: Header sidebar setinggi 64px menumpuk canggung di bawah navbar utama, diikuti tombol raksasa berwarna oranye menyala `+ Sesi Percakapan Baru` yang memakan hampir 200px vertikal sebelum daftar percakapan terlihat.
+  2. **Active State Kasar**: Item percakapan aktif menggunakan multi-border tebal (`border-l-2 border-primary border-y border-r border-hairline shadow-2xs`) yang terlihat seperti badge kaku bukan item daftar yang halus.
+  3. **Metadata Waktu Nihil**: Item riwayat tidak menampilkan kapan percakapan dilakukan atau jumlah kueri.
+  4. **Bug Hydration Percakapan Kosong**: `api.getConversations` dari backend mengembalikan *raw list array* `[...]`, namun kode `UserWorkspace.jsx` mencoba membaca `data.conversations`, sehingga daftar riwayat selalu terbaca `undefined` dan dianggap kosong (`[]`) meski data tersimpan di PostgreSQL.
+
+- **Solusi & Perubahan**:
+  1. **Fix Parsing Hydration Data (`UserWorkspace.jsx`)**: Mengubah `const list = Array.isArray(data) ? data : (data?.conversations || [])`, sehingga seluruh sesi tersimpan di database langsung ter-hydrate secara instan ke dalam sidebar.
+  2. **Header Compact & Minimalis (`ChatHistorySidebar.jsx`)**: Mengganti header tumpuk 64px dengan header kompak setinggi `h-14` berikon `History` coral, tipografi serif anggun "Arsip Percakapan", badge penghitung total sesi, dan tombol ciutkan yang selaras.
+  3. **Tombol Percakapan Baru Taktil & Elegan (`ChatHistorySidebar.jsx`)**: Mengganti tombol oranye mencolok dengan tombol berarsitektur Claude: `bg-canvas hover:bg-surface-cream-strong border border-hairline` dengan ikon `MessageSquarePlus` coral dan shortcut hint `+`.
+  4. **Search Bar Terintegrasi**: Bilah pencarian halus dengan ikon lup dan tombol reset `X` yang tidak merusak tata letak.
+  5. **Item Percakapan dengan Timestamp & Indicator Dot**: Item aktif kini menggunakan latar `bg-surface-cream-strong` dengan titik coral hangat (`w-1.5 h-1.5 bg-primary`). Menampilkan waktu relatif (`13:05`, `Kemarin`, `Sen`) yang secara elegan berganti menjadi tombol hapus saat di-hover.
+  6. **Inline Delete Confirmation**: Konfirmasi hapus yang mulus tanpa merusak tata letak daftar.
+  7. **Empty & Footer State Anggun**: Menampilkan ilustrasi bot lembut dengan pesan edukatif, serta footer minimalis dengan total sesi tersimpan dan tombol pembersihan terkonfirmasi.
+
+- **Hasil Verifikasi**:
+  - Backend pytest: **558 passed in 37.42s** (100% lulus).
+  - Frontend lint: `npm run lint` **0 errors** (100% lulus).
+  - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 1.31s).
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 

@@ -1,8 +1,24 @@
 import { useState, useMemo } from 'react';
 import {
-  MessageSquare, Plus, Trash2, Search, PanelLeftClose,
-  Clock, Check, AlertCircle, X,
+  MessageSquare, MessageSquarePlus, Trash2, Search, PanelLeftClose,
+  History, Bot, X,
 } from 'lucide-react';
+
+function formatWaktuItem(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  const now = new Date();
+  const diffDays = Math.floor((now - d) / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) {
+    return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  }
+  if (diffDays === 1) return 'Kemarin';
+  if (diffDays < 7) {
+    return d.toLocaleDateString('id-ID', { weekday: 'short' });
+  }
+  return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+}
 
 function formatKelompokWaktu(dateStr) {
   if (!dateStr) return 'Sebelumnya';
@@ -67,51 +83,62 @@ export default function ChatHistorySidebar({
       className="w-72 border-r border-hairline bg-surface-card flex flex-col h-full shrink-0 transition-all duration-200 select-none"
       aria-label="Riwayat Percakapan"
     >
-      {/* Header Sidebar: 64px Top-Nav Alignment */}
-      <div className="h-16 px-4 border-b border-hairline flex items-center justify-between bg-surface-card shrink-0">
-        <div className="flex items-center gap-2 text-ink">
-          <Clock size={15} className="text-primary" />
-          <span className="font-serif text-[15px] font-normal tracking-tight text-ink">
-            Riwayat Chat
+      {/* Header Sidebar: Compact & Refined */}
+      <div className="h-14 px-3.5 border-b border-hairline/70 flex items-center justify-between bg-surface-card shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-md bg-primary/10 text-primary flex items-center justify-center border border-primary/20 shrink-0">
+            <History size={13} />
+          </div>
+          <span className="text-xs font-serif font-medium text-ink tracking-tight">
+            Arsip Percakapan
           </span>
+          {conversations.length > 0 && (
+            <span className="text-[10px] font-mono px-1.5 py-0.5 bg-canvas border border-hairline rounded-full text-muted-soft">
+              {conversations.length}
+            </span>
+          )}
         </div>
         <button
           type="button"
           onClick={onToggleOpen}
           title="Ciutkan Sidebar"
-          className="p-1.5 rounded-md text-muted hover:text-ink hover:bg-surface-soft transition-colors cursor-pointer"
+          className="p-1.5 rounded-md text-muted hover:text-ink hover:bg-surface-cream-strong transition-colors cursor-pointer"
         >
           <PanelLeftClose size={15} />
         </button>
       </div>
 
-      {/* Tombol + Chat Baru (Claude Coral Primary CTA) */}
-      <div className="p-3 border-b border-hairline shrink-0">
+      {/* Action Bar: Sleek New Chat Button & Search */}
+      <div className="p-3 border-b border-hairline/60 space-y-2 shrink-0">
         <button
           type="button"
           onClick={onNewChat}
-          className="w-full flex items-center justify-center gap-2 px-3 h-10 rounded-md bg-primary hover:bg-primary-active text-on-primary text-xs font-medium transition-colors cursor-pointer shadow-xs"
+          className="w-full flex items-center justify-between h-9 px-3 rounded-lg bg-canvas hover:bg-surface-cream-strong border border-hairline text-xs font-medium text-ink transition-all shadow-2xs group cursor-pointer hover:border-primary/40"
         >
-          <Plus size={14} className="text-on-primary" />
-          <span>Sesi Percakapan Baru</span>
+          <span className="flex items-center gap-2">
+            <MessageSquarePlus size={14} className="text-primary group-hover:scale-105 transition-transform" />
+            <span>Percakapan Baru</span>
+          </span>
+          <span className="text-[10px] font-mono text-muted-soft border border-hairline px-1.5 py-0.5 rounded bg-surface-card">
+            +
+          </span>
         </button>
 
-        {/* Input Pencarian Riwayat jika percakapan > 3 */}
-        {conversations.length > 3 && (
-          <div className="relative mt-2.5">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+        {conversations.length > 0 && (
+          <div className="relative">
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-soft" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Cari arsip sesi…"
-              className="w-full pl-8 pr-7 py-1.5 text-xs bg-canvas border border-hairline rounded-md text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
+              placeholder="Cari topik percakapan…"
+              className="w-full h-8 pl-8 pr-7 text-xs bg-canvas/70 hover:bg-canvas focus:bg-canvas border border-hairline rounded-lg text-ink placeholder:text-muted-soft focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition-all font-sans"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-ink cursor-pointer"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-soft hover:text-ink cursor-pointer"
               >
                 <X size={12} />
               </button>
@@ -121,85 +148,100 @@ export default function ChatHistorySidebar({
       </div>
 
       {/* Daftar Sesi Percakapan */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-4 text-xs">
+      <div className="flex-1 overflow-y-auto p-2 space-y-3 text-xs">
         {filtered.length === 0 ? (
-          <div className="text-center py-8 text-muted px-4">
-            <MessageSquare size={22} className="mx-auto mb-2 opacity-30 text-muted" />
-            <p className="font-medium text-ink">
-              {searchQuery ? 'Tidak ada arsip cocok' : 'Belum ada arsip percakapan'}
-            </p>
-            <p className="text-[11px] mt-0.5 text-muted">
-              {searchQuery ? 'Gunakan kata kunci lain' : 'Mulai eksplorasi dengan mengajukan pertanyaan'}
-            </p>
+          <div className="py-12 px-4 text-center space-y-3">
+            <div className="w-10 h-10 rounded-xl bg-canvas border border-hairline flex items-center justify-center mx-auto text-primary shadow-2xs">
+              <Bot size={20} />
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-serif font-medium text-ink">
+                {searchQuery ? 'Topik Tidak Ditemukan' : 'Arsip Masih Kosong'}
+              </p>
+              <p className="text-[11px] text-muted-soft leading-relaxed max-w-[200px] mx-auto font-sans">
+                {searchQuery
+                  ? `Tidak ada percakapan yang cocok dengan "${searchQuery}".`
+                  : 'Setiap analisis data yang Anda tanyakan akan tersimpan rapi di sini per sesi.'}
+              </p>
+            </div>
           </div>
         ) : (
           Object.entries(grouped).map(([groupName, items]) => {
             if (items.length === 0) return null;
             return (
               <div key={groupName} className="space-y-1">
-                <p className="px-2 text-[10px] font-mono text-muted-soft uppercase tracking-widest font-medium">
-                  {groupName}
-                </p>
+                <div className="px-2 pt-2 pb-1 text-[10px] font-mono uppercase tracking-wider text-muted-soft font-semibold flex items-center justify-between">
+                  <span>{groupName}</span>
+                  <span className="text-[9px] text-muted-soft/80">{items.length}</span>
+                </div>
                 {items.map((conv) => {
                   const isActive = activeId === conv.id;
                   const isConfirmingDelete = deleteConfirmId === conv.id;
+                  const waktuItem = formatWaktuItem(conv.updated_at || conv.created_at);
 
                   return (
                     <div
                       key={conv.id}
-                      className={`group relative flex items-center justify-between rounded-md px-2.5 py-2 transition-colors cursor-pointer ${
+                      className={`group relative flex items-center justify-between rounded-lg px-2.5 py-2 transition-all cursor-pointer ${
                         isActive
-                          ? 'bg-surface-cream-strong text-ink font-medium border-l-2 border-l-primary border-y border-r border-hairline shadow-2xs'
-                          : 'text-body hover:text-ink hover:bg-surface-cream-strong/50 border border-transparent'
+                          ? 'bg-surface-cream-strong text-ink font-medium border border-hairline/80 shadow-2xs'
+                          : 'text-body hover:text-ink hover:bg-surface-cream-strong/60 border border-transparent'
                       }`}
                       onClick={() => !isConfirmingDelete && onSelectConversation(conv.id)}
                     >
-                      <div className="flex items-center gap-2 min-w-0 pr-2">
-                        <MessageSquare
-                          size={13}
-                          className={`shrink-0 ${isActive ? 'text-primary' : 'text-muted/70'}`}
-                        />
-                        <span className="truncate text-xs tracking-tight" title={conv.title}>
-                          {conv.title || 'Percakapan Tanpa Judul'}
-                        </span>
+                      <div className="flex items-center gap-2 min-w-0 pr-1 flex-1">
+                        {isActive ? (
+                          <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
+                        ) : (
+                          <MessageSquare size={13} className="shrink-0 text-muted-soft group-hover:text-ink transition-colors" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs tracking-tight font-sans" title={conv.title}>
+                            {conv.title || 'Percakapan Tanpa Judul'}
+                          </p>
+                        </div>
                       </div>
 
-                      {/* Tombol Hapus per Item */}
-                      <div
-                        className="shrink-0"
-                        onClick={(e) => e.stopPropagation()}
-                      >
+                      {/* Right side: Time tag or Delete button */}
+                      <div className="shrink-0 flex items-center" onClick={(e) => e.stopPropagation()}>
                         {isConfirmingDelete ? (
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1 bg-canvas border border-hairline p-0.5 rounded-md shadow-xs animate-fadeIn">
                             <button
                               type="button"
-                              title="Konfirmasi Hapus"
+                              title="Hapus percakapan"
                               onClick={() => {
                                 onDeleteConversation(conv.id);
                                 setDeleteConfirmId(null);
                               }}
-                              className="p-1 rounded bg-error/10 hover:bg-error text-error hover:text-white transition-colors cursor-pointer"
+                              className="px-1.5 py-0.5 text-[10px] bg-rose-600 text-white rounded font-medium hover:bg-rose-700 transition-colors cursor-pointer"
                             >
-                              <Check size={11} />
+                              Hapus
                             </button>
                             <button
                               type="button"
                               title="Batal"
                               onClick={() => setDeleteConfirmId(null)}
-                              className="p-1 rounded hover:bg-surface-soft text-muted hover:text-ink transition-colors cursor-pointer"
+                              className="px-1.5 py-0.5 text-[10px] text-muted hover:text-ink rounded transition-colors cursor-pointer"
                             >
-                              <X size={11} />
+                              Batal
                             </button>
                           </div>
                         ) : (
-                          <button
-                            type="button"
-                            title="Hapus Sesi"
-                            onClick={() => setDeleteConfirmId(conv.id)}
-                            className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-error/10 hover:text-error text-muted transition-all cursor-pointer"
-                          >
-                            <Trash2 size={12} />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            {waktuItem && (
+                              <span className="text-[10px] font-mono text-muted-soft group-hover:hidden tabular-nums">
+                                {waktuItem}
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              title="Hapus Sesi"
+                              onClick={() => setDeleteConfirmId(conv.id)}
+                              className="hidden group-hover:flex p-1 rounded hover:bg-rose-50 hover:text-rose-700 text-muted-soft transition-all cursor-pointer"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -211,43 +253,42 @@ export default function ChatHistorySidebar({
         )}
       </div>
 
-      {/* Footer: Hapus Semua Riwayat */}
+      {/* Footer: Hapus Semua Riwayat & Info Sesi */}
       {conversations.length > 0 && (
-        <div className="p-2.5 border-t border-hairline shrink-0">
+        <div className="p-3 border-t border-hairline/80 shrink-0 flex items-center justify-between text-[11px] text-muted-soft font-sans">
+          <span className="font-mono text-[10px]">
+            {conversations.length} sesi tersimpan
+          </span>
+
           {showClearConfirm ? (
-            <div className="p-2.5 rounded-md bg-rose-50/80 border border-rose-200/80 space-y-2 text-center">
-              <p className="text-[11px] text-rose-800 font-medium flex items-center justify-center gap-1">
-                <AlertCircle size={12} />
-                <span>Hapus seluruh riwayat cabang ini?</span>
-              </p>
-              <div className="flex items-center justify-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClearAll();
-                    setShowClearConfirm(false);
-                  }}
-                  className="px-2.5 py-1 text-[11px] font-medium bg-rose-700 text-white rounded-md hover:bg-rose-800 transition-colors cursor-pointer"
-                >
-                  Ya, Hapus Semua
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowClearConfirm(false)}
-                  className="px-2 py-1 text-[11px] text-muted hover:text-ink hover:bg-surface-soft rounded-md transition-colors cursor-pointer"
-                >
-                  Batal
-                </button>
-              </div>
+            <div className="flex items-center gap-1.5 animate-fadeIn">
+              <button
+                type="button"
+                onClick={() => {
+                  onClearAll();
+                  setShowClearConfirm(false);
+                }}
+                className="px-2 py-0.5 text-[10px] font-medium bg-rose-600 text-white rounded hover:bg-rose-700 transition-colors cursor-pointer"
+              >
+                Hapus Semua
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowClearConfirm(false)}
+                className="px-1.5 py-0.5 text-[10px] text-muted hover:text-ink transition-colors cursor-pointer"
+              >
+                Batal
+              </button>
             </div>
           ) : (
             <button
               type="button"
               onClick={() => setShowClearConfirm(true)}
-              className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-xs text-muted hover:text-rose-700 hover:bg-rose-50/50 rounded-md transition-colors cursor-pointer"
+              className="hover:text-rose-700 transition-colors cursor-pointer flex items-center gap-1"
+              title="Bersihkan seluruh riwayat cabang ini"
             >
-              <Trash2 size={12} />
-              <span>Hapus Semua Riwayat</span>
+              <Trash2 size={11} />
+              <span>Bersihkan</span>
             </button>
           )}
         </div>
