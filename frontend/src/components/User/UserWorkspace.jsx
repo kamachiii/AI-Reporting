@@ -462,30 +462,17 @@ export default function UserWorkspace({ user, onLogout }) {
       {/* Header (Top Navigation 64px sesuai DESIGN-claude.md) */}
       <header className="h-16 bg-canvas border-b border-hairline shrink-0 px-4">
         <div className="h-full flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            {!sidebarOpen && (
-              <button
-                type="button"
-                onClick={() => setSidebarOpen(true)}
-                title="Buka Riwayat Percakapan"
-                aria-label="Buka Riwayat Percakapan"
-                className="p-1.5 rounded-md border border-hairline hover:bg-surface-soft text-muted hover:text-ink transition-colors cursor-pointer"
-              >
-                <PanelLeftOpen size={16} />
-              </button>
-            )}
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center border border-primary/20 shrink-0 shadow-2xs">
-                <Bot size={18} />
-              </div>
-              <div>
-                <h1 className="font-serif text-base sm:text-lg text-ink font-medium tracking-tight leading-none">
-                  DMS AI Platform
-                </h1>
-                <p className="text-[11px] text-muted-soft mt-0.5 font-sans">
-                  Asisten Laporan Dealer
-                </p>
-              </div>
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center border border-primary/20 shrink-0 shadow-2xs">
+              <Bot size={18} />
+            </div>
+            <div>
+              <h1 className="font-serif text-base sm:text-lg text-ink font-medium tracking-tight leading-none">
+                DMS AI Platform
+              </h1>
+              <p className="text-[11px] text-muted-soft mt-0.5 font-sans">
+                Asisten Laporan Dealer
+              </p>
             </div>
           </div>
 
@@ -538,7 +525,23 @@ export default function UserWorkspace({ user, onLogout }) {
           onToggleOpen={() => setSidebarOpen((prev) => !prev)}
         />
 
-        <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
+        <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden relative">
+          {/* Floating Edge Handle: Membuka sidebar dari tepi layar tanpa menggeser navbar (Gaya Linear & Cursor) */}
+          {!sidebarOpen && (
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(true)}
+              title="Buka Riwayat Percakapan"
+              aria-label="Buka Riwayat Percakapan"
+              className="absolute left-0 top-3 z-30 group flex items-center gap-2 pl-2.5 pr-3.5 py-1.5 bg-surface-card hover:bg-surface-cream-strong border-y border-r border-hairline rounded-r-xl shadow-xs hover:shadow-sm text-muted hover:text-ink transition-all cursor-pointer select-none"
+            >
+              <PanelLeftOpen size={14} className="text-primary group-hover:scale-110 transition-transform" />
+              <span className="text-xs font-sans font-medium text-ink tracking-tight">
+                Riwayat Chat
+              </span>
+            </button>
+          )}
+
           {/* Area percakapan */}
           <main className="flex-1 overflow-y-auto">
             <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">

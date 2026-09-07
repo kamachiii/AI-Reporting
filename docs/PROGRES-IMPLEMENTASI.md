@@ -69,7 +69,8 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **Penerapan Claude Editorial Design System** | selesai | `d88610c` | Penerapan design system DESIGN-claude.md: palet terracotta #cc785c & warm canvas #faf9f5, tipografi Cormorant Garamond & Inter, Claude code-window-card dengan Apple window controls, category tabs, and active state cream; 558 test lulus, lint 0 error, build 0 error |
 | **Restorasi Icon Bot Warm Coral & Struktur Narasi Analisis** | selesai | `d3e3a51` | Mengembalikan icon Bot warm coral di header & message bubble (menghilangkan kotak hitam [DMS] & [AI]), font ringkasan sans-serif tajam, dan pemecahan narasi analisis eksekutif menjadi paragraf terstruktur + callout rekomendasi tanpa efek semut berbaris |
 | **Penyempurnaan Visual & UX Editorial** | selesai | `95a105f` | Warm user bubble (anti-pitch-black), palet chart terracotta #cc785c, deduplikasi judul toolbar, smart insights label Bulan (bukan Baris), prompt deck sans-serif, login card warm surface, tombol Coba Lagi pada error |
-| **Redesign Sidebar History Chat Editorial & Fix Hydration** | selesai | LIVE | Redesign sidebar gaya Claude.ai (header compact h-14, button Percakapan Baru tactile, search terintegrasi, timestamp item, delete pill inline, empty state ramah); Fix parsing array getConversations agar riwayat ter-render nyata |
+| **Redesign Sidebar History Chat Editorial & Fix Hydration** | selesai | `04ec492` | Redesign sidebar gaya Claude.ai (header compact h-14, button Percakapan Baru tactile, search terintegrasi, timestamp item, delete pill inline, empty state ramah); Fix parsing array getConversations agar riwayat ter-render nyata |
+| **Floating Edge Handle Sidebar (Zero Layout Shift Navbar)** | selesai | LIVE | Menghapus tombol toggle dari navbar atas agar logo dan judul tidak pernah terdorong/bergeser; Menggantinya dengan Floating Edge Tab Handle di tepi layar kiri gaya Linear & Cursor |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -1052,6 +1053,25 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Backend pytest: **558 passed in 37.42s** (100% lulus).
   - Frontend lint: `npm run lint` **0 errors** (100% lulus).
   - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 1.31s).
+
+### 3ae. Floating Edge Tab Handle Sidebar: Eliminasi Total Layout Shift Navbar (2026-09-07)
+
+- **Masalah yang Diatasi**:
+  - Ketika sidebar ditutup, tombol buka sidebar sebelumnya disuntikkan dinamis ke dalam navbar atas di sebelah kiri logo brand `[Bot] DMS AI Platform`.
+  - Hal ini menyebabkan:
+    1. Logo brand dan judul aplikasi terdorong ke kanan saat ditutup (*jarring layout shift*).
+    2. Tombol toggle melompat vertikal dari area sidebar (di bawah navbar) ke dalam navbar atas.
+    3. Penampilan navbar berubah-ubah dan tidak konsisten.
+
+- **Solusi & Perubahan (Gaya Ide 3 - Linear & Cursor Floating Handle)**:
+  1. **Navbar 100% Statis & Suci (`UserWorkspace.jsx`)**: Menghapus tombol toggle dari header navbar atas. Logo brand `[Bot]` dan teks `DMS AI Platform` kini terkunci statis di pojok kiri atas dan tidak pernah bergeser 1 piksel pun, baik saat sidebar dibuka maupun ditutup.
+  2. **Floating Edge Tab Handle (`UserWorkspace.jsx`)**: Saat sidebar ditutup, muncul sebuah tab handle mengambang yang menempel rapi di garis batas tepi kiri layar (`absolute left-0 top-3 z-30`). Berdesain arsitektural (`bg-surface-card hover:bg-surface-cream-strong border-y border-r border-hairline rounded-r-xl shadow-xs`), tab ini memuat ikon `PanelLeftOpen` coral dan label teks "Riwayat Chat".
+  3. **Pengalaman Pengguna Tanpa Goyang**: Navbar atas tetap tenang dan stabil, sementara akses membuka kembali riwayat percakapan berada persis di tepi kiri tempat sidebar akan muncul.
+
+- **Hasil Verifikasi**:
+  - Backend pytest: **558 passed in 37.42s** (100% lulus).
+  - Frontend lint: `npm run lint` **0 errors** (100% lulus).
+  - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 846ms).
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
