@@ -71,8 +71,8 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **Penyempurnaan Visual & UX Editorial** | selesai | `95a105f` | Warm user bubble (anti-pitch-black), palet chart terracotta #cc785c, deduplikasi judul toolbar, smart insights label Bulan (bukan Baris), prompt deck sans-serif, login card warm surface, tombol Coba Lagi pada error |
 | **Redesign Sidebar History Chat Editorial & Fix Hydration** | selesai | `04ec492` | Redesign sidebar gaya Claude.ai (header compact h-14, button Percakapan Baru tactile, search terintegrasi, timestamp item, delete pill inline, empty state ramah); Fix parsing array getConversations agar riwayat ter-render nyata |
 | **Floating Edge Handle Sidebar (Zero Layout Shift Navbar)** | selesai | `2b2cb55` | Menghapus tombol toggle dari navbar atas agar logo dan judul tidak pernah terdorong/bergeser; Menggantinya dengan Floating Edge Tab Handle di tepi layar kiri gaya Linear & Cursor |
-| **Animasi Halus Sidebar & Tipografi Ringan (Non-Bold)** | selesai | `7ece2d8` | Integrasi AnimatePresence & motion.aside untuk animasi slide mulus buka/tutup sidebar dan floating handle; Mengganti ketebalan font dari font-medium/semibold menjadi font-normal yang tipis, tajam, dan elegan |
-| **Penyempurnaan Tipografi Sidebar, Arsip Percakapan & Polish UI/UX** | selesai | LIVE | Pembesaran font Arsip Percakapan (text-[15px] font-medium font-serif), mempertahankan font-normal khusus "Riwayat Chat" pada floating handle, restorasi font-medium/semibold pada aksi & active item, scrollbar ramping editorial di index.css, shortcut keyboard Ctrl+B / Cmd+B, dan animasi aktif tactile |
+| **Penyempurnaan Tipografi Sidebar, Arsip Percakapan & Polish UI/UX** | selesai | `a196fad` | Pembesaran font Arsip Percakapan (text-[15px] font-medium font-serif), mempertahankan font-normal khusus "Riwayat Chat" pada floating handle, restorasi font-medium/semibold pada aksi & active item, scrollbar ramping editorial di index.css, shortcut keyboard Ctrl+B / Cmd+B, dan animasi aktif tactile |
+| **Eliminasi Badge Visual Ctrl+B & Perluasan Trigger Fan-Out Tiap Divisi** | selesai | `a25c07b` | Menghapus badge teks visual Ctrl+B dari floating handle (informasi tetap via hover title), menghapus cache memory tunggal #67, dan memperluas trigger regex fanout_engine untuk menangani typo 'peforma' & frasa 'tiap divisi' sehingga perbandingan performa antar divisi per tahun sukses terpecah ke 4 tab (Komparasi, Unit, Servis, Sparepart) |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -1128,6 +1128,36 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Backend pytest: **558 passed in 48.50s** (100% lulus).
   - Frontend lint: `npm run lint` **0 errors** (100% lulus).
   - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 1.13s).
+
+### 3ah. Eliminasi Badge Visual Ctrl+B & Perluasan Trigger Fan-Out Tiap Divisi (2026-09-07)
+
+- **Latar Belakang & Masukan Pengguna**:
+  1. **Badge Visual Ctrl+B**: Pengguna meminta teks badge `<kbd>Ctrl+B</kbd>` dihilangkan dari floating handle dan cukup mengandalkan informasi tooltip hover.
+  2. **Evaluasi Pertanyaan `tester02` ("bandingkan peforma tiap divisi dalam tiap tahunnya")**:
+     - Hasil lama hanya mengeksekusi tabel `untt_penjualan` (hanya Unit Kendaraan, tanpa Jasa Servis Bengkel & Suku Cadang).
+     - AI di fitur *Analisis Naratif Eksekutif* bahkan secara eksplisit mendeteksi kelemahan tersebut: *"Catatan penting: kueri yang dijalankan belum memuat dimensi divisi..."*.
+     - Penyebab: kata kunci typo `"peforma"` (tanpa 'r') dan frasa `"tiap divisi"` belum terdaftar dalam trigger pattern `fanout_engine.py`.
+
+- **Solusi & Implementasi Teknis**:
+  1. **Pembersihan Tombol Floating Handle (`UserWorkspace.jsx`)**:
+     - Menghapus elemen `<kbd>` dari tombol mengambang.
+     - Menjaga informasi shortcut pada atribut `title="Buka Riwayat Percakapan (Ctrl+B)"` saat di-hover.
+  2. **Pembersihan Cache SQL Memory Tunggal (#67)**:
+     - Menghapus entri `sql_memory` lama id 67 yang terlanjur menyimpan kueri single-table unit agar tidak terjadi replay usang.
+  3. **Perluasan Regex Deteksi Fan-Out 3S (`fanout_engine.py`)**:
+     - Menambahkan pola `peforma` dan `divisi` ke dalam `trigger_patterns`.
+     - Menambahkan pola `r"\b(?:tiap|setiap|antar|per|semua|lintas)\s+divisi\b"` pada aturan penjualan dan fungsi `cek_apakah_perlu_komparasi`.
+  4. **Hasil Pengujian Nyata**:
+     - Kueri *"bandingkan peforma tiap divisi dalam tiap tahunnya"* kini sukses menghasilkan **4 Tab Lengkap**:
+       1. **Komparasi Antar Divisi**: Tabel ringkasan komparasi volume & omzet sejajar per divisi.
+       2. **Unit Kendaraan**: 13 baris data (tahun 2014–2026).
+       3. **Jasa Servis Bengkel**: 13 baris data PKB WO servis (tahun 2014–2026).
+       4. **Suku Cadang & Sparepart**: 7 baris data part terjual & omzet part (tahun 2020–2026).
+
+- **Hasil Verifikasi**:
+  - Backend pytest: **558 passed in 49.19s** (100% lulus).
+  - Frontend lint: `npm run lint` **0 errors** (100% lulus).
+  - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 1.38s).
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
