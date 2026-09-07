@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
-  Check, Loader2, LogOut, Send, Bot,
+  Check, Loader2, LogOut, Send, Bot, RotateCcw,
   PanelLeftOpen, MessageSquarePlus,
   Car, Wrench, Package, BarChart3, ShieldCheck, ArrowRight,
 } from 'lucide-react';
@@ -201,7 +201,7 @@ function MessageBubble({
               </span>
             )}
           </div>
-          <div className="px-4 py-3 bg-surface-dark text-on-dark rounded-lg text-sm leading-relaxed shadow-2xs border border-surface-dark font-sans">
+          <div className="px-4 py-3 bg-surface-cream-strong text-ink rounded-lg text-sm leading-relaxed shadow-2xs border border-hairline font-sans">
             {message.text}
           </div>
         </div>
@@ -235,9 +235,19 @@ function MessageBubble({
           <PipelineIndicator stageIndex={message.stageIndex} />
         </div>
       ) : message.status === 'error' ? (
-        <div className="max-w-2xl bg-rose-50/80 border border-rose-200 rounded-lg px-4 py-3.5 shadow-2xs text-xs text-rose-900 leading-relaxed space-y-1">
-          <div className="font-semibold flex items-center gap-1.5 text-red-800">
+        <div className="max-w-2xl bg-rose-50/80 border border-rose-200 rounded-lg px-4 py-3.5 shadow-2xs text-xs text-rose-900 leading-relaxed space-y-2">
+          <div className="font-semibold flex items-center justify-between gap-1.5 text-red-800">
             <span>Pemeriksaan Gagal</span>
+            {message.question && onAsk && (
+              <button
+                type="button"
+                onClick={() => onAsk(message.question)}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-rose-100 hover:bg-rose-200 text-rose-900 font-medium text-[11px] transition-colors cursor-pointer"
+              >
+                <RotateCcw size={11} />
+                <span>Coba Lagi</span>
+              </button>
+            )}
           </div>
           <p>{message.text}</p>
         </div>
@@ -571,7 +581,7 @@ export default function UserWorkspace({ user, onLogout }) {
                           </span>
                           <ArrowRight size={13} className="text-muted/40 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
                         </div>
-                        <p className="text-xs text-ink font-serif italic mt-1 leading-snug">
+                        <p className="text-xs text-ink font-sans font-medium mt-1 leading-snug">
                           &ldquo;{item.query}&rdquo;
                         </p>
                         <p className="text-[11px] text-muted mt-1 font-sans">

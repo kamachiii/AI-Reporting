@@ -92,49 +92,66 @@ export function hitungSmartInsights(columns, rows) {
   let metricColIdx = -1;
   let metricColName = '';
 
-  // Cari kolom kategori/label (biasanya nama, tahun, atau teks)
+  // Cari kolom kategori/label (nama, teks, tanggal, bulan, tahun, dsb)
   let categoryColIdx = -1;
   let categoryColName = '';
 
-  columns.forEach((col, idx) => {
-    const isId = isIdentifierColumn(col);
-    const sampleVal = Array.isArray(rows[0]) ? rows[0][idx] : rows[0]?.[col];
-    const isNumeric = typeof sampleVal === 'number' || (!Number.isNaN(Number(sampleVal)) && sampleVal !== '');
+  const CATEGORY_PRIORITY = ['nama', 'customer', 'pelanggan', 'bulan', 'bln', 'month', 'tahun', 'thn', 'year', 'periode', 'kategori', 'divisi', 'cabang', 'tipe'];
 
-    if (isNumeric && !isId && metricColIdx === -1) {
-      metricColIdx = idx;
-      metricColName = col;
-    } else if (categoryColIdx === -1 && (!isNumeric || String(col).toLowerCase().includes('tahun'))) {
+  // Prioritas 1: kolom yang cocok dengan kata kunci kategori
+  columns.forEach((col, idx) => {
+    if (idx === metricColIdx) return;
+    const colLower = String(col).toLowerCase();
+    if (categoryColIdx === -1 && CATEGORY_PRIORITY.some((k) => colLower.includes(k))) {
       categoryColIdx = idx;
       categoryColName = col;
     }
   });
 
-  // Jika tidak ada kolom non-id yang numerik, fallback ke kolom angka mana pun
-  if (metricColIdx === -1) {
+  // Prioritas 2: kolom non-numerik pertama
+  if (categoryColIdx === -1) {
     columns.forEach((col, idx) => {
+      if (idx === metricColIdx) return;
       const sampleVal = Array.isArray(rows[0]) ? rows[0][idx] : rows[0]?.[col];
       const isNumeric = typeof sampleVal === 'number' || (!Number.isNaN(Number(sampleVal)) && sampleVal !== '');
-      if (isNumeric && metricColIdx === -1 && !String(col).toLowerCase().includes('id')) {
-        metricColIdx = idx;
-        metricColName = col;
+      if (!isNumeric && categoryColIdx === -1) {
+        categoryColIdx = idx;
+        categoryColName = col;
       }
     });
   }
 
-  if (metricColIdx === -1) {
-    return { hasInsights: false };
+  // Prioritas 3: kolom lain apa pun yang bukan kolom metrik (misal bulan angka 1..12)
+  if (categoryColIdx === -1) {
+    columns.forEach((col, idx) => {
+      if (idx !== metricColIdx && categoryColIdx === -1) {
+        categoryColIdx = idx;
+        categoryColName = col;
+      }
+    });
   }
 
   // Ekstrak data
   const parsedData = rows.map((r, i) => {
     const rawVal = Array.isArray(r) ? r[metricColIdx] : r?.[metricColName];
-    const rawCat = categoryColIdx !== -1
+    let rawCat = categoryColIdx !== -1
       ? (Array.isArray(r) ? r[categoryColIdx] : r?.[categoryColName])
-      : `Baris ${i + 1}`;
+      : null;
+
+    if (rawCat !== null && rawCat !== undefined && String(rawCat).trim() !== '') {
+      const catLower = String(categoryColName || '').toLowerCase();
+      if ((catLower === 'bulan' || catLower.includes('bulan') || catLower === 'bln') && !Number.isNaN(Number(rawCat))) {
+        rawCat = `Bulan ${rawCat}`;
+      } else if ((catLower === 'tahun' || catLower.includes('tahun') || catLower === 'thn') && !Number.isNaN(Number(rawCat))) {
+        rawCat = `Tahun ${rawCat}`;
+      }
+    } else {
+      rawCat = `Baris ${i + 1}`;
+    }
+
     const num = Number(rawVal);
     return {
-      label: String(rawCat || `Data ${i + 1}`),
+      label: String(rawCat),
       value: Number.isNaN(num) ? 0 : num,
     };
   });

@@ -30,7 +30,7 @@ export default function LoginModal({ onLoginSuccess }) {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-canvas px-4">
-      <div className="w-full max-w-md bg-white rounded-xl border border-hairline p-8 shadow-xs space-y-6">
+      <div className="w-full max-w-md bg-surface-card rounded-xl border border-hairline p-8 shadow-xs space-y-6">
         <div className="text-center">
           <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 text-primary mb-4 border border-primary/20 shadow-2xs">
             <Bot className="w-6 h-6 text-primary" />

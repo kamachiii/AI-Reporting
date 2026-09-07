@@ -67,7 +67,8 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **Manajemen Riwayat Chat & Tabel Pintar** | selesai | `348ef57` | Sidebar riwayat multi-sesi (+ Chat Baru, ganti sesi, hapus riwayat per sesi / semua); Tabel cerdas di kartu jawaban (search filter, sorting kolom asc/desc, paginasi mini 10/25/50/semua, salin tabel TSV/Excel); Koreksi skema bengkel riil srvt_wo & srvt_wodetail (138k & 927k rows); Ekstraksi robust JSON SQL; 558 test lulus |
 | **Redesign Anti-AI-Slop & Executive Command Deck** | selesai | `0d6b68e` | Instalasi 2 skill baru (anti-ai-slop-design & web-design-guidelines); Eliminasi pola AI slop (bot avatar raksasa, badge spam 0-token, tombol warna-warni inkonsisten); Command Deck 4 kartu analitis dealer; Precision Dossier & Tabular Numbers; 558 test lulus, lint 0 error, build 0 error |
 | **Penerapan Claude Editorial Design System** | selesai | `d88610c` | Penerapan design system DESIGN-claude.md: palet terracotta #cc785c & warm canvas #faf9f5, tipografi Cormorant Garamond & Inter, Claude code-window-card dengan Apple window controls, category tabs, and active state cream; 558 test lulus, lint 0 error, build 0 error |
-| **Restorasi Icon Bot Warm Coral & Struktur Narasi Analisis** | selesai | LIVE | Mengembalikan icon Bot warm coral di header & message bubble (menghilangkan kotak hitam [DMS] & [AI]), font ringkasan sans-serif tajam, dan pemecahan narasi analisis eksekutif menjadi paragraf terstruktur + callout rekomendasi tanpa efek semut berbaris |
+| **Restorasi Icon Bot Warm Coral & Struktur Narasi Analisis** | selesai | `d3e3a51` | Mengembalikan icon Bot warm coral di header & message bubble (menghilangkan kotak hitam [DMS] & [AI]), font ringkasan sans-serif tajam, dan pemecahan narasi analisis eksekutif menjadi paragraf terstruktur + callout rekomendasi tanpa efek semut berbaris |
+| **Penyempurnaan Visual & UX Editorial** | selesai | LIVE | Warm user bubble (anti-pitch-black), palet chart terracotta #cc785c, deduplikasi judul toolbar, smart insights label Bulan (bukan Baris), prompt deck sans-serif, login card warm surface, tombol Coba Lagi pada error |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -1003,6 +1004,31 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Frontend lint: `npm run lint` **0 errors** (100% lulus).
   - Frontend build: `npm run build` exit code 0 (**100% lulus**).
   - Browser DevTools live testing: Tangkapan layar membuktikan brand bot coral, ringkasan sans-serif tajam, dan narasi analisis terstruktur rapi.
+
+### 3ac. Penyempurnaan Visual & UX Editorial: Warm Bubble, Palet Chart Terracotta, Deduplikasi Judul & Label Bulan (2026-09-07)
+
+- **Masalah yang Diatasi**:
+  1. Bubble pesan pengguna berwarna hitam pekat `#181715` yang terlalu kontras dan menusuk mata pada kanvas ivory.
+  2. Palet grafik visual Recharts masih menggunakan warna default Tailwind blue `#3b82f6` yang bertabrakan dengan palet terracotta dan cream.
+  3. Duplikasi judul grafik di toolbar kartu jawaban (muncul mengambang di samping tombol Salin Tabel dan di dalam kartu grafik).
+  4. Label Smart Insights menampilkan *"Baris 6"* alih-alih *"Bulan 6"* karena kolom `bulan` bernilai angka.
+  5. Tipografi prompt saran di command deck menggunakan font serif italic yang kurang tegas untuk elemen interaktif.
+  6. Kartu login menggunakan `bg-white` murni yang melanggar *Zero Pure White Rule*.
+  7. Tidak adanya tombol aksi "Coba Lagi" saat pipeline kueri mengalami kendala jaringan atau error.
+
+- **Solusi & Perubahan**:
+  1. **Bubble Pesan Pengguna (`UserWorkspace.jsx`)**: Diubah ke warna permukaan hangat yang elegan: `bg-surface-cream-strong text-ink border border-hairline rounded-lg shadow-2xs font-sans`.
+  2. **Palet Warna Chart Terkoordinasi (`AssistantAnswerCard.jsx`)**: Mengganti `BAR_COLORS` menjadi palet editorial terracotta `#cc785c`, deep teal `#2e6f77`, warm amber `#d97706`, dan slate `#475569`.
+  3. **Eliminasi Duplikasi Judul (`AssistantAnswerCard.jsx`)**: Menghapus teks judul mengambang di samping tombol toolbar, mempertahankan judul rapi di dalam kartu visual dengan icon `TrendingUp`.
+  4. **Penyempurnaan Deteksi Label Kategori (`smartInsights.js`)**: Memprioritaskan kata kunci kategori (`bulan`, `tahun`, `periode`, dsb.) dan memformat label otomatis (`Bulan 6`, `Tahun 2025`).
+  5. **Tipografi Command Deck (`UserWorkspace.jsx`)**: Mengubah prompt saran menjadi `font-sans font-medium text-xs text-ink` yang bersih dan tegas.
+  6. **Penyelarasan Kartu Login (`LoginModal.jsx`)**: Mengubah kontainer form menjadi `bg-surface-card rounded-xl border border-hairline`.
+  7. **Tombol Coba Lagi pada Error (`UserWorkspace.jsx`)**: Menambahkan tombol `Coba Lagi` dengan ikon `RotateCcw` di samping judul `Pemeriksaan Gagal`.
+
+- **Hasil Verifikasi**:
+  - Backend pytest: **558 passed in 40.95s** (100% lulus).
+  - Frontend lint: `npm run lint` **0 errors** (100% lulus).
+  - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 2.64s).
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 

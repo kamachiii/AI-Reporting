@@ -211,7 +211,7 @@ function deteksiKecocokanGrafik(columns, rows) {
   };
 }
 
-const BAR_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#f43f5e', '#06b6d4'];
+const BAR_COLORS = ['#cc785c', '#2e6f77', '#d97706', '#475569', '#059669', '#7c3aed'];
 
 /** Silent Error Boundary: Cegah error runtime chart agar tidak merusak UI user. */
 class SilentChartErrorBoundary extends Component {
@@ -849,12 +849,6 @@ export default function AssistantAnswerCard({
                 <span>{isCopied ? 'Tersalin!' : 'Salin Tabel'}</span>
               </button>
             </div>
-
-            {grafikConfig.cocok && (
-              <span className="text-[11px] text-muted tracking-tight font-medium font-sans">
-                {grafikConfig.title}
-              </span>
-            )}
           </div>
         )}
 
