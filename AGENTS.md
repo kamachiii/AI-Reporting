@@ -149,4 +149,4 @@ Detail kontrak & keputusan: `PROGRESS §3a–3g`.
 ---
 
 *File ini di-maintain seperti kode: ubah lewat commit, jangan edit diam-diam di production
-branch. Terakhir diperbarui: 2026-09-07 (setelah Redesign Anti-AI-Slop & Executive Command Deck).*
+branch. Terakhir diperbarui: 2026-09-07 (setelah Penerapan Claude Editorial Design System & Eliminasi AI-Slop).*

@@ -193,15 +193,15 @@ function MessageBubble({
         className="flex justify-end py-1.5"
       >
         <div className="max-w-[85%] sm:max-w-[75%] space-y-1">
-          <div className="flex items-center justify-end gap-2 text-[11px] text-muted font-medium pr-1">
+          <div className="flex items-center justify-end gap-2 text-[11px] text-muted-soft font-medium pr-1">
             <span>Pertanyaan Anda</span>
             {message.createdAt && (
-              <span className="font-mono text-[10px] text-muted/70 tabular-nums">
+              <span className="font-mono text-[10px] text-muted-soft tabular-nums">
                 {new Date(message.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
               </span>
             )}
           </div>
-          <div className="px-4 py-2.5 bg-surface-dark text-white rounded-xl rounded-tr-xs text-sm leading-relaxed shadow-xs border border-surface-dark">
+          <div className="px-4 py-3 bg-surface-dark text-on-dark rounded-lg text-sm leading-relaxed shadow-2xs border border-surface-dark font-sans">
             {message.text}
           </div>
         </div>
@@ -216,26 +216,26 @@ function MessageBubble({
       transition={{ duration: 0.25 }}
       className="py-2 w-full space-y-1.5"
     >
-      <div className="flex items-center gap-2 text-[11px] text-muted font-medium pl-0.5">
-        <div className="w-4 h-4 rounded-md bg-surface-soft border border-hairline flex items-center justify-center text-primary font-bold text-[9px]">
+      <div className="flex items-center gap-2 text-[11px] text-muted-soft font-medium pl-0.5">
+        <div className="w-4 h-4 rounded-sm bg-surface-dark text-on-dark flex items-center justify-center font-serif font-medium text-[9px] select-none">
           AI
         </div>
-        <span className="font-semibold text-ink">Intelijen Dealer AI</span>
-        <span className="text-muted/40">•</span>
-        <span className="font-mono text-[10px] text-muted">Core Engine</span>
+        <span className="font-medium text-ink">Intelijen Dealer AI</span>
+        <span className="text-hairline">•</span>
+        <span className="font-mono text-[10px] text-muted-soft">Core Engine</span>
         {message.createdAt && (
-          <span className="font-mono text-[10px] text-muted/60 ml-auto tabular-nums">
+          <span className="font-mono text-[10px] text-muted-soft ml-auto tabular-nums">
             {new Date(message.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
           </span>
         )}
       </div>
 
       {message.status === 'processing' ? (
-        <div className="bg-white border border-hairline rounded-xl p-4 shadow-xs max-w-md">
+        <div className="bg-canvas border border-hairline rounded-lg p-4 shadow-2xs max-w-md">
           <PipelineIndicator stageIndex={message.stageIndex} />
         </div>
       ) : message.status === 'error' ? (
-        <div className="max-w-2xl bg-red-50/80 border border-red-200 rounded-xl px-4 py-3.5 shadow-xs text-xs text-red-900 leading-relaxed space-y-1">
+        <div className="max-w-2xl bg-rose-50/80 border border-rose-200 rounded-lg px-4 py-3.5 shadow-2xs text-xs text-rose-900 leading-relaxed space-y-1">
           <div className="font-semibold flex items-center gap-1.5 text-red-800">
             <span>Pemeriksaan Gagal</span>
           </div>
@@ -325,7 +325,9 @@ export default function UserWorkspace({ user, onLogout }) {
   // Auto-scroll ke pesan terbaru setiap daftar pesan berubah
   // (termasuk saat indikator pipeline berpindah tahap).
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    if (messages.length > 0) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
   }, [messages]);
 
   const handleSelectConversation = async (convId) => {
@@ -447,9 +449,9 @@ export default function UserWorkspace({ user, onLogout }) {
 
   return (
     <div className="h-screen bg-canvas flex flex-col overflow-hidden">
-      {/* Header: Judul App + Status Koneksi + Sesi Baru + Logout */}
-      <header className="bg-white border-b border-hairline shrink-0 px-4 py-2.5">
-        <div className="flex items-center justify-between gap-3">
+      {/* Header (Top Navigation 64px sesuai DESIGN-claude.md) */}
+      <header className="h-16 bg-canvas border-b border-hairline shrink-0 px-4">
+        <div className="h-full flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             {!sidebarOpen && (
               <button
@@ -457,20 +459,20 @@ export default function UserWorkspace({ user, onLogout }) {
                 onClick={() => setSidebarOpen(true)}
                 title="Buka Riwayat Percakapan"
                 aria-label="Buka Riwayat Percakapan"
-                className="p-1.5 rounded-lg border border-hairline hover:bg-surface-soft text-muted hover:text-ink transition-colors cursor-pointer"
+                className="p-1.5 rounded-md border border-hairline hover:bg-surface-soft text-muted hover:text-ink transition-colors cursor-pointer"
               >
                 <PanelLeftOpen size={16} />
               </button>
             )}
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-surface-dark text-white flex items-center justify-center font-serif font-bold text-sm tracking-wider shadow-2xs border border-surface-dark/90 select-none">
+              <div className="w-8 h-8 rounded-md bg-surface-dark text-on-dark flex items-center justify-center font-serif font-medium text-xs tracking-wider shadow-2xs border border-surface-dark/90 select-none">
                 DMS
               </div>
               <div>
-                <h1 className="font-serif text-base sm:text-lg text-ink font-semibold tracking-tight leading-none">
+                <h1 className="font-serif text-base sm:text-lg text-ink font-normal tracking-tight leading-none">
                   DMS AI Platform
                 </h1>
-                <p className="text-[11px] text-muted mt-0.5 font-sans">
+                <p className="text-[11px] text-muted-soft mt-0.5 font-sans">
                   Asisten Intelijen Basis Data Dealer
                 </p>
               </div>
@@ -482,29 +484,29 @@ export default function UserWorkspace({ user, onLogout }) {
               type="button"
               onClick={handleNewChat}
               title="Mulai Sesi Chat Baru"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-surface-soft border border-hairline text-xs font-medium text-ink transition-colors shadow-2xs cursor-pointer"
+              className="h-9 flex items-center gap-1.5 px-3 rounded-md bg-canvas hover:bg-surface-soft border border-hairline text-xs font-medium text-ink transition-colors shadow-2xs cursor-pointer"
             >
               <MessageSquarePlus size={14} className="text-primary" />
               <span className="hidden sm:inline">Sesi Baru</span>
             </button>
 
             {branchCode && (
-              <div className="hidden sm:inline-flex items-center gap-2 px-3 py-1 rounded-full bg-surface-soft border border-hairline text-xs font-medium text-ink">
+              <div className="hidden sm:inline-flex items-center gap-2 px-3 py-1 rounded-full bg-surface-card border border-hairline text-xs font-medium text-ink">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="font-mono font-semibold">{branchCode}</span>
-                <span className="text-muted/40 text-[10px]">|</span>
+                <span className="font-mono font-medium">{branchCode}</span>
+                <span className="text-hairline text-[10px]">|</span>
                 <span className="text-muted text-[11px]">Database Siap</span>
               </div>
             )}
 
             <div className="h-4 w-[1px] bg-hairline hidden md:block mx-0.5" />
 
-            <span className="hidden md:inline text-xs text-muted font-medium font-mono">{user?.username}</span>
+            <span className="hidden md:inline text-xs text-muted-soft font-medium font-mono">{user?.username}</span>
 
             <button
               onClick={onLogout}
               title="Keluar dari sesi"
-              className="flex items-center gap-1.5 px-2.5 py-1.5 border border-hairline rounded-lg text-xs text-muted hover:bg-surface-soft hover:text-ink transition-colors cursor-pointer"
+              className="h-9 flex items-center gap-1.5 px-2.5 border border-hairline rounded-md text-xs text-muted hover:bg-surface-soft hover:text-ink transition-colors cursor-pointer"
             >
               <LogOut size={13} />
               <span className="hidden sm:inline">Keluar</span>
@@ -539,20 +541,20 @@ export default function UserWorkspace({ user, onLogout }) {
                 >
                   {/* Hero Dossier Header */}
                   <div className="text-center max-w-xl mx-auto space-y-2.5">
-                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-soft border border-hairline text-xs font-medium text-body">
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-card border border-hairline text-xs font-medium text-body">
                       <ShieldCheck size={13} className="text-emerald-600" />
                       <span>Terhubung ke Basis Data Dealer ({branchCode || 'Aktif'})</span>
                     </div>
-                    <h2 className="font-serif text-3xl sm:text-4xl text-ink font-semibold tracking-tight text-balance">
+                    <h2 className="font-serif text-3xl sm:text-4xl text-ink font-normal tracking-tight text-balance leading-tight">
                       Eksplorasi Data & Kinerja Dealer
                     </h2>
-                    <p className="text-body text-xs sm:text-sm leading-relaxed text-pretty max-w-lg mx-auto">
+                    <p className="text-body text-xs sm:text-sm leading-relaxed text-pretty max-w-lg mx-auto font-sans">
                       Analisis performa penjualan unit, operasional servis bengkel, dan ketersediaan stok
                       secara langsung dari database transaksi riil tanpa perlu menyusun SQL manual.
                     </p>
                   </div>
 
-                  {/* Quick Analytical Command Grid (4 Pilar Otomotif) */}
+                  {/* Quick Analytical Command Grid (Claude feature-card format) */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl mx-auto pt-1">
                     {PROMPT_SUGGESTIONS.map((item, idx) => (
                       <button
@@ -560,19 +562,19 @@ export default function UserWorkspace({ user, onLogout }) {
                         type="button"
                         onClick={() => handleSend(item.query)}
                         disabled={isProcessing || !branchCode}
-                        className="group text-left p-3.5 rounded-xl bg-white border border-hairline hover:border-primary/50 hover:shadow-xs transition-all cursor-pointer flex flex-col justify-between"
+                        className="group text-left p-5 rounded-lg bg-surface-card border border-hairline hover:border-primary/50 transition-all cursor-pointer flex flex-col justify-between shadow-2xs"
                       >
                         <div className="flex items-center justify-between mb-1.5">
-                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink group-hover:text-primary transition-colors">
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-ink group-hover:text-primary transition-colors">
                             <item.icon size={14} className="text-primary" />
                             {item.category}
                           </span>
                           <ArrowRight size={13} className="text-muted/40 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
                         </div>
-                        <p className="text-xs text-ink font-medium leading-snug">
+                        <p className="text-xs text-ink font-serif italic mt-1 leading-snug">
                           &ldquo;{item.query}&rdquo;
                         </p>
-                        <p className="text-[11px] text-muted mt-1">
+                        <p className="text-[11px] text-muted mt-1 font-sans">
                           {item.desc}
                         </p>
                       </button>
@@ -580,7 +582,7 @@ export default function UserWorkspace({ user, onLogout }) {
                   </div>
 
                   {/* System Telemetry Metadata */}
-                  <div className="flex items-center justify-center gap-3 text-[11px] text-muted font-mono pt-3 border-t border-hairline/60 max-w-md mx-auto">
+                  <div className="flex items-center justify-center gap-3 text-[11px] text-muted-soft font-mono pt-3 border-t border-hairline/60 max-w-md mx-auto">
                     <span>2.387 Tabel Terpantau</span>
                     <span>•</span>
                     <span>Read-Only Enforced</span>
@@ -606,14 +608,14 @@ export default function UserWorkspace({ user, onLogout }) {
           </main>
 
           {/* Kolom input console */}
-          <footer className="bg-white/95 backdrop-blur-xs border-t border-hairline shrink-0">
+          <footer className="bg-canvas/95 backdrop-blur-xs border-t border-hairline shrink-0">
             <div className="max-w-3xl mx-auto px-4 py-3">
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
                   handleSend();
                 }}
-                className="relative flex items-center bg-canvas border border-hairline rounded-xl shadow-2xs focus-within:border-primary/70 focus-within:ring-2 focus-within:ring-primary/10 transition-all"
+                className="relative flex items-center bg-canvas border border-hairline rounded-md shadow-2xs focus-within:border-primary focus-within:ring-3 focus-within:ring-primary/15 transition-all"
               >
                 <input
                   value={input}
@@ -626,14 +628,14 @@ export default function UserWorkspace({ user, onLogout }) {
                         ? 'Sedang menganalisis basis data dealer…'
                         : `Ajukan pertanyaan analitik untuk cabang ${branchCode}…`
                   }
-                  className="flex-1 py-3 pl-4 pr-12 bg-transparent text-sm text-ink placeholder:text-muted/60 focus:outline-none disabled:opacity-60 font-sans"
+                  className="flex-1 h-11 pl-4 pr-12 bg-transparent text-sm text-ink placeholder:text-muted-soft focus:outline-none disabled:opacity-60 font-sans"
                   aria-label="Pertanyaan analitik"
                 />
                 <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
                   <button
                     type="submit"
                     disabled={isProcessing || !branchCode || !input.trim()}
-                    className="p-2 rounded-lg bg-surface-dark text-white hover:bg-black disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    className="p-2 rounded-md bg-primary hover:bg-primary-active text-on-primary disabled:bg-primary-disabled disabled:text-muted disabled:cursor-not-allowed transition-colors cursor-pointer shadow-2xs"
                     title="Kirim Pertanyaan"
                     aria-label="Kirim Pertanyaan"
                   >
@@ -642,7 +644,7 @@ export default function UserWorkspace({ user, onLogout }) {
                 </div>
               </form>
 
-              <div className="flex items-center justify-between text-[11px] text-muted pt-2 px-1">
+              <div className="flex items-center justify-between text-[11px] text-muted-soft pt-2 px-1">
                 <span className="flex items-center gap-1.5">
                   <ShieldCheck size={12} className="text-emerald-600" />
                   <span>Kueri dieksekusi secara read-only dengan verifikasi AST & pgvector</span>

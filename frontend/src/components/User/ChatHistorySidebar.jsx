@@ -67,30 +67,32 @@ export default function ChatHistorySidebar({
       className="w-72 border-r border-hairline bg-surface-card flex flex-col h-full shrink-0 transition-all duration-200 select-none"
       aria-label="Riwayat Percakapan"
     >
-      {/* Header Sidebar: Judul + Tombol Tutup */}
-      <div className="p-3.5 border-b border-hairline flex items-center justify-between">
-        <div className="flex items-center gap-2 text-ink font-semibold text-sm">
-          <Clock size={16} className="text-primary" />
-          <span>Riwayat Chat</span>
+      {/* Header Sidebar: 64px Top-Nav Alignment */}
+      <div className="h-16 px-4 border-b border-hairline flex items-center justify-between bg-surface-card shrink-0">
+        <div className="flex items-center gap-2 text-ink">
+          <Clock size={15} className="text-primary" />
+          <span className="font-serif text-[15px] font-normal tracking-tight text-ink">
+            Riwayat Chat
+          </span>
         </div>
         <button
           type="button"
           onClick={onToggleOpen}
           title="Ciutkan Sidebar"
-          className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-surface-soft transition-colors cursor-pointer"
+          className="p-1.5 rounded-md text-muted hover:text-ink hover:bg-surface-soft transition-colors cursor-pointer"
         >
-          <PanelLeftClose size={16} />
+          <PanelLeftClose size={15} />
         </button>
       </div>
 
-      {/* Tombol + Chat Baru */}
-      <div className="p-3 border-b border-hairline">
+      {/* Tombol + Chat Baru (Claude Coral Primary CTA) */}
+      <div className="p-3 border-b border-hairline shrink-0">
         <button
           type="button"
           onClick={onNewChat}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-surface-dark text-white text-xs font-medium shadow-xs hover:bg-black transition-colors cursor-pointer"
+          className="w-full flex items-center justify-center gap-2 px-3 h-10 rounded-md bg-primary hover:bg-primary-active text-on-primary text-xs font-medium transition-colors cursor-pointer shadow-xs"
         >
-          <Plus size={14} className="text-white" />
+          <Plus size={14} className="text-on-primary" />
           <span>Sesi Percakapan Baru</span>
         </button>
 
@@ -103,7 +105,7 @@ export default function ChatHistorySidebar({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Cari arsip sesi…"
-              className="w-full pl-8 pr-7 py-1.5 text-xs bg-surface-soft/60 border border-hairline rounded-md text-ink placeholder:text-muted/60 focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/60 transition-colors"
+              className="w-full pl-8 pr-7 py-1.5 text-xs bg-canvas border border-hairline rounded-md text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
             />
             {searchQuery && (
               <button
@@ -135,7 +137,7 @@ export default function ChatHistorySidebar({
             if (items.length === 0) return null;
             return (
               <div key={groupName} className="space-y-1">
-                <p className="px-2 text-[10px] font-semibold text-muted uppercase tracking-wider">
+                <p className="px-2 text-[10px] font-mono text-muted-soft uppercase tracking-widest font-medium">
                   {groupName}
                 </p>
                 {items.map((conv) => {
@@ -145,10 +147,10 @@ export default function ChatHistorySidebar({
                   return (
                     <div
                       key={conv.id}
-                      className={`group relative flex items-center justify-between rounded-lg px-2.5 py-2 transition-colors cursor-pointer ${
+                      className={`group relative flex items-center justify-between rounded-md px-2.5 py-2 transition-colors cursor-pointer ${
                         isActive
-                          ? 'bg-white text-ink font-semibold border-l-2 border-l-primary border-y border-r border-hairline shadow-2xs'
-                          : 'text-body hover:text-ink hover:bg-surface-soft/60 border border-transparent'
+                          ? 'bg-surface-cream-strong text-ink font-medium border-l-2 border-l-primary border-y border-r border-hairline shadow-2xs'
+                          : 'text-body hover:text-ink hover:bg-surface-cream-strong/50 border border-transparent'
                       }`}
                       onClick={() => !isConfirmingDelete && onSelectConversation(conv.id)}
                     >
@@ -211,10 +213,10 @@ export default function ChatHistorySidebar({
 
       {/* Footer: Hapus Semua Riwayat */}
       {conversations.length > 0 && (
-        <div className="p-2.5 border-t border-hairline">
+        <div className="p-2.5 border-t border-hairline shrink-0">
           {showClearConfirm ? (
-            <div className="p-2 rounded-lg bg-error/5 border border-error/20 space-y-1.5 text-center">
-              <p className="text-[11px] text-error font-medium flex items-center justify-center gap-1">
+            <div className="p-2.5 rounded-md bg-rose-50/80 border border-rose-200/80 space-y-2 text-center">
+              <p className="text-[11px] text-rose-800 font-medium flex items-center justify-center gap-1">
                 <AlertCircle size={12} />
                 <span>Hapus seluruh riwayat cabang ini?</span>
               </p>
@@ -225,7 +227,7 @@ export default function ChatHistorySidebar({
                     onClearAll();
                     setShowClearConfirm(false);
                   }}
-                  className="px-2.5 py-1 text-[11px] font-medium bg-error text-white rounded-md hover:bg-error/90 transition-colors cursor-pointer"
+                  className="px-2.5 py-1 text-[11px] font-medium bg-rose-700 text-white rounded-md hover:bg-rose-800 transition-colors cursor-pointer"
                 >
                   Ya, Hapus Semua
                 </button>
@@ -242,7 +244,7 @@ export default function ChatHistorySidebar({
             <button
               type="button"
               onClick={() => setShowClearConfirm(true)}
-              className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-xs text-muted hover:text-error hover:bg-error/5 rounded-lg transition-colors cursor-pointer"
+              className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-xs text-muted hover:text-rose-700 hover:bg-rose-50/50 rounded-md transition-colors cursor-pointer"
             >
               <Trash2 size={12} />
               <span>Hapus Semua Riwayat</span>

@@ -937,7 +937,45 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Backend compileall: **exit 0**.
   - Backend pytest: **558 passed in 38.50s** (100% lulus tanpa kegagalan).
   - Frontend lint: `npm run lint` **0 errors** (100% lulus).
-  - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 1.24s).
+## 3aa. Penerapan Claude Editorial Design System & Eliminasi AI-Slop (DESIGN-claude.md)
+
+- **Latar Belakang & Acuan Desain**:
+  - Mengadopsi pedoman desain resmi dari dokumen `DESIGN-claude.md` (arsitektur antarmuka editorial Anthropic Claude).
+  - Menghilangkan secara radikal seluruh pola klise generik AI (*AI-slop*): avatar bot kartun raksasa, badge soup dengan emoji berkilau (`✨`), bentuk balon rounded-3xl berlebih, gradasi warna ungu/pink, dan font bold 700 liar.
+  - Memastikan *Zero Pure White Rule*: seluruh background menggunakan kanvas hangat (`#faf9f5` / `bg-canvas`), kartu konten menggunakan deeper cream (`#efe9de` / `bg-surface-card`), aksen primer coral hangat (`#cc785c` / `bg-primary`), dan permukaan gelap produk (`#181715` / `bg-surface-dark`).
+
+- **Komponen & Berkas yang Diperbarui**:
+  1. **Global Typography & Token Styling (`frontend/index.html` & `frontend/src/index.css`)**:
+     - Memuat font Google `Cormorant Garamond` (bobot 400, 500, 600, italic), `Inter` (bobot 400, 500, 600), dan `JetBrains Mono` (bobot 400, 500).
+     - Mengkonfigurasi seluruh token warna CSS `@theme` turunan `DESIGN-claude.md`: `--color-primary: #cc785c`, `--color-primary-active: #a9583e`, `--color-canvas: #faf9f5`, `--color-surface-card: #efe9de`, `--color-surface-cream-strong: #e8e0d2`, `--color-surface-dark: #181715`, `--color-surface-dark-soft: #1f1e1b`, `--color-ink: #141413`, `--color-body: #3d3d3a`, `--color-muted: #6c6a64`, `--color-muted-soft: #8e8b82`, `--color-border-hairline: #e6dfd8`.
+  2. **Layar Autentikasi (`LoginModal.jsx`)**:
+     - Menghapus ikon Sparkles dan nuansa ungu/pink generic AI.
+     - Menggunakan monogram arsitektural gelap `DMS` dengan tipografi display serif `Cormorant Garamond` 400 regular (`tracking-tight`).
+     - Tombol login diubah menjadi Claude `button-primary` coral (`h-10`, `rounded-md`, `#cc785c` dengan hover `#a9583e`).
+  3. **Workspace Asisten Eksekutif (`UserWorkspace.jsx`)**:
+     - *Header*: Mengadopsi 64px (`h-16`) top-nav dengan monogram arsitektural `DMS`, pill status database dealer ber-hairline rapi, dan tombol Sesi Baru.
+     - *Hero Empty State*: Format `hero-band` Claude dengan judul display serif Cormorant Garamond 400 regular dan 4 kartu kueri cepat berformat `feature-card` Claude (`#efe9de` surface-card, `rounded-lg` 12px, border hairline halus, hover border coral).
+     - *Message Bubble*: Pesan pengguna berformat Claude `product-mockup-card-dark` (`bg-surface-dark text-on-dark rounded-lg p-4 font-sans`).
+     - *Input Console*: Berfokus tenang dengan hairline hangat, focus ring coral lembut (`focus-within:ring-primary/15`), dan tombol kirim coral tactile.
+  4. **Kartu Jawaban & Window Artifact (`AssistantAnswerCard.jsx`)**:
+     - *SQL Code Block*: Dirombak menjadi signature Claude `code-window-card` (`bg-surface-dark` #181715 dengan container luar ber-border halus, window control bar 3 titik berwarna Apple #ff5f57, #febc2e, #28c840, tab `query.sql`, tombol Salin SQL, dan teks SQL JetBrains Mono `#f5f4ef`).
+     - *Pilar 3S Multi-Table & Category Tabs*: Berganti ke Claude `category-tab` (`rounded-md`, aktif dengan `bg-canvas border border-hairline text-primary`).
+     - *Tabel & Aksi*: Menyelaraskan tombol `Unduh Excel` dan `Salin Tabel` ke Claude `button-secondary` (`bg-canvas border border-hairline rounded-md text-ink hover:bg-surface-soft`).
+  5. **Sidebar Riwayat Chat (`ChatHistorySidebar.jsx`)**:
+     - Header diselaraskan dengan ketinggian 64px (`h-16`).
+     - Tombol `+ Sesi Percakapan Baru` menggunakan coral primary CTA (`bg-primary text-on-primary rounded-md h-10`).
+     - Sesi aktif berganti ke Claude active item (`bg-surface-cream-strong text-ink font-medium border-l-2 border-l-primary rounded-md`).
+  6. **Kartu Dialog Klarifikasi Parameter (`ClarificationCard.jsx`)**:
+     - Dibungkus dalam kontainer `bg-surface-card border border-hairline rounded-lg`.
+     - Opsi pilihan diformat sebagai Claude `connector-tile` (`bg-canvas border border-hairline hover:bg-surface-cream-strong hover:border-primary/50 rounded-md`).
+
+- **Hasil Verifikasi**:
+  - Backend pytest: **558 passed in 56.75s** (100% lulus tanpa kegagalan).
+  - Frontend lint: `npm run lint` **0 errors** (100% lulus).
+  - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 1.33s).
+  - Visual Browser Verification via Chrome DevTools MCP:
+    - Terverifikasi pada viewport desktop nyata di `http://localhost:5173/`.
+    - Tangkapan layar hero, dossier eksekutif, dark code window card, dan table view membuktikan antarmuka editorial hangat dan bebas AI-slop secara nyata.
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
@@ -998,6 +1036,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Penyempurnaan Analisis Multi-Divisi: Koreksi Skema Riil Dealer, Tab Komparasi Sejajar, De-duplikasi Chip & Smart Context Note** — SELESAI (lihat §3y).
 - [x] **Fix Format Mata Uang vs Kuantitas & Total Transaksi** — SELESAI (lihat §3y).
 - [x] **Manajemen Riwayat Chat Multi-Sesi, Tabel Pintar Interaktif & Penyelarasan Skema Bengkel Riil** — SELESAI (lihat §3z).
+- [x] **Penerapan Claude Editorial Design System & Eliminasi AI-Slop (DESIGN-claude.md)** — SELESAI (lihat §3aa).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. *Dedicated Executive Dashboard Page*: Ditutup/dibatalkan atas arahan pengguna untuk mempertahankan identitas murni Conversational AI Assistant.
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.

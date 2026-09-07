@@ -239,7 +239,7 @@ class SilentChartErrorBoundary extends Component {
 function CustomChartTooltip({ active, payload, label }) {
   if (active && payload && payload.length) {
     return (
-      <div className="bg-white border border-hairline rounded-lg p-2.5 shadow-lg text-xs space-y-1 z-50">
+      <div className="bg-canvas border border-hairline rounded-md p-2.5 shadow-sm text-xs space-y-1 z-50">
         <p className="font-semibold text-ink border-b border-hairline pb-1 mb-1.5">{label}</p>
         {payload.map((entry, index) => (
           <div key={index} className="flex items-center justify-between gap-4">
@@ -284,6 +284,7 @@ export default function AssistantAnswerCard({
   const [tablePage, setTablePage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [isCopied, setIsCopied] = useState(false);
+  const [isSqlCopied, setIsSqlCopied] = useState(false);
 
   // Filter hanya tab yang memiliki data nyata (>0 baris)
   const validTabs = useMemo(() => {
@@ -505,28 +506,28 @@ export default function AssistantAnswerCard({
 
   return (
     <>
-      <div className="bg-white border border-hairline rounded-xl shadow-xs p-4 sm:p-5 space-y-4">
+      <div className="bg-canvas border border-hairline rounded-lg shadow-2xs p-4 sm:p-5 space-y-4">
         {/* Executive Dossier Header */}
         <div className="flex items-center justify-between gap-3 border-b border-hairline pb-3 flex-wrap">
           <div className="flex items-center gap-2 flex-wrap">
             {terverifikasi ? (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-xs font-semibold">
-                <Check size={12} className="text-emerald-600" />
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-50/80 border border-emerald-200/80 text-emerald-800 text-xs font-medium">
+                <Check size={12} className="text-emerald-700" />
                 <span>Memori Terverifikasi</span>
               </span>
             ) : ditolak ? (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-rose-50 border border-rose-200 text-rose-800 text-xs font-medium">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-rose-50/80 border border-rose-200 text-rose-800 text-xs font-medium">
                 <X size={12} />
                 <span>Kueri Ditolak</span>
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-surface-soft border border-hairline text-ink text-xs font-semibold">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-surface-card border border-hairline text-ink text-xs font-medium">
                 <Database size={12} className="text-primary" />
                 <span>Hasil Basis Data Terverifikasi</span>
               </span>
             )}
 
-            <span className="text-[11px] text-muted font-mono bg-canvas px-2 py-0.5 rounded border border-hairline">
+            <span className="text-[11px] text-muted font-mono bg-surface-card px-2 py-0.5 rounded-md border border-hairline">
               Keyakinan: <strong className="text-ink">{answer.confidence || 'B'}</strong>
             </span>
           </div>
@@ -546,11 +547,11 @@ export default function AssistantAnswerCard({
 
         {/* Ringkasan Eksekutif Callout */}
         {answer.ringkasan && (
-          <div className="border-l-2 border-primary pl-3.5 py-1.5 bg-surface-soft/40 rounded-r-lg">
+          <div className="border-l-2 border-primary pl-3.5 py-1.5 bg-surface-card/50 rounded-r-md">
             <div className="text-[10px] font-mono text-muted uppercase tracking-wider mb-0.5">
               Ringkasan Eksekutif
             </div>
-            <p className="font-serif italic text-[15px] sm:text-[16px] leading-relaxed text-ink font-medium">
+            <p className="font-serif italic text-[15px] sm:text-[16px] leading-relaxed text-ink font-normal">
               {bersihkanRingkasan(answer.ringkasan)}
             </p>
           </div>
@@ -563,9 +564,9 @@ export default function AssistantAnswerCard({
               type="button"
               onClick={handleExplain}
               disabled={loadingExplain}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-hairline rounded-lg text-ink bg-white hover:bg-surface-soft transition-colors disabled:opacity-50 cursor-pointer shadow-2xs"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-hairline rounded-md text-ink bg-canvas hover:bg-surface-soft transition-colors disabled:opacity-50 cursor-pointer shadow-2xs"
             >
-              {loadingExplain ? <Loader2 size={12} className="animate-spin text-primary" /> : <Lightbulb size={12} className="text-amber-600" />}
+              {loadingExplain ? <Loader2 size={12} className="animate-spin text-primary" /> : <Lightbulb size={12} className="text-primary" />}
               <span>{loadingExplain ? 'Menyusun analisis mendalam…' : 'Analisis Naratif Eksekutif'}</span>
             </button>
           </div>
@@ -573,9 +574,9 @@ export default function AssistantAnswerCard({
 
         {/* Hasil Narasi Analisis Eksekutif On-Demand */}
         {penjelasan && (
-          <div className="bg-surface-soft/70 border border-hairline rounded-lg p-3.5 text-xs leading-relaxed text-ink space-y-1.5 animate-fadeIn">
-            <div className="flex items-center gap-1.5 text-ink font-semibold text-[11px] uppercase tracking-wider">
-              <Lightbulb size={13} className="text-amber-600" />
+          <div className="bg-surface-card/70 border border-hairline rounded-lg p-3.5 text-xs leading-relaxed text-ink space-y-1.5 animate-fadeIn">
+            <div className="flex items-center gap-1.5 text-ink font-medium text-[11px] uppercase tracking-wider">
+              <Lightbulb size={13} className="text-primary" />
               <span>Analisis Eksekutif Data</span>
             </div>
             <p className="whitespace-pre-wrap text-body font-sans leading-relaxed">{penjelasan}</p>
@@ -585,7 +586,7 @@ export default function AssistantAnswerCard({
         {/* Domain Tab Bar (Pilar 3S Multi-Table) - HANYA tampil jika minimal 2 tabel memiliki data */}
         {isMultiTab && (
           <div className="pt-1">
-            <div className="flex items-center gap-1.5 p-1 bg-surface-soft/80 rounded-xl border border-hairline overflow-x-auto">
+            <div className="flex items-center gap-1.5 p-1 bg-surface-card rounded-md border border-hairline overflow-x-auto">
               {validTabs.map((tab, idx) => {
                 const isActive = (activeDomainTab >= validTabs.length ? 0 : activeDomainTab) === idx;
                 return (
@@ -595,10 +596,10 @@ export default function AssistantAnswerCard({
                     onClick={() => {
                       setActiveDomainTab(idx);
                     }}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer whitespace-nowrap ${
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer whitespace-nowrap ${
                       isActive
-                        ? 'bg-white shadow-xs text-primary font-semibold border border-hairline'
-                        : 'text-muted hover:text-ink hover:bg-white/50'
+                        ? 'bg-canvas shadow-xs text-primary font-medium border border-hairline'
+                        : 'text-muted hover:text-ink hover:bg-surface-soft/60'
                     }`}
                   >
                     {tab.icon === 'Car' ? <Car size={13} /> :
@@ -620,10 +621,10 @@ export default function AssistantAnswerCard({
 
         {/* Ringkasan Indikator Statistik Data */}
         {smartInsights.hasInsights && (
-          <div className="bg-surface-soft/60 border border-hairline rounded-lg p-3 space-y-2 text-xs">
+          <div className="bg-surface-card/60 border border-hairline rounded-lg p-3 space-y-2 text-xs">
             <div className="flex items-center justify-between text-muted text-[11px]">
               <span className="inline-flex items-center gap-1.5 font-medium text-ink tracking-wide">
-                <Lightbulb size={13} className="text-amber-600" />
+                <Lightbulb size={13} className="text-primary" />
                 <span>Indikator Statistik Utama</span>
               </span>
               <span className="font-mono tabular-nums text-muted">{smartInsights.jumlahData} baris data</span>
@@ -634,10 +635,10 @@ export default function AssistantAnswerCard({
                 <div
                   className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium tabular-nums ${
                     smartInsights.arahTren === 'naik'
-                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                      ? 'bg-emerald-50/80 text-emerald-800 border-emerald-200/80'
                       : smartInsights.arahTren === 'turun'
-                        ? 'bg-rose-50 text-rose-800 border-rose-200'
-                        : 'bg-white text-body border-hairline'
+                        ? 'bg-rose-50/80 text-rose-800 border-rose-200/80'
+                        : 'bg-canvas text-body border-hairline'
                   }`}
                 >
                   {smartInsights.arahTren === 'naik' ? (
@@ -652,8 +653,8 @@ export default function AssistantAnswerCard({
               )}
 
               {smartInsights.tertinggi && (
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white border border-hairline text-body">
-                  <Award size={12} className="text-amber-600 shrink-0" />
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-canvas border border-hairline text-body">
+                  <Award size={12} className="text-primary shrink-0" />
                   <span className="truncate max-w-[240px]">
                     Tertinggi: <strong className="font-semibold text-ink">{smartInsights.tertinggi.label}</strong> (<span className="font-mono tabular-nums">{smartInsights.tertinggi.nilaiFormatted}</span>)
                   </span>
@@ -661,13 +662,13 @@ export default function AssistantAnswerCard({
               )}
 
               {smartInsights.totalFormatted && (
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white border border-hairline text-muted">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-canvas border border-hairline text-muted">
                   <span>Total: <strong className="text-ink font-mono tabular-nums">{smartInsights.totalFormatted}</strong></span>
                 </div>
               )}
 
               {smartInsights.rataRataFormatted && (
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white border border-hairline text-muted">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-canvas border border-hairline text-muted">
                   <span>Rata-rata: <strong className="text-ink font-mono tabular-nums">{smartInsights.rataRataFormatted}</strong></span>
                 </div>
               )}
@@ -680,12 +681,12 @@ export default function AssistantAnswerCard({
           <div className="flex items-center justify-between pt-1 flex-wrap gap-2">
             <div className="flex items-center gap-2 flex-wrap">
               {grafikConfig.cocok && (
-                <div className="flex items-center gap-1 bg-surface-soft p-0.5 rounded-lg border border-hairline">
+                <div className="flex items-center gap-1 bg-surface-card p-0.5 rounded-md border border-hairline">
                   <button
                     type="button"
                     onClick={() => setUserTabPreference('table')}
                     className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                      activeTab === 'table' ? 'bg-white shadow-xs text-ink font-semibold border border-hairline' : 'text-muted hover:text-ink'
+                      activeTab === 'table' ? 'bg-canvas shadow-xs text-ink font-medium border border-hairline' : 'text-muted hover:text-ink'
                     }`}
                   >
                     <TableIcon size={12} />
@@ -695,7 +696,7 @@ export default function AssistantAnswerCard({
                     type="button"
                     onClick={() => setUserTabPreference('chart')}
                     className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                      activeTab === 'chart' ? 'bg-white shadow-xs text-primary font-semibold border border-hairline' : 'text-muted hover:text-ink'
+                      activeTab === 'chart' ? 'bg-canvas shadow-xs text-primary font-medium border border-hairline' : 'text-muted hover:text-ink'
                     }`}
                   >
                     <BarChart2 size={12} />
@@ -709,13 +710,13 @@ export default function AssistantAnswerCard({
 
               {/* Sub-toggle tipe chart jika di tab chart */}
               {grafikConfig.cocok && activeTab === 'chart' && (
-                <div className="flex items-center gap-0.5 bg-surface-soft/80 p-0.5 rounded-md border border-hairline">
+                <div className="flex items-center gap-0.5 bg-surface-card p-0.5 rounded-md border border-hairline">
                   <button
                     type="button"
                     title="Grafik Batang (Bar)"
                     onClick={() => setChartType('bar')}
-                    className={`p-1 rounded text-xs transition-colors cursor-pointer ${
-                      chartType === 'bar' ? 'bg-white shadow-xs text-primary font-semibold' : 'text-muted hover:text-ink'
+                    className={`p-1 rounded-md text-xs transition-colors cursor-pointer ${
+                      chartType === 'bar' ? 'bg-canvas shadow-xs text-primary font-medium' : 'text-muted hover:text-ink'
                     }`}
                   >
                     <BarChart2 size={13} />
@@ -724,8 +725,8 @@ export default function AssistantAnswerCard({
                     type="button"
                     title="Grafik Garis Tren (Line)"
                     onClick={() => setChartType('line')}
-                    className={`p-1 rounded text-xs transition-colors cursor-pointer ${
-                      chartType === 'line' ? 'bg-white shadow-xs text-primary font-semibold' : 'text-muted hover:text-ink'
+                    className={`p-1 rounded-md text-xs transition-colors cursor-pointer ${
+                      chartType === 'line' ? 'bg-canvas shadow-xs text-primary font-medium' : 'text-muted hover:text-ink'
                     }`}
                   >
                     <LineChartIcon size={13} />
@@ -739,12 +740,12 @@ export default function AssistantAnswerCard({
                 onClick={handleExportExcel}
                 disabled={isExporting}
                 title="Unduh Spreadsheet Excel (.xlsx) Lengkap dengan Format Akuntansi & Grafik Asli"
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-white hover:bg-surface-soft text-ink border border-hairline transition-colors shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-canvas hover:bg-surface-soft text-ink border border-hairline transition-colors shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-50"
               >
                 {isExporting ? (
-                  <Loader2 size={12} className="animate-spin text-emerald-700" />
+                  <Loader2 size={12} className="animate-spin text-primary" />
                 ) : (
-                  <FileSpreadsheet size={13} className="text-emerald-700" />
+                  <FileSpreadsheet size={13} className="text-primary" />
                 )}
                 <span>{isExporting ? 'Mengekspor...' : 'Unduh Excel'}</span>
               </button>
@@ -754,10 +755,10 @@ export default function AssistantAnswerCard({
                 type="button"
                 onClick={handleCopyTable}
                 title="Salin seluruh data tabel ke clipboard (format TSV/Excel)"
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-white hover:bg-surface-soft text-ink border border-hairline transition-colors shadow-2xs hover:shadow-xs cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-canvas hover:bg-surface-soft text-ink border border-hairline transition-colors shadow-2xs hover:shadow-xs cursor-pointer"
               >
                 {isCopied ? (
-                  <Check size={13} className="text-emerald-600" />
+                  <Check size={13} className="text-emerald-700" />
                 ) : (
                   <Copy size={13} className="text-muted" />
                 )}
@@ -766,7 +767,7 @@ export default function AssistantAnswerCard({
             </div>
 
             {grafikConfig.cocok && (
-              <span className="text-[11px] text-muted tracking-tight font-medium">
+              <span className="text-[11px] text-muted tracking-tight font-medium font-sans">
                 {grafikConfig.title}
               </span>
             )}
@@ -791,13 +792,13 @@ export default function AssistantAnswerCard({
               </p>
             )}
           >
-            <div className="border border-hairline rounded-xl p-3.5 bg-surface-soft/30 shadow-xs space-y-2">
+            <div className="border border-hairline rounded-lg p-3.5 bg-surface-card/30 shadow-2xs space-y-2">
               <div className="flex items-center justify-between text-xs pb-1 border-b border-hairline">
-                <span className="font-semibold text-ink flex items-center gap-1.5">
+                <span className="font-medium text-ink flex items-center gap-1.5 font-sans">
                   <TrendingUp size={13} className="text-primary" />
                   {grafikConfig.title}
                 </span>
-                <span className="text-[10px] text-muted font-mono bg-canvas px-1.5 py-0.5 rounded border border-hairline">
+                <span className="text-[10px] text-muted font-mono bg-canvas px-1.5 py-0.5 rounded-md border border-hairline">
                   {grafikConfig.chartData.length} data point
                 </span>
               </div>
@@ -805,15 +806,15 @@ export default function AssistantAnswerCard({
                 <ResponsiveContainer width="100%" height="100%">
                   {chartType === 'line' ? (
                     <LineChart data={grafikConfig.chartData} margin={{ top: 10, right: 15, left: 5, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e6dfd8" />
                       <XAxis
                         dataKey={grafikConfig.categoryCol}
-                        tick={{ fontSize: 11, fill: '#64748b' }}
-                        tickLine={{ stroke: '#cbd5e1' }}
+                        tick={{ fontSize: 11, fill: '#6c6a64' }}
+                        tickLine={{ stroke: '#e6dfd8' }}
                       />
                       <YAxis
-                        tick={{ fontSize: 11, fill: '#64748b' }}
-                        tickLine={{ stroke: '#cbd5e1' }}
+                        tick={{ fontSize: 11, fill: '#6c6a64' }}
+                        tickLine={{ stroke: '#e6dfd8' }}
                         tickFormatter={(val) => formatCompactAxis(val, grafikConfig.hasCurrencyCol)}
                       />
                       <Tooltip content={<CustomChartTooltip />} />
@@ -825,22 +826,22 @@ export default function AssistantAnswerCard({
                           dataKey={col}
                           stroke={BAR_COLORS[idx % BAR_COLORS.length]}
                           strokeWidth={2.5}
-                          dot={{ r: 3.5, strokeWidth: 1.5, fill: '#ffffff' }}
+                          dot={{ r: 3.5, strokeWidth: 1.5, fill: '#faf9f5' }}
                           activeDot={{ r: 6 }}
                         />
                       ))}
                     </LineChart>
                   ) : (
                     <BarChart data={grafikConfig.chartData} margin={{ top: 10, right: 15, left: 5, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e6dfd8" />
                       <XAxis
                         dataKey={grafikConfig.categoryCol}
-                        tick={{ fontSize: 11, fill: '#64748b' }}
-                        tickLine={{ stroke: '#cbd5e1' }}
+                        tick={{ fontSize: 11, fill: '#6c6a64' }}
+                        tickLine={{ stroke: '#e6dfd8' }}
                       />
                       <YAxis
-                        tick={{ fontSize: 11, fill: '#64748b' }}
-                        tickLine={{ stroke: '#cbd5e1' }}
+                        tick={{ fontSize: 11, fill: '#6c6a64' }}
+                        tickLine={{ stroke: '#e6dfd8' }}
                         tickFormatter={(val) => formatCompactAxis(val, grafikConfig.hasCurrencyCol)}
                       />
                       <Tooltip content={<CustomChartTooltip />} />
@@ -850,8 +851,8 @@ export default function AssistantAnswerCard({
                           key={col}
                           dataKey={col}
                           fill={BAR_COLORS[idx % BAR_COLORS.length]}
-                          radius={[4, 4, 0, 0]}
-                          maxBarSize={48}
+                          radius={[3, 3, 0, 0]}
+                          maxBarSize={44}
                         />
                       ))}
                     </BarChart>
@@ -875,7 +876,7 @@ export default function AssistantAnswerCard({
                       setTableSearch(e.target.value);
                       setTablePage(1);
                     }}
-                    className="w-full pl-8 pr-3 py-1 text-xs bg-surface-soft/60 border border-hairline rounded-md focus:outline-none focus:ring-1 focus:ring-primary/40 text-ink placeholder:text-muted"
+                    className="w-full pl-8 pr-3 py-1.5 text-xs bg-canvas border border-hairline rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-ink placeholder:text-muted"
                   />
                   {tableSearch && (
                     <button
@@ -895,7 +896,7 @@ export default function AssistantAnswerCard({
                       setPageSize(e.target.value === 'all' ? 'all' : Number(e.target.value));
                       setTablePage(1);
                     }}
-                    className="bg-surface-soft/60 border border-hairline rounded px-1.5 py-0.5 text-xs text-ink focus:outline-none cursor-pointer"
+                    className="bg-canvas border border-hairline rounded-md px-2 py-1 text-xs text-ink focus:outline-none cursor-pointer"
                   >
                     <option value={10}>10</option>
                     <option value={25}>25</option>
@@ -907,8 +908,8 @@ export default function AssistantAnswerCard({
             )}
 
             <div className="border border-hairline rounded-lg overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-surface-soft text-xs text-muted">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-surface-card text-[11px] text-muted font-medium border-b border-hairline">
                   <tr>
                     {activeColumns.map((col, j) => {
                       const isSorted = sortCol === col;
@@ -918,7 +919,7 @@ export default function AssistantAnswerCard({
                         <th
                           key={col}
                           onClick={() => handleSort(col)}
-                          className={`px-3 py-2 font-medium whitespace-nowrap cursor-pointer select-none hover:bg-surface-soft/80 transition-colors ${
+                          className={`px-3 py-2 font-medium whitespace-nowrap cursor-pointer select-none hover:bg-surface-cream-strong/50 transition-colors ${
                             isNum ? 'text-right' : 'text-left'
                           }`}
                           title={`Klik untuk mengurutkan data berdasarkan ${col}`}
@@ -951,7 +952,7 @@ export default function AssistantAnswerCard({
                     paginatedRows.map((row, i) => {
                       const cells = Array.isArray(row) ? row : Object.values(row || {});
                       return (
-                        <tr key={i} className="hover:bg-surface-soft/50 transition-colors">
+                        <tr key={i} className="hover:bg-surface-card/40 transition-colors">
                           {cells.map((cell, j) => {
                             const isNum = typeof cell === 'number' || (typeof cell === 'string' && cell.trim() !== '' && !Number.isNaN(Number(cell)));
                             return (
@@ -987,19 +988,19 @@ export default function AssistantAnswerCard({
                       type="button"
                       disabled={tablePage <= 1}
                       onClick={() => setTablePage((p) => Math.max(1, p - 1))}
-                      className="p-1 rounded border border-hairline hover:bg-surface-soft disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                      className="p-1 rounded-md border border-hairline bg-canvas hover:bg-surface-soft disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                       title="Halaman sebelumnya"
                     >
                       <ChevronLeft size={13} />
                     </button>
-                    <span className="px-1.5 font-medium text-ink">
+                    <span className="px-1.5 font-medium text-ink font-mono text-[11px]">
                       {tablePage} / {totalPages}
                     </span>
                     <button
                       type="button"
                       disabled={tablePage >= totalPages}
                       onClick={() => setTablePage((p) => Math.min(totalPages, p + 1))}
-                      className="p-1 rounded border border-hairline hover:bg-surface-soft disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                      className="p-1 rounded-md border border-hairline bg-canvas hover:bg-surface-soft disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                       title="Halaman berikutnya"
                     >
                       <ChevronRight size={13} />
@@ -1020,21 +1021,53 @@ export default function AssistantAnswerCard({
           </p>
         )}
 
-        {/* SQL disertakan apa adanya (kejujuran UI) */}
-        <div>
+        {/* SQL Window Card - Signature Claude Artifact Aesthetic */}
+        <div className="pt-1">
           <button
             type="button"
             onClick={() => setTampilSql((v) => !v)}
-            className="inline-flex items-center gap-1 text-xs text-muted hover:text-ink transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 text-xs text-muted hover:text-ink transition-colors cursor-pointer"
             aria-expanded={tampilSql}
           >
             {tampilSql ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-            {isMultiTab ? `Lihat SQL (${currentTab.title || 'Tab Aktif'})` : 'Lihat SQL'}
+            <span className="font-mono text-[11px]">
+              {isMultiTab ? `SQL Query (${currentTab.title || 'Tab Aktif'})` : 'SQL Query'}
+            </span>
           </button>
           {tampilSql && (
-            <pre className="mt-1.5 bg-canvas border border-hairline rounded-lg p-3 text-[11px] leading-relaxed font-mono text-body overflow-x-auto whitespace-pre-wrap break-words">
-              {activeSql}
-            </pre>
+            <div className="mt-2 bg-surface-dark border border-hairline/20 rounded-lg overflow-hidden shadow-xs">
+              {/* Window Header */}
+              <div className="flex items-center justify-between px-3 py-2 bg-surface-dark-soft border-b border-hairline/15 text-xs">
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f57]/80 inline-block" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#febc2e]/80 inline-block" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#28c840]/80 inline-block" />
+                  </div>
+                  <span className="font-mono text-[11px] text-muted-soft pl-1.5 border-l border-hairline/20">
+                    query.sql
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(activeSql);
+                    setIsSqlCopied(true);
+                    toast.success('SQL disalin ke clipboard');
+                    setTimeout(() => setIsSqlCopied(false), 2000);
+                  }}
+                  className="inline-flex items-center gap-1 text-[11px] font-mono text-muted-soft hover:text-on-dark transition-colors cursor-pointer"
+                  title="Salin SQL"
+                >
+                  {isSqlCopied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                  <span>{isSqlCopied ? 'Tersalin' : 'Salin'}</span>
+                </button>
+              </div>
+              {/* Code Body */}
+              <pre className="p-3.5 text-[11px] leading-relaxed font-mono text-[#f5f4ef] overflow-x-auto whitespace-pre-wrap break-words bg-surface-dark">
+                {activeSql}
+              </pre>
+            </div>
           )}
         </div>
 

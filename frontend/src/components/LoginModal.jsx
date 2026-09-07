@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Sparkles } from 'lucide-react';
 import { api } from '../services/api';
 import { notify } from '../utils/notification';
 
@@ -30,51 +29,61 @@ export default function LoginModal({ onLoginSuccess }) {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-canvas px-4">
-      <div className="w-full max-w-md bg-white rounded-xl border border-hairline p-8 shadow-sm">
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-primary/10 mb-4">
-            <Sparkles className="w-6 h-6 text-primary" />
+      <div className="w-full max-w-md bg-white rounded-xl border border-hairline p-8 shadow-xs space-y-6">
+        <div className="text-center">
+          <div className="inline-flex items-center justify-center w-11 h-11 rounded-lg bg-surface-dark text-on-dark font-serif font-medium text-base tracking-wider mb-4 border border-surface-dark/90 shadow-2xs select-none">
+            DMS
           </div>
-          <h1 className="font-serif text-2xl text-ink">DMS AI Platform</h1>
-          <p className="text-muted text-sm mt-1">SaaS Add-on Chat AI untuk DMS</p>
+          <h1 className="font-serif text-3xl text-ink font-normal tracking-tight">
+            DMS AI Platform
+          </h1>
+          <p className="text-muted text-xs mt-1.5 font-sans">
+            Asisten Intelijen Basis Data Dealer
+          </p>
         </div>
 
         {error && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-error text-sm">
+          <div className="p-3 bg-red-50/80 border border-error/20 rounded-md text-error text-xs leading-relaxed">
             {error}
           </div>
         )}
 
         <form id="login-form" onSubmit={handleLogin} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-ink mb-1">Username</label>
+            <label className="block text-xs font-medium text-body-strong mb-1.5">
+              Username
+            </label>
             <input
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-4 py-2 border border-hairline rounded-md focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary bg-canvas"
-              placeholder="John Doe"
+              className="w-full h-10 px-3.5 text-sm bg-canvas border border-hairline rounded-md text-ink placeholder:text-muted/60 focus:outline-none focus:border-primary focus:ring-3 focus:ring-primary/15 transition-all font-sans"
+              placeholder="Masukkan username Anda…"
               disabled={isLoading}
+              required
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-ink mb-1">Password</label>
+            <label className="block text-xs font-medium text-body-strong mb-1.5">
+              Password
+            </label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-2 border border-hairline rounded-md focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary bg-canvas"
+              className="w-full h-10 px-3.5 text-sm bg-canvas border border-hairline rounded-md text-ink placeholder:text-muted/60 focus:outline-none focus:border-primary focus:ring-3 focus:ring-primary/15 transition-all font-sans"
               placeholder="••••••••"
               disabled={isLoading}
+              required
             />
           </div>
 
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full py-2.5 bg-primary text-white rounded-md font-medium hover:bg-primary-active transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
+            className="w-full h-10 px-5 bg-primary hover:bg-primary-active text-on-primary rounded-md text-sm font-medium transition-colors shadow-2xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed mt-2"
           >
-            {isLoading ? 'Memproses...' : 'Masuk ke Platform'}
+            {isLoading ? 'Memvalidasi Kredensial…' : 'Masuk ke Platform'}
           </button>
         </form>
       </div>
