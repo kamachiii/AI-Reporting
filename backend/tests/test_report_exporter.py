@@ -19,8 +19,13 @@ def test_is_currency_column():
     assert _is_currency_column("total_omzet") is True
     assert _is_currency_column("harga_jual") is True
     assert _is_currency_column("ar_leasing") is True
+    assert _is_currency_column("nilai_transaksi") is True
+    assert _is_currency_column("total_nominal") is True
     assert _is_currency_column("jumlah_unit") is False
     assert _is_currency_column("kuartal") is False
+    assert _is_currency_column("kuantiti_part_terjual") is False
+    assert _is_currency_column("total_transaksi") is False
+    assert _is_currency_column("total_pkb") is False
 
 
 def _get_chart_title_text(chart) -> str:

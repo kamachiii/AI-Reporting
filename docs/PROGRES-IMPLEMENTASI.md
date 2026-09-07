@@ -62,6 +62,8 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **Auto-Adaptive Visual Charts (0-Token)** | selesai | LIVE | Client-side Recharts 0 token, auto-default time-series (tren kuartal/bulan/tahun), toggle dinamis Bar vs Line chart, formatting sumbu eksekutif (rb/jt/M/T), isolasi per-tab 3S; 542 test backend lulus, build 0 error |
 | **Ekspor Excel Berformat & Grafik Native + Pertanyaan Emas Dealer** | selesai | LIVE | Integrasi 32 KPI dealer dari acuan Design Dashboard (SPK, Unit Entry GR/BP, SA produktivitas, Stock Value, AR/AP Aging); Fitur ekspor Excel .xlsx dengan format akuntansi Indonesia & native openpyxl embedded chart; 548 test lulus, build 0 error |
 | **Metrik Utilisasi AI Admin & Skenario Demo PKL (Opsi 5)** | selesai | LIVE | Dashboard analitik AI admin (overview, tren Recharts 7-hari, kuota token cabang real-time), modal ubah kuota cabang, dokumen panduan sidang PKL; 554 test backend lulus, lint 0 error, build 0 error |
+| **Penyempurnaan Analisis Multi-Divisi** | selesai | LIVE | Koreksi skema riil dealer (srvt/pwt1/inv1), komparasi sejajar, smart context note, de-duplikasi chip; 557 test backend lulus |
+| **Fix Format Mata Uang vs Kuantitas & Total Transaksi** | selesai | LIVE | Perbaikan deteksi kolom: hapus total_transaksi dari UANG_KEYWORDS, tambahkan kuantiti, transaksi, unit ke KUANTITAS_KEYWORDS di UI, smartInsights, dan Excel exporter; 557 test lulus |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -828,6 +830,36 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Frontend lint: `npm run lint` lolos (**0 errors, 0 warnings pada file baru/modifikasi**).
   - Frontend build: `npm run build` lolos (exit code 0).
   - Live query verification: Kueri *"Bandingkan performa antar divisi tahun ini"* sukses menghasilkan 3 tab, dengan Tab 1 berupa Komparasi Antar Divisi, Tab 2 Unit, Tab 3 Servis, narasi dengan Smart Context Note, dan chip saran kontekstual yang bersih.
+
+### 3z. Perbaikan Deteksi Kolom Mata Uang vs Kuantitas & Total Transaksi (2026-09-07)
+
+- **Latar Belakang Masalah (Bug Anomali Format `Rp`)**:
+  - Pengguna menemukan dua anomali format uang pada hasil kueri:
+    1. Kolom `kuantiti_part_terjual` menampilkan nilai berformat Rupiah: `Rp 24`, `Rp 1`, `Rp 32`, dst.
+    2. Kolom `total_transaksi` menampilkan nilai berformat Rupiah: `Rp 3`, `Rp 13`, `Rp 5`.
+- **Akar Penyebab Teknis**:
+  1. `total_transaksi` tercantum secara eksplisit di dalam array `UANG_KEYWORDS` di `AssistantAnswerCard.jsx` dan `smartInsights.js`. Kata kunci ini keliru karena `total_transaksi` adalah frekuensi/jumlah cacah transaksi, bukan nilai rupiah (bandingkan dengan `nilai_transaksi` yang memang mata uang).
+  2. Kata kunci `jual` berada di `UANG_KEYWORDS` (sehingga string `...terjual` cocok). Sementara itu, `KUANTITAS_KEYWORDS` sebelumnya belum menyertakan `kuantiti`, `kuantitas`, maupun `quantity`. Karena `kuantiti_part_terjual` tidak cocok dengan kata kunci kuantitas yang ada, fungsi `isKolomUang` mengevaluasi `jual` dan mengembalikan `true`.
+  3. Pada `smartInsights.js`, belum ada pemeriksaan `KUANTITAS_KEYWORDS` sebelum fallback `Math.abs(num) >= 1000000`.
+  4. Pada `report_exporter.py` (ekspor Excel), `CURRENCY_PATTERNS` belum memiliki filter negatif `QUANTITY_PATTERNS` yang kuat untuk menangkis kolom kuantitas dan jumlah transaksi.
+- **Solusi yang Diterapkan**:
+  - **`frontend/src/components/User/AssistantAnswerCard.jsx`**:
+    - Hapus `total_transaksi` dari `UANG_KEYWORDS`.
+    - Tambahkan `kuantiti`, `kuantitas`, `quantity`, `transaksi`, `total_transaksi`, `jumlah_transaksi`, `pkb`, `total_pkb`, `unit`, `total_item`, `item_terjual`, `part_terjual`, `terjual_unit`, `pcs`, `lembar`, `orang`, `pelanggan`, `customer`, `antrean` ke `KUANTITAS_KEYWORDS`.
+    - Di `formatSel`, tambahkan proteksi `!isKuantitas` pada evaluasi periode musiman nominal besar.
+  - **`frontend/src/utils/smartInsights.js`**:
+    - Hapus `total_transaksi` dari `UANG_KEYWORDS`.
+    - Definisikan `KUANTITAS_KEYWORDS`, `EKSPLISIT_UANG`, `isKolomKuantitas()`, dan `isKolomUang()`.
+    - Di `formatAngkaAtauUang()`, pastikan kolom kuantitas tidak pernah diformat dengan `Rp` atau `Juta/Miliar`.
+  - **`backend/app/services/report_exporter.py`**:
+    - Tambahkan `QUANTITY_PATTERNS` dan `EXPLICIT_CURRENCY_PATTERNS`.
+    - Prioritas evaluasi `_is_currency_column()`: jika `EXPLICIT_CURRENCY_PATTERNS` cocok -> `True`; jika `QUANTITY_PATTERNS` cocok -> `False`; baru evaluasi `CURRENCY_PATTERNS`.
+  - **`backend/tests/test_report_exporter.py`**:
+    - Ditambahkan assertion untuk `kuantiti_part_terjual` (False), `total_transaksi` (False), `total_pkb` (False), `nilai_transaksi` (True).
+- **Hasil Verifikasi**:
+  - Backend pytest: **557 passed in 39.87s** (100% lulus).
+  - Frontend lint: `npm run lint` **0 errors** (100% lulus).
+  - Frontend build: `npm run build` exit code 0 (**100% lulus**).
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 

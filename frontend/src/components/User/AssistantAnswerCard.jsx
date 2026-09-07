@@ -23,19 +23,24 @@ const UANG_KEYWORDS = [
   'nominal', 'saldo', 'total_pembelian', 'total_penjualan', 'total_nilai',
   'hpunit', 'hpdpp', 'hpppn', 'hppbm', 'tarif', 'subtotal', 'diskon',
   'selisih', 'laba', 'rugi', 'profit', 'margin', 'pendapatan', 'piutang', 'hutang',
-  'nilai_transaksi', 'total_transaksi',
+  'nilai_transaksi',
 ];
 
 // Kolom yang pasti kuantitas / hitungan unit — BUKAN uang
 const KUANTITAS_KEYWORDS = [
   'jumlah', 'qty', 'count', 'cnt', 'banyak', 'total_unit', 'unit_terjual',
   'frekuensi', 'freq', 'banyaknya', 'nomor', 'kode',
+  'kuantiti', 'kuantitas', 'quantity', 'transaksi', 'total_transaksi',
+  'jumlah_transaksi', 'pkb', 'total_pkb', 'unit', 'total_item',
+  'item_terjual', 'part_terjual', 'terjual_unit', 'pcs', 'lembar',
+  'orang', 'pelanggan', 'customer', 'antrean',
 ];
 
 // Pengecualian: kolom yang mengandung kata 'jumlah' / 'total' tapi eksplisit uang
 const EKSPLISIT_UANG = [
   'jumlah_nominal', 'jumlah_uang', 'jumlah_biaya', 'jumlah_rupiah', 'jumlah_rp',
   'total_nominal', 'total_biaya', 'total_rupiah', 'total_rp', 'total_nilai',
+  'nilai_transaksi',
 ];
 
 function isKolomUang(colName) {
@@ -81,7 +86,8 @@ function formatSel(nilai, colName = '') {
     // Deteksi musiman / periode finansial: semester_..., kuartal_..., q1_..., q2_...
     const isPeriodeMusiman = /^(semester|kuartal|triwulan|q[1-4]|s[1-2])(_|\b)/i.test(colStr);
     const isNominalBesar = Math.abs(num) >= 100000;
-    const isUang = isKolomUang(colName) || (isPeriodeMusiman && isNominalBesar);
+    const isKuantitas = KUANTITAS_KEYWORDS.some((k) => colStr.includes(k));
+    const isUang = !isKuantitas && (isKolomUang(colName) || (isPeriodeMusiman && isNominalBesar));
 
     const formatted = new Intl.NumberFormat('id-ID', { maximumFractionDigits: 2 }).format(Math.abs(num));
     if (isUang) {

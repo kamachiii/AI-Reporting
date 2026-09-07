@@ -18,7 +18,22 @@ const UANG_KEYWORDS = [
   'nominal', 'saldo', 'total_pembelian', 'total_penjualan', 'total_nilai',
   'hpunit', 'hpdpp', 'hpppn', 'hppbm', 'tarif', 'subtotal', 'diskon',
   'selisih', 'laba', 'rugi', 'profit', 'margin', 'pendapatan', 'piutang', 'hutang',
-  'nilai_transaksi', 'total_transaksi', 'total_omzet', 'hjakhir',
+  'nilai_transaksi', 'total_omzet', 'hjakhir',
+];
+
+const KUANTITAS_KEYWORDS = [
+  'jumlah', 'qty', 'count', 'cnt', 'banyak', 'total_unit', 'unit_terjual',
+  'frekuensi', 'freq', 'banyaknya', 'nomor', 'kode',
+  'kuantiti', 'kuantitas', 'quantity', 'transaksi', 'total_transaksi',
+  'jumlah_transaksi', 'pkb', 'total_pkb', 'unit', 'total_item',
+  'item_terjual', 'part_terjual', 'terjual_unit', 'pcs', 'lembar',
+  'orang', 'pelanggan', 'customer', 'antrean',
+];
+
+const EKSPLISIT_UANG = [
+  'jumlah_nominal', 'jumlah_uang', 'jumlah_biaya', 'jumlah_rupiah', 'jumlah_rp',
+  'total_nominal', 'total_biaya', 'total_rupiah', 'total_rp', 'total_nilai',
+  'nilai_transaksi',
 ];
 
 function isIdentifierColumn(colName) {
@@ -27,10 +42,26 @@ function isIdentifierColumn(colName) {
   return IDENTIFIER_KEYWORDS.some((k) => col.includes(k));
 }
 
+function isKolomKuantitas(colName) {
+  if (!colName) return false;
+  const col = String(colName).toLowerCase();
+  if (EKSPLISIT_UANG.some((k) => col.includes(k))) return false;
+  return KUANTITAS_KEYWORDS.some((k) => col.includes(k));
+}
+
+function isKolomUang(colName) {
+  if (!colName) return false;
+  const col = String(colName).toLowerCase();
+  if (EKSPLISIT_UANG.some((k) => col.includes(k))) return true;
+  if (KUANTITAS_KEYWORDS.some((k) => col.includes(k))) return false;
+  return UANG_KEYWORDS.some((k) => col.includes(k));
+}
+
 function formatAngkaAtauUang(num, colName = '') {
   if (num === null || num === undefined || Number.isNaN(num)) return '0';
-  const isUang = UANG_KEYWORDS.some((k) => String(colName).toLowerCase().includes(k))
-    || Math.abs(num) >= 1000000;
+  const isKuantitas = isKolomKuantitas(colName);
+  const isId = isIdentifierColumn(colName);
+  const isUang = !isKuantitas && !isId && (isKolomUang(colName) || Math.abs(num) >= 1000000);
   
   const absNum = Math.abs(num);
 

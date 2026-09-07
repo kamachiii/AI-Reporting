@@ -23,6 +23,19 @@ TIME_SERIES_PATTERNS = [
     r'\btgl\b', r'\btanggal\b', r'\bdate\b', r'\bperiode\b'
 ]
 
+QUANTITY_PATTERNS = [
+    r'qty', r'kuantiti', r'kuantitas', r'quantity',
+    r'jumlah', r'count', r'cnt', r'unit',
+    r'transaksi', r'pkb', r'frekuensi', r'freq',
+    r'item', r'pcs', r'lembar', r'orang', r'pelanggan', r'antrean'
+]
+
+EXPLICIT_CURRENCY_PATTERNS = [
+    r'jumlah_nominal', r'jumlah_uang', r'jumlah_biaya', r'jumlah_rupiah', r'jumlah_rp',
+    r'total_nominal', r'total_biaya', r'total_rupiah', r'total_rp', r'total_nilai',
+    r'nilai_transaksi'
+]
+
 CURRENCY_PATTERNS = [
     r'omzet', r'penjualan', r'harga', r'revenue', r'profit', r'nominal',
     r'pembelian', r'diskon', r'discount', r'nilai', r'bayar', r'total_uang',
@@ -33,6 +46,10 @@ CURRENCY_PATTERNS = [
 def _is_currency_column(col_name: str) -> bool:
     """Deteksi apakah kolom merepresentasikan nominal mata uang."""
     c_lower = col_name.lower()
+    if any(re.search(pat, c_lower) for pat in EXPLICIT_CURRENCY_PATTERNS):
+        return True
+    if any(re.search(pat, c_lower) for pat in QUANTITY_PATTERNS):
+        return False
     return any(re.search(pat, c_lower) for pat in CURRENCY_PATTERNS)
 
 
