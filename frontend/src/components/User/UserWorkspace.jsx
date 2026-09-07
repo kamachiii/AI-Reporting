@@ -75,9 +75,14 @@ function pesanErrorChat(error) {
     return 'Tidak dapat terhubung ke server. Periksa koneksi lalu coba lagi.';
   }
   if (status === 422) {
-    const sebab = detail && typeof detail === 'object'
-      ? `${detail.gate ?? '-'}: ${detail.reason ?? '-'}`
-      : (typeof detail === 'string' ? detail : 'lolos verifikasi');
+    let sebab = 'verifikasi gagal';
+    if (Array.isArray(detail)) {
+      sebab = detail.map((d) => d.msg || d.reason || JSON.stringify(d)).join(', ');
+    } else if (detail && typeof detail === 'object') {
+      sebab = `${detail.gate ?? '-'}: ${detail.reason ?? detail.message ?? '-'}`;
+    } else if (typeof detail === 'string') {
+      sebab = detail;
+    }
     return `Pertanyaan ini tidak dapat dijawab otomatis (${sebab}). `
       + 'Coba ubah kalimat pertanyaan.';
   }

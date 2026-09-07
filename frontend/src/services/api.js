@@ -250,9 +250,9 @@ export const api = {
   //           truncated, duration_ms, memory_id}
   // memory_id hanya terisi untuk jawaban baru (SQL memory pending) —
   // dipakai tombol feedback "Jawaban benar/salah".
-  askAssistant: async (branchCode, question, mode = 'auto', conversationId = null) => {
+  askAssistant: async (branchCode, question, conversationId = null, mode = 'auto') => {
     // Timeout 180 dtk (3 menit): mengakomodasi model penalaran / thinking AI
-    const payload = { branch_code: branchCode, question, mode };
+    const payload = { branch_code: branchCode, question, mode: (typeof mode === 'string' && mode) ? mode : 'auto' };
     if (conversationId) {
       payload.conversation_id = conversationId;
     }
