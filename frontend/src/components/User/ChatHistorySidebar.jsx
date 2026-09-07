@@ -93,13 +93,13 @@ export default function ChatHistorySidebar({
         <div className="h-14 px-3.5 border-b border-hairline/70 flex items-center justify-between bg-surface-card shrink-0">
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 rounded-md bg-primary/10 text-primary flex items-center justify-center border border-primary/20 shrink-0">
-              <History size={13} />
+              <History size={13.5} />
             </div>
-            <span className="text-xs font-serif font-normal text-ink tracking-tight">
+            <span className="text-[15px] font-serif font-medium text-ink tracking-tight">
               Arsip Percakapan
             </span>
             {conversations.length > 0 && (
-              <span className="text-[10px] font-mono px-1.5 py-0.5 bg-canvas border border-hairline rounded-full text-muted-soft font-normal">
+              <span className="text-[10px] font-mono px-1.5 py-0.5 bg-canvas border border-hairline rounded-full text-muted font-medium">
                 {conversations.length}
               </span>
             )}
@@ -107,7 +107,7 @@ export default function ChatHistorySidebar({
           <button
             type="button"
             onClick={onToggleOpen}
-            title="Ciutkan Sidebar"
+            title="Ciutkan Sidebar (Ctrl+B)"
             className="p-1.5 rounded-md text-muted hover:text-ink hover:bg-surface-cream-strong transition-colors cursor-pointer"
           >
             <PanelLeftClose size={15} />
@@ -119,13 +119,13 @@ export default function ChatHistorySidebar({
         <button
           type="button"
           onClick={onNewChat}
-          className="w-full flex items-center justify-between h-9 px-3 rounded-lg bg-canvas hover:bg-surface-cream-strong border border-hairline text-xs font-normal text-body hover:text-ink transition-all shadow-2xs group cursor-pointer hover:border-primary/40"
+          className="w-full flex items-center justify-between h-9 px-3 rounded-lg bg-canvas hover:bg-surface-cream-strong border border-hairline text-xs font-medium text-ink transition-all shadow-2xs group cursor-pointer hover:border-primary/40"
         >
           <span className="flex items-center gap-2">
             <MessageSquarePlus size={14} className="text-primary group-hover:scale-105 transition-transform" />
             <span>Percakapan Baru</span>
           </span>
-          <span className="text-[10px] font-mono text-muted-soft border border-hairline px-1.5 py-0.5 rounded bg-surface-card">
+          <span className="text-[10px] font-mono text-muted-soft border border-hairline px-1.5 py-0.5 rounded bg-surface-card font-medium">
             +
           </span>
         </button>
@@ -161,7 +161,7 @@ export default function ChatHistorySidebar({
               <Bot size={20} />
             </div>
             <div className="space-y-1">
-              <p className="text-xs font-serif font-normal text-ink">
+              <p className="text-sm font-serif font-medium text-ink">
                 {searchQuery ? 'Topik Tidak Ditemukan' : 'Arsip Masih Kosong'}
               </p>
               <p className="text-[11px] text-muted-soft leading-relaxed max-w-[200px] mx-auto font-sans">
@@ -176,9 +176,9 @@ export default function ChatHistorySidebar({
             if (items.length === 0) return null;
             return (
               <div key={groupName} className="space-y-1">
-                <div className="px-2 pt-2 pb-1 text-[10px] font-mono uppercase tracking-wider text-muted-soft font-normal flex items-center justify-between">
+                <div className="px-2 pt-2 pb-1 text-[10px] font-mono uppercase tracking-wider text-muted font-semibold flex items-center justify-between">
                   <span>{groupName}</span>
-                  <span className="text-[9px] text-muted-soft/80 font-normal">{items.length}</span>
+                  <span className="text-[9px] text-muted-soft font-normal">{items.length}</span>
                 </div>
                 {items.map((conv) => {
                   const isActive = activeId === conv.id;
@@ -190,7 +190,7 @@ export default function ChatHistorySidebar({
                       key={conv.id}
                       className={`group relative flex items-center justify-between rounded-lg px-2.5 py-2 transition-all cursor-pointer ${
                         isActive
-                          ? 'bg-surface-cream-strong text-ink font-normal border border-hairline/80 shadow-2xs'
+                          ? 'bg-surface-cream-strong text-ink font-medium border border-hairline/80 shadow-2xs'
                           : 'text-body hover:text-ink hover:bg-surface-cream-strong/60 border border-transparent font-normal'
                       }`}
                       onClick={() => !isConfirmingDelete && onSelectConversation(conv.id)}
@@ -202,7 +202,12 @@ export default function ChatHistorySidebar({
                           <MessageSquare size={13} className="shrink-0 text-muted-soft group-hover:text-ink transition-colors" />
                         )}
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-xs tracking-tight font-sans font-normal" title={conv.title}>
+                          <p
+                            className={`truncate text-xs tracking-tight font-sans ${
+                              isActive ? 'font-medium text-ink' : 'font-normal text-body group-hover:text-ink'
+                            }`}
+                            title={conv.title}
+                          >
                             {conv.title || 'Percakapan Tanpa Judul'}
                           </p>
                         </div>

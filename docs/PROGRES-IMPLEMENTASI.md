@@ -71,7 +71,8 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **Penyempurnaan Visual & UX Editorial** | selesai | `95a105f` | Warm user bubble (anti-pitch-black), palet chart terracotta #cc785c, deduplikasi judul toolbar, smart insights label Bulan (bukan Baris), prompt deck sans-serif, login card warm surface, tombol Coba Lagi pada error |
 | **Redesign Sidebar History Chat Editorial & Fix Hydration** | selesai | `04ec492` | Redesign sidebar gaya Claude.ai (header compact h-14, button Percakapan Baru tactile, search terintegrasi, timestamp item, delete pill inline, empty state ramah); Fix parsing array getConversations agar riwayat ter-render nyata |
 | **Floating Edge Handle Sidebar (Zero Layout Shift Navbar)** | selesai | `2b2cb55` | Menghapus tombol toggle dari navbar atas agar logo dan judul tidak pernah terdorong/bergeser; Menggantinya dengan Floating Edge Tab Handle di tepi layar kiri gaya Linear & Cursor |
-| **Animasi Halus Sidebar & Tipografi Ringan (Non-Bold)** | selesai | LIVE | Integrasi AnimatePresence & motion.aside untuk animasi slide mulus buka/tutup sidebar dan floating handle; Mengganti ketebalan font dari font-medium/semibold menjadi font-normal yang tipis, tajam, dan elegan |
+| **Animasi Halus Sidebar & Tipografi Ringan (Non-Bold)** | selesai | `7ece2d8` | Integrasi AnimatePresence & motion.aside untuk animasi slide mulus buka/tutup sidebar dan floating handle; Mengganti ketebalan font dari font-medium/semibold menjadi font-normal yang tipis, tajam, dan elegan |
+| **Penyempurnaan Tipografi Sidebar, Arsip Percakapan & Polish UI/UX** | selesai | LIVE | Pembesaran font Arsip Percakapan (text-[15px] font-medium font-serif), mempertahankan font-normal khusus "Riwayat Chat" pada floating handle, restorasi font-medium/semibold pada aksi & active item, scrollbar ramping editorial di index.css, shortcut keyboard Ctrl+B / Cmd+B, dan animasi aktif tactile |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -1095,6 +1096,38 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Backend pytest: **558 passed in 37.42s** (100% lulus).
   - Frontend lint: `npm run lint` **0 errors** (100% lulus).
   - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 938ms).
+
+### 3ag. Penyempurnaan Tipografi Sidebar, Arsip Percakapan & Polish UI/UX (2026-09-07)
+
+- **Masalah & Masukan Pengguna**:
+  1. **Teks "Arsip Percakapan" Terlalu Kecil**: Ukuran sebelumnya `text-xs` (12px serif) tampak sangat kecil dan sulit dibaca di monitor standar.
+  2. **Klarifikasi Ketebalan Font (Bold)**: Pengguna mengklarifikasi bahwa yang dimaksud tidak boleh bold hanyalah teks *"Riwayat Chat"* pada floating edge handle. Elemen lainnya (seperti tombol aksi "Percakapan Baru", header grup waktu, dan sesi chat aktif) perlu mempertahankan bobot `font-medium`/`font-semibold` agar hirarki visual tetap jelas.
+  3. **Audit Menyeluruh UI, UX, Animasi & Performa**: Menyelaraskan seluruh interaksi aplikasi dari scrollbar tebal default Windows, kemudahan navigasi keyboard, hingga umpan balik taktil klik.
+
+- **Solusi & Implementasi Teknis**:
+  1. **Pembesaran Tipografi "Arsip Percakapan" (`ChatHistorySidebar.jsx`)**:
+     - Mengubah ukuran teks dari `text-xs font-normal` menjadi `text-[15px] font-serif font-medium text-ink tracking-tight`.
+     - Header kini tampil berwibawa, mudah dibaca, dan proporsional dengan tinggi header 56px (`h-14`).
+  2. **Restorasi Hirarki Bobot Tipografi Sidebar (`ChatHistorySidebar.jsx`)**:
+     - Tombol "Percakapan Baru": Menggunakan `text-xs font-medium text-ink` dengan hover ring coral.
+     - Header grup tanggal (`HARI INI`, `KEMARIN`, dll.): Menggunakan `text-[10px] font-mono uppercase font-semibold text-muted`.
+     - Sesi chat aktif: Menggunakan `font-medium text-ink` pada judul sesi, memperjelas sesi mana yang sedang aktif.
+     - Sesi chat tidak aktif: Tetap `font-normal text-body` yang ramah di mata.
+     - Judul empty state: Menggunakan `text-sm font-serif font-medium text-ink`.
+  3. **Preservasi Font-Normal Khusus "Riwayat Chat" (`UserWorkspace.jsx`)**:
+     - Memastikan teks "Riwayat Chat" pada floating handle tetap `font-normal text-body group-hover:text-ink` (tidak bold), ditemani badge visual shortcut `Ctrl+B`.
+  4. **Scrollbar Ramping Editorial Custom (`frontend/src/index.css`)**:
+     - Menggantikan scrollbar default OS Windows yang kaku dan tebal (17px abu-abu) dengan scrollbar ramping 6px bertema hangat (`#d8d0c4` pada thumb dan transparan pada track).
+     - Menambahkan kustomisasi warna seleksi teks (`::selection`) hangat bernuansa coral transparan (`rgba(204, 120, 92, 0.2)`).
+  5. **Keyboard Shortcut Cepat (`UserWorkspace.jsx`)**:
+     - Menambahkan listener keyboard global: `Ctrl+B` (Windows/Linux) atau `Cmd+B` (macOS) untuk toggle buka/tutup sidebar riwayat secara instan.
+  6. **Umpan Balik Taktil Tombol Kirim (`UserWorkspace.jsx`)**:
+     - Menambahkan transisi `active:scale-95` pada tombol submit chat untuk sensasi klik responsif.
+
+- **Hasil Verifikasi**:
+  - Backend pytest: **558 passed in 48.50s** (100% lulus).
+  - Frontend lint: `npm run lint` **0 errors** (100% lulus).
+  - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 1.13s).
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 

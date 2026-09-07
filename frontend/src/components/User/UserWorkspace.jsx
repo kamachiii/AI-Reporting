@@ -340,6 +340,18 @@ export default function UserWorkspace({ user, onLogout }) {
     }
   }, [messages]);
 
+  // Keyboard shortcut: Ctrl+B atau Cmd+B untuk toggle buka/tutup sidebar
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        setSidebarOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const handleSelectConversation = async (convId) => {
     if (isProcessing || convId === activeConversationId) return;
     setActiveConversationId(convId);
@@ -534,20 +546,23 @@ export default function UserWorkspace({ user, onLogout }) {
           <AnimatePresence>
             {!sidebarOpen && (
               <motion.button
-                initial={{ x: -30, opacity: 0 }}
+                initial={{ x: -28, opacity: 0 }}
                 animate={{ x: 0, opacity: 1 }}
-                exit={{ x: -30, opacity: 0 }}
-                transition={{ duration: 0.2, ease: 'easeOut' }}
+                exit={{ x: -28, opacity: 0 }}
+                transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
                 type="button"
                 onClick={() => setSidebarOpen(true)}
-                title="Buka Riwayat Percakapan"
+                title="Buka Riwayat Percakapan (Ctrl+B)"
                 aria-label="Buka Riwayat Percakapan"
-                className="absolute left-0 top-3 z-30 group flex items-center gap-2 pl-2.5 pr-3 py-1.5 bg-surface-card hover:bg-surface-cream-strong border-y border-r border-hairline rounded-r-xl shadow-xs hover:shadow-sm text-body hover:text-ink transition-colors cursor-pointer select-none"
+                className="absolute left-0 top-3 z-30 group flex items-center gap-2 pl-2.5 pr-3 py-1.5 bg-surface-card hover:bg-surface-cream-strong border-y border-r border-hairline rounded-r-lg shadow-xs hover:shadow-sm text-body hover:text-ink transition-colors cursor-pointer select-none"
               >
                 <PanelLeftOpen size={14} className="text-primary group-hover:scale-105 transition-transform" />
-                <span className="text-xs font-sans font-normal text-body hover:text-ink tracking-tight">
+                <span className="text-xs font-sans font-normal text-body group-hover:text-ink tracking-tight">
                   Riwayat Chat
                 </span>
+                <kbd className="hidden sm:inline-block font-mono text-[9px] text-muted-soft px-1 py-0.2 rounded bg-canvas border border-hairline/70">
+                  Ctrl+B
+                </kbd>
               </motion.button>
             )}
           </AnimatePresence>
@@ -658,7 +673,7 @@ export default function UserWorkspace({ user, onLogout }) {
                   <button
                     type="submit"
                     disabled={isProcessing || !branchCode || !input.trim()}
-                    className="p-2 rounded-md bg-primary hover:bg-primary-active text-on-primary disabled:bg-primary-disabled disabled:text-muted disabled:cursor-not-allowed transition-colors cursor-pointer shadow-2xs"
+                    className="p-2 rounded-md bg-primary hover:bg-primary-active text-on-primary disabled:bg-primary-disabled disabled:text-muted disabled:cursor-not-allowed transition-all active:scale-95 cursor-pointer shadow-2xs"
                     title="Kirim Pertanyaan"
                     aria-label="Kirim Pertanyaan"
                   >
