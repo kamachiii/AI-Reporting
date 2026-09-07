@@ -1,9 +1,10 @@
 import { Component, useMemo, useState } from 'react';
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight, ChevronLeft, Database, Layers, X,
-  BarChart2, LineChart as LineChartIcon, Table as TableIcon, Loader2, GraduationCap,
-  TrendingUp, TrendingDown, Lightbulb, Compass, Award,
+  Loader2, GraduationCap, TrendingUp, TrendingDown, Lightbulb, Compass, Award,
   Car, Wrench, Package, FileSpreadsheet, ArrowUpDown, ArrowUp, ArrowDown, Copy, Search,
+  SplitSquareVertical, Calendar, ArrowRight, Table2,
+  BarChart2, LineChart as LineChartIcon, Table as TableIcon,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
@@ -426,6 +427,21 @@ export default function AssistantAnswerCard({
       .slice(0, 3);
   }, [ditolak, onAsk, answer.saran, question, answer.question, activeColumns, activeRows, activeSql]);
 
+  const breakdownSaran = useMemo(() => {
+    if (!onAsk || ditolak) return [];
+    if (!answer.is_comparison && !smartSaran.some((s) => s.toLowerCase().includes('terpisah'))) {
+      return [];
+    }
+    return smartSaran.filter((s) => s.toLowerCase().includes('terpisah') || s.toLowerCase().includes('detail') || s.toLowerCase().includes('rincian'));
+  }, [answer.is_comparison, smartSaran, onAsk, ditolak]);
+
+  const regularSaran = useMemo(() => {
+    if (breakdownSaran.length > 0) {
+      return smartSaran.filter((s) => !breakdownSaran.includes(s));
+    }
+    return smartSaran;
+  }, [smartSaran, breakdownSaran]);
+
   const grafikConfig = useMemo(
     () => deteksiKecocokanGrafik(activeColumns, activeRows),
     [activeColumns, activeRows]
@@ -689,6 +705,8 @@ export default function AssistantAnswerCard({
                     {tab.icon === 'Car' ? <Car size={13} /> :
                      tab.icon === 'Wrench' ? <Wrench size={13} /> :
                      tab.icon === 'Package' ? <Package size={13} /> :
+                     tab.icon === 'Calendar' ? <Calendar size={13} /> :
+                     tab.icon === 'Table2' ? <Table2 size={13} /> :
                      <Layers size={13} />}
                     <span>{tab.title}</span>
                     <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
@@ -1208,15 +1226,42 @@ export default function AssistantAnswerCard({
         </div>
       </div>
 
-      {/* Saran pertanyaan lanjutan kontekstual */}
-      {smartSaran.length > 0 && (
+      {/* Tawaran Proaktif Rincian Terpisah (Gaya 1 -> Gaya 2) - 100% Icon Lucide, Zero Emoji */}
+      {breakdownSaran.length > 0 && onAsk && (
+        <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 sm:p-3.5 space-y-2.5 animate-fadeIn">
+          <div className="flex items-center gap-2 text-xs font-medium text-primary">
+            <SplitSquareVertical size={14} className="text-primary shrink-0" />
+            <span>Ingin melihat data transaksi masing-masing periode secara terpisah?</span>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {breakdownSaran.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => onAsk(s)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-primary/30 rounded-md bg-canvas text-ink hover:bg-primary/10 hover:border-primary text-left transition-all cursor-pointer shadow-2xs group"
+              >
+                {s.toLowerCase().includes('terpisah') ? (
+                  <SplitSquareVertical size={12} className="text-primary group-hover:scale-105 transition-transform shrink-0" />
+                ) : (
+                  <ArrowRight size={12} className="text-primary group-hover:translate-x-0.5 transition-transform shrink-0" />
+                )}
+                <span>{s}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Saran pertanyaan lanjutan kontekstual reguler (Zero Emoji) */}
+      {regularSaran.length > 0 && (
         <div className="space-y-1.5 pt-1">
           <p className="text-[11px] text-muted flex items-center gap-1.5 font-medium">
             <Compass size={12} className="text-primary" />
             <span>Rekomendasi eksplorasi data selanjutnya:</span>
           </p>
           <div className="flex items-center gap-1.5 flex-wrap">
-            {smartSaran.map((s) => (
+            {regularSaran.map((s) => (
               <button
                 key={s}
                 type="button"

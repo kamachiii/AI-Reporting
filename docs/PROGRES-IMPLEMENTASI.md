@@ -73,6 +73,7 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **Floating Edge Handle Sidebar (Zero Layout Shift Navbar)** | selesai | `2b2cb55` | Menghapus tombol toggle dari navbar atas agar logo dan judul tidak pernah terdorong/bergeser; Menggantinya dengan Floating Edge Tab Handle di tepi layar kiri gaya Linear & Cursor |
 | **Penyempurnaan Tipografi Sidebar, Arsip Percakapan & Polish UI/UX** | selesai | `a196fad` | Pembesaran font Arsip Percakapan (text-[15px] font-medium font-serif), mempertahankan font-normal khusus "Riwayat Chat" pada floating handle, restorasi font-medium/semibold pada aksi & active item, scrollbar ramping editorial di index.css, shortcut keyboard Ctrl+B / Cmd+B, dan animasi aktif tactile |
 | **Eliminasi Badge Visual Ctrl+B & Perluasan Trigger Fan-Out Tiap Divisi** | selesai | `a25c07b` | Menghapus badge teks visual Ctrl+B dari floating handle (informasi tetap via hover title), menghapus cache memory tunggal #67, dan memperluas trigger regex fanout_engine untuk menangani typo 'peforma' & frasa 'tiap divisi' sehingga perbandingan performa antar divisi per tahun sukses terpecah ke 4 tab (Komparasi, Unit, Servis, Sparepart) |
+| **Progressive Comparison (Gaya 1 -> Gaya 2) & Zero Emoji** | selesai | LIVE | Deteksi kueri periode (Gaya 1 tabel terpadu default + chart); ProactiveBreakdownOffer interaktif ke Gaya 2 (multi-tab rincian terpisah per periode tanpa jargon 3S); Penegakan 100% Zero-Emoji (SVG Lucide SplitSquareVertical, Calendar, Table2); 562 test backend lulus, lint 0 error, build 0 error |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -1199,6 +1200,35 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Backend pytest: **558 passed in 41.37s** (100% lulus).
   - Frontend lint: `npm run lint` **0 errors** (100% lulus).
   - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 1.15s).
+
+### 3aj. Alur Komparasi Progresif (Gaya 1 Terpadu -> Tawaran Gaya 2 Terpisah) & Penegakan Disiplin Zero-Emoji
+
+- **Konteks & Masalah**:
+  1. Pengguna menginginkan alur perbandingan dua periode waktu (misal *"2024 vs 2025"*) yang fleksibel: default menjawab dengan **Gaya 1** (1 tabel komparasi side-by-side terpadu yang ringkas), sambil secara proaktif menawarkan apakah pengguna ingin melihat tabel rincian transaksi masing-masing periode secara terpisah (**Gaya 2**).
+  2. Pengguna secara mutlak melarang penggunaan emoji unicode: *"JANGAN MENGGUNAKAN EMOJI! gunakan icon.."*. Semua indikator visual, judul tab, tombol saran, dan narasi wajib 100% menggunakan SVG Icon Lucide (`lucide-react`).
+  3. Eliminasi total label dan jargon buatan "3S Dealer" di seluruh antarmuka.
+
+- **Solusi Arsitektur & Teknis**:
+  1. **Backend (`fanout_engine.py`, `vanna_engine.py`, `presenter.py`)**:
+     - `_deteksi_kueri_komparasi_periode`: mendeteksi kueri perbandingan antar tahun/periode secara deterministik (0 token).
+     - Menghasilkan saran lokal bebas emoji:
+       - `"Tampilkan rincian transaksi {topik} tahun {p1} dan {p2} secara terpisah"`
+       - `"Lihat detail transaksi {topik} tahun {p1}"`
+       - `"Lihat detail transaksi {topik} tahun {p2}"`
+     - `cek_apakah_minta_rincian_terpisah`: mendeteksi permintaan tabel rincian terpisah (Gaya 2) dan secara otomatis memecah eksekusi ke multi-tab murni temporal (*Tab "Rincian Tahun 2024"* dan *Tab "Rincian Tahun 2025"* ber-icon `Calendar`), tanpa kategori artifisial 3S.
+     - `_bersihkan_emoji_teks`: filter regex ketat yang membuang seluruh karakter emoji 4-byte (`[\U00010000-\U0010ffff]`) dan simbol dingbat dari ringkasan, saran, dan respons sistem.
+  2. **Frontend (`AssistantAnswerCard.jsx`)**:
+     - Memasang komponen `ProactiveBreakdownOffer` saat mendeteksi kueri komparasi atau chip rincian terpisah.
+     - Menggunakan icon Lucide: `SplitSquareVertical`, `ArrowRight`, `Calendar`, `Table2`.
+     - Klik chip secara instan mengirim prompt ke input pengguna via `onAsk(s)`.
+  3. **Unit Testing (`test_progressive_comparison.py`)**:
+     - 4 test unit baru menguji ekstraksi periode, deteksi komparasi, deteksi rincian terpisah, dan pembersihan emoji. Total suite meningkat menjadi 562 test.
+
+- **Verifikasi**:
+  - `compileall app`: exit 0
+  - `pytest tests/`: 562 passed
+  - `npm run lint`: 0 error
+  - `npm run build`: exit 0
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 

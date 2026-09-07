@@ -204,6 +204,15 @@ def _buang_pembungkus(raw) -> str:
     return teks
 
 
+def _bersihkan_emoji_teks(teks: str) -> str:
+    """Membersihkan emoji unicode dan simbol piktograf dari teks (Zero Emoji policy)."""
+    if not teks:
+        return ""
+    clean = re.sub(r'[\U00010000-\U0010ffff]', '', teks)
+    clean = re.sub(r'[\u2600-\u27bf\u2300-\u23ff\u2b50\u200d\ufe0f]', '', clean)
+    return clean.strip()
+
+
 def _parse_dan_bersihkan(raw) -> tuple[dict | None, list[str]]:
     """Output LLM -> ({"ringkasan", "saran"} | None, daftar error).
 
@@ -223,9 +232,10 @@ def _parse_dan_bersihkan(raw) -> tuple[dict | None, list[str]]:
     mentah = data.get("saran", [])
     if not isinstance(mentah, list):
         return None, ["field 'saran' wajib array string"]
-    saran = [s.strip() for s in mentah
-             if isinstance(s, str) and s.strip()][:3]
-    return {"ringkasan": ringkasan.strip(), "saran": saran}, []
+    saran = [_bersihkan_emoji_teks(s.strip()) for s in mentah
+             if isinstance(s, str) and s.strip()]
+    saran = [s for s in saran if s][:3]
+    return {"ringkasan": _bersihkan_emoji_teks(ringkasan.strip()), "saran": saran}, []
 
 
 # ===========================================================================

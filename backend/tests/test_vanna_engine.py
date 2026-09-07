@@ -79,7 +79,7 @@ async def test_jalankan_mode_vanna_mock():
         assert res["confidence"] == "A"
         assert "SELECT tahun, total" in res["sql"]
         assert res["row_count"] == 1
-        assert res["saran"] == []
+        assert any("terpisah" in s for s in res["saran"])
 
 @pytest.mark.anyio
 async def test_jalankan_mode_vanna_memory_replay():

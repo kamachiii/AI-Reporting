@@ -37,6 +37,16 @@ from app.services.fanout_engine import (
 
 logger = logging.getLogger(__name__)
 
+
+def _bersihkan_emoji_teks(teks: str) -> str:
+    """Membersihkan emoji unicode dan simbol piktograf dari teks (Zero Emoji policy)."""
+    if not teks:
+        return ""
+    clean = re.sub(r'[\U00010000-\U0010ffff]', '', teks)
+    clean = re.sub(r'[\u2600-\u27bf\u2300-\u23ff\u2b50\u200d\ufe0f]', '', clean)
+    return clean.strip()
+
+
 # Concurrency Semaphore untuk membatasi beban query AI serentak (maksimal 5 serentak)
 VANNA_SEMAPHORE = asyncio.Semaphore(5)
 
@@ -254,6 +264,104 @@ def _format_ringkasan_otomatis(rows: list, columns: list, question: str = "") ->
     return base_summary
 
 
+def _deteksi_kueri_komparasi_periode(question: str) -> dict | None:
+    """Deteksi kueri perbandingan antar periode (misal: 2024 vs 2025)."""
+    q_lower = (question or "").lower()
+    years = re.findall(r'\b(20[12]\d)\b', q_lower)
+    is_vs = any(w in q_lower for w in [" vs ", " versus ", "bandingkan", "perbandingan", "komparasi", " beda ", "selisih"])
+
+    subject = "transaksi"
+    if any(w in q_lower for w in ["jual", "penjualan", "omzet", "unit terjual"]):
+        subject = "penjualan"
+    elif any(w in q_lower for w in ["beli", "pembelian", "pengadaan"]):
+        subject = "pembelian"
+    elif any(w in q_lower for w in ["servis", "service", "bengkel", "wo", "pkb"]):
+        subject = "servis"
+    elif any(w in q_lower for w in ["part", "sparepart", "suku cadang"]):
+        subject = "suku cadang"
+
+    if len(years) >= 2:
+        p1, p2 = sorted(years[:2])
+        return {
+            "type": "year",
+            "periods": [p1, p2],
+            "subject": subject,
+            "suggestions": [
+                f"Tampilkan rincian transaksi {subject} tahun {p1} dan {p2} secara terpisah",
+                f"Lihat detail transaksi {subject} tahun {p1}",
+                f"Lihat detail transaksi {subject} tahun {p2}",
+            ]
+        }
+    elif is_vs and len(years) == 1:
+        p1 = years[0]
+        p_prev = str(int(p1) - 1)
+        return {
+            "type": "year",
+            "periods": [p_prev, p1],
+            "subject": subject,
+            "suggestions": [
+                f"Tampilkan rincian transaksi {subject} tahun {p_prev} dan {p1} secara terpisah",
+                f"Lihat detail transaksi {subject} tahun {p1}",
+                f"Lihat detail transaksi {subject} tahun {p_prev}",
+            ]
+        }
+    return None
+
+
+def cek_apakah_minta_rincian_terpisah(question: str) -> dict | None:
+    """Deteksi jika user meminta rincian periode terpisah (Gaya 2)."""
+    q_lower = (question or "").lower()
+    is_terpisah = any(w in q_lower for w in ["terpisah", "sendiri-sendiri", "masing-masing", "pisah"])
+    is_rincian = any(w in q_lower for w in ["rincian", "detail", "faktur", "transaksi", "tabel terpisah"])
+    years = re.findall(r'\b(20[12]\d)\b', q_lower)
+
+    if (is_terpisah or is_rincian) and len(years) >= 2:
+        p1, p2 = sorted(years[:2])
+
+        # Tentukan tabel target berdasarkan konteks kueri
+        table = "untt_penjualan"
+        date_col = "tanggal"
+        order_col = "tanggal"
+        filter_clause = "NOT COALESCE(batal, FALSE) AND NOT COALESCE(retur, FALSE)"
+        columns_to_select = "nomor, tanggal, nomor_pesanan, hargajual, diskon, hjakhir"
+
+        if any(w in q_lower for w in ["beli", "pembelian"]):
+            table = "untt_pembelian"
+            date_col = "tglinvoice"
+            order_col = "tglinvoice"
+            filter_clause = "1=1"
+            columns_to_select = "nomor, tglinvoice, norangka, hpunit, hpdpp, hpppn"
+        elif any(w in q_lower for w in ["servis", "service", "bengkel"]):
+            table = "srvt_wo"
+            date_col = "tanggal"
+            order_col = "tanggal"
+            filter_clause = "NOT COALESCE(batal, FALSE)"
+            columns_to_select = "nomor, tanggal, nomor_customer, nopolisi, totalestimasibiaya"
+
+        sql_1 = f"SELECT {columns_to_select} FROM {table} WHERE EXTRACT(YEAR FROM {date_col}) = {p1} AND {filter_clause} ORDER BY {order_col} DESC LIMIT 50;"
+        sql_2 = f"SELECT {columns_to_select} FROM {table} WHERE EXTRACT(YEAR FROM {date_col}) = {p2} AND {filter_clause} ORDER BY {order_col} DESC LIMIT 50;"
+
+        return {
+            "category": "rincian_terpisah",
+            "mode": "separated_years",
+            "domains": [
+                {
+                    "id": f"thn_{p1}",
+                    "title": f"Rincian Tahun {p1}",
+                    "icon": "Calendar",
+                    "sql": sql_1,
+                },
+                {
+                    "id": f"thn_{p2}",
+                    "title": f"Rincian Tahun {p2}",
+                    "icon": "Calendar",
+                    "sql": sql_2,
+                }
+            ]
+        }
+    return None
+
+
 async def resolve_ai_config_for_tenant(core_pool, user_id: int, tenant_id: int) -> dict:
     """Resolve AI config: user -> tenant -> global."""
     rows = await core_pool.fetch(
@@ -305,12 +413,17 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                 durasi_ms = int((time.monotonic() - t0) * 1000)
                 columns = [k for k in db_rows[0].keys()] if db_rows else []
                 rows = [[_konversi_nilai_vanna(v) for v in r.values()] for r in db_rows[:500]]
-                ringkasan = entri_memori["ringkasan"] or _format_ringkasan_otomatis(db_rows[:500], columns, question)
+                raw_ringkasan = entri_memori["ringkasan"] or _format_ringkasan_otomatis(db_rows[:500], columns, question)
+                ringkasan = _bersihkan_emoji_teks(raw_ringkasan)
 
                 try:
                     await tandai_memory_dipakai(core_pool, entri_memori["id"])
                 except Exception:
                     pass
+
+                comp_info = _deteksi_kueri_komparasi_periode(question)
+                saran_list = comp_info.get("suggestions", []) if comp_info else []
+                is_comp = bool(comp_info)
 
                 response = {
                     "source": "memory",
@@ -325,9 +438,11 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                     "memory_id": entri_memori["id"],
                     "question": question,
                     "ringkasan": ringkasan,
-                    "saran": [],
+                    "saran": saran_list,
                     "metode": "memory",
-                    "allow_explain": True
+                    "allow_explain": True,
+                    "is_comparison": is_comp,
+                    "comparison_meta": comp_info
                 }
 
                 conv_id = await ambil_atau_buat_conversation(core_pool, user_id, branch_code, question, conversation_id=conversation_id)
@@ -350,8 +465,8 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
             except Exception as e_mem:
                 logger.warning("Replay SQL memory gagal (%s), lanjut ke LLM...", e_mem)
 
-        # 0.4. Cek Kueri Makro Dealer untuk Proaktif Multi-Tab Fan-Out (3S)
-        fanout_info = cek_apakah_perlu_fanout(question)
+        # 0.4. Cek Kueri Rincian Terpisah (Gaya 2) atau Kueri Makro Dealer Multi-Tab
+        fanout_info = cek_apakah_minta_rincian_terpisah(question) or cek_apakah_perlu_fanout(question)
         if fanout_info:
             ai_config = await resolve_ai_config(core_pool, user.get("username", ""), branch_code)
             async with VANNA_SEMAPHORE:
@@ -421,8 +536,8 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                 has_multiple_tabs = len(tabs_with_data) > 1
                 active_tabs = tabs_with_data if tabs_with_data else tab_results
 
-                # Jika pertanyaan meminta komparasi/perbandingan, tambahkan Tab Komparasi Konsolidasi Sejajar
-                if cek_apakah_perlu_komparasi(question) and tabs_with_data:
+                # Jika pertanyaan meminta komparasi/perbandingan antar divisi, tambahkan Tab Komparasi Konsolidasi Sejajar
+                if cek_apakah_perlu_komparasi(question) and tabs_with_data and fanout_info.get("category") != "rincian_terpisah":
                     komparasi_tab = susun_tab_komparasi_divisi(tabs_with_data, question)
                     if komparasi_tab:
                         active_tabs = [komparasi_tab] + [t for t in tabs_with_data if t["id"] != "komparasi"]
@@ -431,24 +546,34 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                 default_tab = active_tabs[0]
 
                 durasi_ms = int((time.monotonic() - t0) * 1000)
-                ringkasan_multi = susun_ringkasan_eksekutif_multi(active_tabs, question)
+                ringkasan_multi = _bersihkan_emoji_teks(susun_ringkasan_eksekutif_multi(active_tabs, question))
 
                 # Rekomendasi saran pertanyaan kontekstual (Anti Self-Referencing / De-duplikasi kueri user)
-                saran_list = []
-                q_clean = question.lower().strip()
-                potential_saran = [
-                    "Tampilkan tren bulanan penjualan unit tahun ini",
-                    "Tampilkan rincian servis bengkel dengan estimasi biaya terbesar",
-                    "Bandingkan performa divisi dengan tahun penuh 2025",
-                    "Tampilkan 5 customer dengan transaksi terbesar tahun ini",
-                    "Tampilkan ringkasan pendapatan jasa servis bengkel per kuartal"
-                ]
-                for s in potential_saran:
-                    s_clean = s.lower().strip()
-                    if s_clean != q_clean and q_clean not in s_clean and s_clean not in q_clean:
-                        saran_list.append(s)
-                    if len(saran_list) >= 3:
-                        break
+                if fanout_info.get("category") == "rincian_terpisah":
+                    p1 = fanout_info.get("p1", "")
+                    p2 = fanout_info.get("p2", "")
+                    topic = fanout_info.get("topic", "penjualan")
+                    saran_list = [
+                        f"Bandingkan performa {topic} tahun {p1} vs {p2} dalam satu tabel",
+                        f"Tampilkan tren bulanan {topic} tahun {p1}",
+                        f"Tampilkan tren bulanan {topic} tahun {p2}"
+                    ]
+                else:
+                    saran_list = []
+                    q_clean = question.lower().strip()
+                    potential_saran = [
+                        "Tampilkan tren bulanan penjualan unit tahun ini",
+                        "Tampilkan rincian servis bengkel dengan estimasi biaya terbesar",
+                        "Bandingkan performa divisi dengan tahun penuh 2025",
+                        "Tampilkan 5 customer dengan transaksi terbesar tahun ini",
+                        "Tampilkan ringkasan pendapatan jasa servis bengkel per kuartal"
+                    ]
+                    for s in potential_saran:
+                        s_clean = s.lower().strip()
+                        if s_clean != q_clean and q_clean not in s_clean and s_clean not in q_clean:
+                            saran_list.append(s)
+                        if len(saran_list) >= 3:
+                            break
 
                 response = {
                     "source": "vanna",
@@ -613,6 +738,11 @@ Berikan ringkasan naratif eksekutif singkat (2-3 kalimat) dalam bahasa Indonesia
                 ringkasan = _format_ringkasan_otomatis(db_rows[:500], columns, question)
                 allow_explain = True
 
+            ringkasan = _bersihkan_emoji_teks(ringkasan)
+            comp_info = _deteksi_kueri_komparasi_periode(question)
+            saran_list = comp_info.get("suggestions", []) if comp_info else []
+            is_comp = bool(comp_info)
+
             response = {
                 "source": "vanna",
                 "confidence": "A",
@@ -626,9 +756,11 @@ Berikan ringkasan naratif eksekutif singkat (2-3 kalimat) dalam bahasa Indonesia
                 "memory_id": None,
                 "question": question,
                 "ringkasan": ringkasan,
-                "saran": [],
+                "saran": saran_list,
                 "metode": "vanna",
-                "allow_explain": allow_explain
+                "allow_explain": allow_explain,
+                "is_comparison": is_comp,
+                "comparison_meta": comp_info
             }
 
         # Simpan ke SQL Memory agar pertanyaan yang sama berikutnya bernilai 0 token!

@@ -160,11 +160,19 @@ def susun_multi_sql_prompt(question: str, fanout_info: Dict[str, Any], context_t
     domain_text = "\n".join(domain_instructions)
     json_sample = "{\n  " + ",\n  ".join(json_keys) + "\n}"
 
-    prompt = f"""You are a PostgreSQL expert for an automotive dealership DMS (Dealer Management System).
-The user asked a multi-domain dealership question: "{question}"
+    if fanout_info.get("category") == "rincian_terpisah":
+        intro = (
+            f'The user requested detailed transaction breakdowns separated by period: "{question}"\n\n'
+            "Generate an independent, valid PostgreSQL SELECT query for each requested period:\n"
+        )
+    else:
+        intro = (
+            f'The user asked a multi-domain dealership question: "{question}"\n\n'
+            "To provide a comprehensive 360-degree overview, generate a separate, valid PostgreSQL SELECT query for each of the following sub-domains:\n"
+        )
 
-To provide a comprehensive 360-degree overview, generate a separate, valid PostgreSQL SELECT query for each of the following sub-domains:
-{domain_text}
+    prompt = f"""You are a PostgreSQL expert for an automotive dealership DMS (Dealer Management System).
+{intro}{domain_text}
 
 Relevant Database Context & Rules:
 {context_text}
@@ -235,6 +243,129 @@ def _format_rupiah_singkat(val: float) -> str:
     elif abs_val >= 1_000:
         return f"Rp {val:,.0f}".replace(",", ".")
     return f"Rp {val:,.0f}"
+
+
+def _ekstrak_dua_periode(question: str) -> Optional[tuple[str, str]]:
+    """Mengekstrak 2 tahun atau 2 periode waktu dari kueri."""
+    q_lower = (question or "").lower()
+    years = re.findall(r"\b(20[1-3][0-9])\b", q_lower)
+    seen_years: List[str] = []
+    for y in years:
+        if y not in seen_years:
+            seen_years.append(y)
+    if len(seen_years) >= 2:
+        return seen_years[0], seen_years[1]
+
+    quarters = re.findall(r"\b(q[1-4]|kuartal\s*[1-4]|triwulan\s*[1-4]|semester\s*[1-2]|s[1-2])\b", q_lower)
+    seen_q: List[str] = []
+    for q in quarters:
+        if q not in seen_q:
+            seen_q.append(q)
+    if len(seen_q) >= 2:
+        return seen_q[0], seen_q[1]
+
+    return None
+
+
+def cek_apakah_minta_rincian_terpisah(question: str) -> Optional[Dict[str, Any]]:
+    """
+    Deteksi apakah user meminta rincian transaksi ditampilkan dalam tabel terpisah per periode (Gaya 2).
+    Contoh: 'Tampilkan rincian transaksi penjualan tahun 2024 dan 2025 secara terpisah',
+            'Pisahkan tabel pembelian 2025 dan 2026', 'Detail transaksi 2024 dan 2025 terpisah'.
+    """
+    q_lower = (question or "").lower()
+    has_terpisah = bool(re.search(r"\b(?:terpisah|pisahkan|dipisah|pisah|pecah|masing-masing\s+tabel|tiap\s+tabel|per\s+tabel|sendiri-sendiri)\b", q_lower))
+    has_rincian = bool(re.search(r"\b(?:rincian|detail|detil|breakdown)\b", q_lower))
+
+    if not (has_terpisah or (has_rincian and bool(re.search(r"\b(?:dan|vs|versus|serta)\b", q_lower)))):
+        return None
+
+    periode = _ekstrak_dua_periode(question)
+    if not periode:
+        return None
+
+    p1, p2 = periode
+
+    topic = "penjualan"
+    table_hint = "untt_penjualan"
+    date_col = "tgl_penjualan"
+    if any(w in q_lower for w in ["beli", "pembelian", "kulakan", "pengadaan"]):
+        topic = "pembelian"
+        table_hint = "untt_pembelian"
+        date_col = "tgl_pembelian"
+    elif any(w in q_lower for w in ["servis", "service", "bengkel", "pkb"]):
+        topic = "servis"
+        table_hint = "srvt_pkb"
+        date_col = "tgl_pkb"
+    elif any(w in q_lower for w in ["part", "sparepart", "suku cadang"]):
+        topic = "sparepart"
+        table_hint = "prtt_penjualan"
+        date_col = "tgl_transaksi"
+    elif any(w in q_lower for w in ["unit", "mobil", "motor", "kendaraan"]):
+        topic = "unit kendaraan"
+        table_hint = "untt_penjualan"
+        date_col = "tgl_penjualan"
+
+    return {
+        "category": "rincian_terpisah",
+        "p1": p1,
+        "p2": p2,
+        "topic": topic,
+        "domains": [
+            {
+                "id": f"periode_{p1}",
+                "title": f"Rincian Tahun {p1}",
+                "icon": "Calendar",
+                "focus": f"Daftar detail transaksi {topic} tahun {p1}",
+                "hint": f"Tampilkan data baris transaksi dari '{table_hint}' pada tahun {p1} (filter {date_col} tahun {p1}). Batasi LIMIT 50.",
+            },
+            {
+                "id": f"periode_{p2}",
+                "title": f"Rincian Tahun {p2}",
+                "icon": "Calendar",
+                "focus": f"Daftar detail transaksi {topic} tahun {p2}",
+                "hint": f"Tampilkan data baris transaksi dari '{table_hint}' pada tahun {p2} (filter {date_col} tahun {p2}). Batasi LIMIT 50.",
+            },
+        ]
+    }
+
+
+def _deteksi_kueri_komparasi_periode(question: str) -> Optional[Dict[str, Any]]:
+    """
+    Deteksi apakah pertanyaan adalah komparasi antar periode waktu (Gaya 1).
+    Contoh: 'bandingkan penjualan tahun 2024 vs 2025', 'pembelian 2025 versus 2026'.
+    """
+    q_lower = (question or "").lower()
+    # Jika sudah minta rincian terpisah, serahkan ke cek_apakah_minta_rincian_terpisah
+    if bool(re.search(r"\b(?:terpisah|pisahkan|dipisah|pisah|pecah)\b", q_lower)):
+        return None
+
+    has_comp_kw = bool(re.search(r"\b(?:bandingkan|komparasi|perbandingan|versus|vs|growth|pertumbuhan|tren\s+antar|selisih|dibandingkan|dibanding|banding)\b", q_lower))
+    periode = _ekstrak_dua_periode(question)
+    if not periode:
+        return None
+
+    has_connector = bool(re.search(r"\b(?:vs|versus|dan|ke|dengan|serta|dibanding)\b", q_lower))
+    if not (has_comp_kw or has_connector):
+        return None
+
+    p1, p2 = periode
+    topic = "penjualan"
+    if any(w in q_lower for w in ["beli", "pembelian", "kulakan", "pengadaan"]):
+        topic = "pembelian"
+    elif any(w in q_lower for w in ["servis", "service", "bengkel", "pkb"]):
+        topic = "servis"
+    elif any(w in q_lower for w in ["part", "sparepart", "suku cadang"]):
+        topic = "sparepart"
+    elif any(w in q_lower for w in ["unit", "mobil", "motor", "kendaraan"]):
+        topic = "unit kendaraan"
+
+    return {
+        "is_comparison": True,
+        "p1": p1,
+        "p2": p2,
+        "topic": topic,
+    }
 
 
 def cek_apakah_perlu_komparasi(question: str) -> bool:
@@ -395,12 +526,15 @@ def susun_ringkasan_eksekutif_multi(domain_results: List[Dict[str, Any]], questi
             parts.append(f"{title}: {len(rows)} baris data")
 
     ringkasan_teks = " • ".join(parts)
-    if len(valid_items) > 1:
-        base_narasi = f"Ringkasan performa dealer mencakup seluruh divisi operasional: {ringkasan_teks}."
+    is_rincian = any("Rincian" in str(d.get("title", "")) for d in valid_items)
+    if is_rincian:
+        base_narasi = f"Rincian transaksi per periode: {ringkasan_teks}."
+    elif len(valid_items) > 1:
+        base_narasi = f"Ringkasan performa mencakup seluruh data operasional: {ringkasan_teks}."
     elif len(valid_items) == 1:
         base_narasi = f"Hasil analitik {valid_items[0].get('title', 'data')}: {ringkasan_teks}."
     else:
-        base_narasi = f"Ringkasan performa dealer: {ringkasan_teks}."
+        base_narasi = f"Ringkasan performa: {ringkasan_teks}."
 
     # Smart Context Note untuk Data Tahun Berjalan (2026 vs 2025/2024)
     q_lower = (question or "").lower()
