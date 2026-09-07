@@ -1,6 +1,6 @@
 import { Component, useMemo, useState } from 'react';
 import {
-  AlertTriangle, Check, ChevronDown, ChevronRight, ChevronLeft, Database, Layers, Sparkles, X, Zap,
+  AlertTriangle, Check, ChevronDown, ChevronRight, ChevronLeft, Database, Layers, X,
   BarChart2, LineChart as LineChartIcon, Table as TableIcon, Loader2, GraduationCap,
   TrendingUp, TrendingDown, Lightbulb, Compass, Award,
   Car, Wrench, Package, FileSpreadsheet, ArrowUpDown, ArrowUp, ArrowDown, Copy, Search,
@@ -505,45 +505,55 @@ export default function AssistantAnswerCard({
 
   return (
     <>
-      <div className="bg-white border border-hairline rounded-xl rounded-tl-md shadow-sm p-4 space-y-3">
-        {/* Badge sumber + level keyakinan */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {terverifikasi ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-success/10 text-success text-[11px] font-medium">
-              <Check size={11} />
-              Memori (terverifikasi)
+      <div className="bg-white border border-hairline rounded-xl shadow-xs p-4 sm:p-5 space-y-4">
+        {/* Executive Dossier Header */}
+        <div className="flex items-center justify-between gap-3 border-b border-hairline pb-3 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            {terverifikasi ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-xs font-semibold">
+                <Check size={12} className="text-emerald-600" />
+                <span>Memori Terverifikasi</span>
+              </span>
+            ) : ditolak ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-rose-50 border border-rose-200 text-rose-800 text-xs font-medium">
+                <X size={12} />
+                <span>Kueri Ditolak</span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-surface-soft border border-hairline text-ink text-xs font-semibold">
+                <Database size={12} className="text-primary" />
+                <span>Hasil Basis Data Terverifikasi</span>
+              </span>
+            )}
+
+            <span className="text-[11px] text-muted font-mono bg-canvas px-2 py-0.5 rounded border border-hairline">
+              Keyakinan: <strong className="text-ink">{answer.confidence || 'B'}</strong>
             </span>
-          ) : ditolak ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-soft text-muted text-[11px] font-medium">
-              <X size={11} />
-              Ditolak
-            </span>
-          ) : answer.source === 'vanna' ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-card text-ink border border-hairline text-[11px] font-medium">
-              <Zap size={11} className="text-muted" />
-              Mode Vanna (pgvector)
-            </span>
-          ) : answer.source === 'tier2' ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-card text-ink text-[11px] font-medium">
-              <Layers size={11} />
-              SQL Kompleks (Level C)
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[11px] font-medium">
-              <Sparkles size={11} />
-              Jawaban baru
-            </span>
-          )}
-          <span className="px-2 py-0.5 rounded-full border border-hairline text-muted text-[11px]">
-            Keyakinan {answer.confidence}
-          </span>
+          </div>
+
+          <div className="flex items-center gap-2.5 text-xs text-muted font-mono">
+            {durasi && (
+              <span className="tabular-nums font-mono">{durasi}</span>
+            )}
+            {activeRows.length > 0 && (
+              <>
+                <span className="text-muted/40">•</span>
+                <span className="tabular-nums font-mono">{activeRows.length} baris</span>
+              </>
+            )}
+          </div>
         </div>
 
-        {/* Ringkasan naratif / ringkasan otomatis */}
+        {/* Ringkasan Eksekutif Callout */}
         {answer.ringkasan && (
-          <p className="border-l-2 border-primary/40 pl-3 font-serif italic text-[15px] leading-relaxed text-ink">
-            {bersihkanRingkasan(answer.ringkasan)}
-          </p>
+          <div className="border-l-2 border-primary pl-3.5 py-1.5 bg-surface-soft/40 rounded-r-lg">
+            <div className="text-[10px] font-mono text-muted uppercase tracking-wider mb-0.5">
+              Ringkasan Eksekutif
+            </div>
+            <p className="font-serif italic text-[15px] sm:text-[16px] leading-relaxed text-ink font-medium">
+              {bersihkanRingkasan(answer.ringkasan)}
+            </p>
+          </div>
         )}
 
         {/* Tombol On-Demand Explain (Mode Operasional) */}
@@ -553,22 +563,22 @@ export default function AssistantAnswerCard({
               type="button"
               onClick={handleExplain}
               disabled={loadingExplain}
-              className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium border border-primary/30 rounded-lg text-primary bg-primary/5 hover:bg-primary/10 transition-colors disabled:opacity-50 cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-hairline rounded-lg text-ink bg-white hover:bg-surface-soft transition-colors disabled:opacity-50 cursor-pointer shadow-2xs"
             >
-              {loadingExplain ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-              {loadingExplain ? 'Menganalisis data mendalam...' : 'Jelaskan Lebih Dalam dengan AI'}
+              {loadingExplain ? <Loader2 size={12} className="animate-spin text-primary" /> : <Lightbulb size={12} className="text-amber-600" />}
+              <span>{loadingExplain ? 'Menyusun analisis mendalam…' : 'Analisis Naratif Eksekutif'}</span>
             </button>
           </div>
         )}
 
         {/* Hasil Narasi Analisis Eksekutif On-Demand */}
         {penjelasan && (
-          <div className="bg-surface-soft border border-hairline rounded-lg p-3 text-xs leading-relaxed text-ink space-y-1.5 animate-fadeIn">
-            <div className="flex items-center gap-1.5 text-primary font-medium text-[11px] uppercase tracking-wider">
-              <Sparkles size={12} />
-              <span>Analisis Eksekutif AI</span>
+          <div className="bg-surface-soft/70 border border-hairline rounded-lg p-3.5 text-xs leading-relaxed text-ink space-y-1.5 animate-fadeIn">
+            <div className="flex items-center gap-1.5 text-ink font-semibold text-[11px] uppercase tracking-wider">
+              <Lightbulb size={13} className="text-amber-600" />
+              <span>Analisis Eksekutif Data</span>
             </div>
-            <p className="whitespace-pre-wrap text-body font-sans">{penjelasan}</p>
+            <p className="whitespace-pre-wrap text-body font-sans leading-relaxed">{penjelasan}</p>
           </div>
         )}
 
@@ -608,57 +618,57 @@ export default function AssistantAnswerCard({
           </div>
         )}
 
-        {/* Smart Insights (Zero-Token Analisis Matematis) */}
+        {/* Ringkasan Indikator Statistik Data */}
         {smartInsights.hasInsights && (
-          <div className="bg-canvas border border-hairline rounded-lg p-2.5 space-y-2 text-xs">
+          <div className="bg-surface-soft/60 border border-hairline rounded-lg p-3 space-y-2 text-xs">
             <div className="flex items-center justify-between text-muted text-[11px]">
-              <span className="inline-flex items-center gap-1 font-medium text-ink">
-                <Lightbulb size={13} className="text-amber-500" />
-                Smart Insight (Zero-Token)
+              <span className="inline-flex items-center gap-1.5 font-medium text-ink tracking-wide">
+                <Lightbulb size={13} className="text-amber-600" />
+                <span>Indikator Statistik Utama</span>
               </span>
-              <span>{smartInsights.jumlahData} data dianalisis</span>
+              <span className="font-mono tabular-nums text-muted">{smartInsights.jumlahData} baris data</span>
             </div>
 
             <div className="flex items-center gap-2 flex-wrap text-xs">
               {smartInsights.deltaPersen !== null && (
                 <div
-                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md border font-medium ${
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium tabular-nums ${
                     smartInsights.arahTren === 'naik'
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                       : smartInsights.arahTren === 'turun'
-                        ? 'bg-rose-50 text-rose-700 border-rose-200'
-                        : 'bg-surface-soft text-body border-hairline'
+                        ? 'bg-rose-50 text-rose-800 border-rose-200'
+                        : 'bg-white text-body border-hairline'
                   }`}
                 >
                   {smartInsights.arahTren === 'naik' ? (
-                    <TrendingUp size={13} />
+                    <TrendingUp size={12} />
                   ) : smartInsights.arahTren === 'turun' ? (
-                    <TrendingDown size={13} />
+                    <TrendingDown size={12} />
                   ) : null}
                   <span>
-                    Tren: {Number(smartInsights.deltaPersen) > 0 ? `+${smartInsights.deltaPersen}%` : `${smartInsights.deltaPersen}%`}
+                    Tren {Number(smartInsights.deltaPersen) > 0 ? `+${smartInsights.deltaPersen}%` : `${smartInsights.deltaPersen}%`}
                   </span>
                 </div>
               )}
 
               {smartInsights.tertinggi && (
-                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-surface-soft/80 border border-hairline text-body">
-                  <Award size={13} className="text-amber-600 shrink-0" />
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white border border-hairline text-body">
+                  <Award size={12} className="text-amber-600 shrink-0" />
                   <span className="truncate max-w-[240px]">
-                    Tertinggi: <strong className="font-semibold text-ink">{smartInsights.tertinggi.label}</strong> ({smartInsights.tertinggi.nilaiFormatted})
+                    Tertinggi: <strong className="font-semibold text-ink">{smartInsights.tertinggi.label}</strong> (<span className="font-mono tabular-nums">{smartInsights.tertinggi.nilaiFormatted}</span>)
                   </span>
                 </div>
               )}
 
               {smartInsights.totalFormatted && (
-                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-surface-soft/80 border border-hairline text-muted">
-                  <span>Total: <strong className="text-ink">{smartInsights.totalFormatted}</strong></span>
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white border border-hairline text-muted">
+                  <span>Total: <strong className="text-ink font-mono tabular-nums">{smartInsights.totalFormatted}</strong></span>
                 </div>
               )}
 
               {smartInsights.rataRataFormatted && (
-                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-surface-soft/80 border border-hairline text-muted">
-                  <span>Rata-rata: <strong className="text-ink">{smartInsights.rataRataFormatted}</strong></span>
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white border border-hairline text-muted">
+                  <span>Rata-rata: <strong className="text-ink font-mono tabular-nums">{smartInsights.rataRataFormatted}</strong></span>
                 </div>
               )}
             </div>
@@ -723,13 +733,13 @@ export default function AssistantAnswerCard({
                 </div>
               )}
 
-              {/* Tombol Unduh Excel dengan Grafik Asli */}
+              {/* Tombol Unduh Excel Format Akuntansi */}
               <button
                 type="button"
                 onClick={handleExportExcel}
                 disabled={isExporting}
                 title="Unduh Spreadsheet Excel (.xlsx) Lengkap dengan Format Akuntansi & Grafik Asli"
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-colors shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-white hover:bg-surface-soft text-ink border border-hairline transition-colors shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-50"
               >
                 {isExporting ? (
                   <Loader2 size={12} className="animate-spin text-emerald-700" />
@@ -744,7 +754,7 @@ export default function AssistantAnswerCard({
                 type="button"
                 onClick={handleCopyTable}
                 title="Salin seluruh data tabel ke clipboard (format TSV/Excel)"
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-surface-soft hover:bg-surface-soft/80 text-body border border-hairline transition-colors shadow-2xs hover:shadow-xs cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-white hover:bg-surface-soft text-ink border border-hairline transition-colors shadow-2xs hover:shadow-xs cursor-pointer"
               >
                 {isCopied ? (
                   <Check size={13} className="text-emerald-600" />
@@ -756,9 +766,8 @@ export default function AssistantAnswerCard({
             </div>
 
             {grafikConfig.cocok && (
-              <span className="text-[11px] text-muted flex items-center gap-1">
-                <Sparkles size={11} className="text-primary" />
-                <span>{grafikConfig.title} (0 Token)</span>
+              <span className="text-[11px] text-muted tracking-tight font-medium">
+                {grafikConfig.title}
               </span>
             )}
           </div>
@@ -901,16 +910,20 @@ export default function AssistantAnswerCard({
               <table className="w-full text-left text-sm">
                 <thead className="bg-surface-soft text-xs text-muted">
                   <tr>
-                    {activeColumns.map((col) => {
+                    {activeColumns.map((col, j) => {
                       const isSorted = sortCol === col;
+                      const sampleCell = activeRows?.[0] ? (Array.isArray(activeRows[0]) ? activeRows[0][j] : activeRows[0][col]) : null;
+                      const isNum = typeof sampleCell === 'number' || (!Number.isNaN(Number(sampleCell)) && sampleCell !== null && sampleCell !== '' && typeof sampleCell !== 'boolean');
                       return (
                         <th
                           key={col}
                           onClick={() => handleSort(col)}
-                          className="px-3 py-2 font-medium whitespace-nowrap cursor-pointer select-none hover:bg-surface-soft/80 transition-colors"
+                          className={`px-3 py-2 font-medium whitespace-nowrap cursor-pointer select-none hover:bg-surface-soft/80 transition-colors ${
+                            isNum ? 'text-right' : 'text-left'
+                          }`}
                           title={`Klik untuk mengurutkan data berdasarkan ${col}`}
                         >
-                          <div className="inline-flex items-center gap-1">
+                          <div className={`inline-flex items-center gap-1 ${isNum ? 'justify-end w-full' : ''}`}>
                             <span>{col}</span>
                             {isSorted ? (
                               sortDir === 'asc' ? (
@@ -939,14 +952,19 @@ export default function AssistantAnswerCard({
                       const cells = Array.isArray(row) ? row : Object.values(row || {});
                       return (
                         <tr key={i} className="hover:bg-surface-soft/50 transition-colors">
-                          {cells.map((cell, j) => (
-                            <td
-                              key={j}
-                              className={`px-3 py-2 whitespace-nowrap ${j === 0 ? 'text-ink font-medium' : 'text-body'}`}
-                            >
-                              {formatSel(cell, activeColumns?.[j])}
-                            </td>
-                          ))}
+                          {cells.map((cell, j) => {
+                            const isNum = typeof cell === 'number' || (typeof cell === 'string' && cell.trim() !== '' && !Number.isNaN(Number(cell)));
+                            return (
+                              <td
+                                key={j}
+                                className={`px-3 py-2 whitespace-nowrap ${
+                                  isNum ? 'text-right font-mono tabular-nums text-ink' : (j === 0 ? 'text-ink font-medium' : 'text-body')
+                                }`}
+                              >
+                                {formatSel(cell, activeColumns?.[j])}
+                              </td>
+                            );
+                          })}
                         </tr>
                       );
                     })
@@ -1079,20 +1097,20 @@ export default function AssistantAnswerCard({
         </div>
       </div>
 
-      {/* Saran pertanyaan lanjutan kontekstual (Zero-Token Chips) */}
+      {/* Saran pertanyaan lanjutan kontekstual */}
       {smartSaran.length > 0 && (
         <div className="space-y-1.5 pt-1">
-          <p className="text-[11px] text-muted flex items-center gap-1 font-medium">
+          <p className="text-[11px] text-muted flex items-center gap-1.5 font-medium">
             <Compass size={12} className="text-primary" />
-            Rekomendasi pertanyaan berikutnya:
+            <span>Rekomendasi eksplorasi data selanjutnya:</span>
           </p>
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-wrap">
             {smartSaran.map((s) => (
               <button
                 key={s}
                 type="button"
                 onClick={() => onAsk(s)}
-                className="px-3 py-1 text-xs border border-hairline rounded-full bg-canvas text-body hover:bg-surface-soft hover:border-primary/40 hover:text-primary transition-colors cursor-pointer text-left shadow-2xs"
+                className="px-2.5 py-1 text-xs border border-hairline rounded-md bg-canvas text-body hover:bg-surface-soft hover:border-primary/40 hover:text-ink transition-colors cursor-pointer text-left shadow-2xs"
               >
                 {s}
               </button>

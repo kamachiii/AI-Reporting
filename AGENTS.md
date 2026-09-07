@@ -149,4 +149,4 @@ Detail kontrak & keputusan: `PROGRESS §3a–3g`.
 ---
 
 *File ini di-maintain seperti kode: ubah lewat commit, jangan edit diam-diam di production
-branch. Terakhir diperbarui: 2026-09-07 (setelah Opsi 5 Admin Metrics & Quota — commit `94da6b0`).*
+branch. Terakhir diperbarui: 2026-09-07 (setelah Redesign Anti-AI-Slop & Executive Command Deck).*

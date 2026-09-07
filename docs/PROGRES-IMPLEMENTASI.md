@@ -64,7 +64,8 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **Metrik Utilisasi AI Admin & Skenario Demo PKL (Opsi 5)** | selesai | LIVE | Dashboard analitik AI admin (overview, tren Recharts 7-hari, kuota token cabang real-time), modal ubah kuota cabang, dokumen panduan sidang PKL; 554 test backend lulus, lint 0 error, build 0 error |
 | **Penyempurnaan Analisis Multi-Divisi** | selesai | LIVE | Koreksi skema riil dealer (srvt/pwt1/inv1), komparasi sejajar, smart context note, de-duplikasi chip; 557 test backend lulus |
 | **Fix Format Mata Uang vs Kuantitas & Total Transaksi** | selesai | LIVE | Perbaikan deteksi kolom: hapus total_transaksi dari UANG_KEYWORDS, tambahkan kuantiti, transaksi, unit ke KUANTITAS_KEYWORDS di UI, smartInsights, dan Excel exporter; 557 test lulus |
-| **Manajemen Riwayat Chat & Tabel Pintar** | selesai | LIVE | Sidebar riwayat multi-sesi (+ Chat Baru, ganti sesi, hapus riwayat per sesi / semua); Tabel cerdas di kartu jawaban (search filter, sorting kolom asc/desc, paginasi mini 10/25/50/semua, salin tabel TSV/Excel); Koreksi skema bengkel riil srvt_wo & srvt_wodetail (138k & 927k rows); Ekstraksi robust JSON SQL; 558 test lulus |
+| **Manajemen Riwayat Chat & Tabel Pintar** | selesai | `348ef57` | Sidebar riwayat multi-sesi (+ Chat Baru, ganti sesi, hapus riwayat per sesi / semua); Tabel cerdas di kartu jawaban (search filter, sorting kolom asc/desc, paginasi mini 10/25/50/semua, salin tabel TSV/Excel); Koreksi skema bengkel riil srvt_wo & srvt_wodetail (138k & 927k rows); Ekstraksi robust JSON SQL; 558 test lulus |
+| **Redesign Anti-AI-Slop & Executive Command Deck** | selesai | LIVE | Instalasi 2 skill baru (anti-ai-slop-design & web-design-guidelines); Eliminasi pola AI slop (bot avatar raksasa, badge spam 0-token, tombol warna-warni inkonsisten); Command Deck 4 kartu analitis dealer; Precision Dossier & Tabular Numbers; 558 test lulus, lint 0 error, build 0 error |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -904,6 +905,39 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Backend pytest: **558 passed in 36.88s** (100% lulus tanpa kegagalan).
   - Frontend lint: `npm run lint` **0 errors** (100% lulus).
   - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 1.35s).
+
+### 3aa. Redesign Anti-AI-Slop & Executive Automotive Intelligence Deck
+- **Latar Belakang & Keluhan**:
+  - Pengguna merasa antarmuka UI chat sebelumnya terlalu memiliki pola generik "AI Slop": bot avatar raksasa melayang di empty state, badge soup warna-warni (`0-Token`, `(0-Token)`, `✨`), tombol aksi tidak harmonis (hijau terang beradu dengan abu-abu), bubble chat membulat ekstrem tanpa hierarki data eksekutif.
+- **Skill Baru yang Diinstal**:
+  - `.agents/skills/anti-ai-slop-design/SKILL.md`: Panduan desain editorial otomotif presisi, eliminasi pola klise AI bot, tipografi editorial (`font-serif` Cmorant Garamond + `font-mono` tabular numbers), pembatasan aksen terracotta (`#cc785c`), dan palet hangat arsitektural.
+  - `.agents/skills/web-design-guidelines/SKILL.md`: Standar Vercel Web Interface Guidelines (aksesibilitas WCAG, visible focus rings, tabular numbers alignment, transisi eksplisit tanpa `all`).
+- **Komponen yang Direkayasa Ulang**:
+  1. **`UserWorkspace.jsx`**:
+     - *Header*: Monogram arsitektural `DMS`, live green telemetry ping (`Database Siap`), tombol `Sesi Baru` minimalis, profil user yang terstruktur rapi.
+     - *Empty State (Executive Command Deck)*: Menghapus total bot avatar raksasa kartun. Digantikan dengan **4 Kartu Quick Query Kategori Dealer** (*Penjualan Kendaraan Unit Baru*, *Operasional Layanan Bengkel & WO*, *Suku Cadang & Perputaran Stok*, *Komparasi Kinerja Lintas Divisi*) yang interaktif (klik langsung mengeksekusi pertanyaan).
+     - *Telemetry Strip*: Ringkasan status teknis di empty state (`2.387 Tabel Terpantau • Read-Only Enforced • AST Verifier Active`).
+     - *MessageBubble*: Pesan user dirombak menjadi kartu gelap eksekutif (`bg-surface-dark text-white rounded-lg`) dengan cap waktu dan label "Pertanyaan Anda".
+     - *PipelineIndicator*: Tampilan log telemetri teknis dengan animasi pulsa lembut dan badge tahapan yang presisi.
+     - *Input Console*: Container berfokus tenang dengan send button tactile dan catatan kepatuhan audit.
+  2. **`AssistantAnswerCard.jsx`**:
+     - *Executive Dossier Header*: Menggantikan badge soup dengan bar status teknis terpadu (status verifikasi, level keyakinan A/B/C, durasi kueri `tabular-nums font-mono`, jumlah baris).
+     - *Executive Briefing Callout*: Narasi ringkasan dengan aksen hairline vertikal terracotta yang elegan.
+     - *Statistik Data Utama*: Menghapus badge buzzword `(Zero-Token)` dan menggantinya dengan indikator statistik bersih berformat monospaced `tabular-nums`.
+     - *Tabel Cerdas Presisi*: Nilai numerik dan mata uang secara otomatis disejajarkan ke kanan (`text-right font-mono tabular-nums`), sedangkan label teks disejajarkan ke kiri.
+     - *Toolbar & Chart*: Menghapus badge `(0 Token)` dan icon `Sparkles`. Menyelaraskan tombol `Unduh Excel` dan `Salin Tabel` ke gaya tombol korporat editorial yang harmonis.
+     - *Contextual Chips*: Mengubah pil bulat balon menjadi chip penunjuk arah eksplorasi yang bersih (`rounded-md border border-hairline`).
+  3. **`ChatHistorySidebar.jsx`**:
+     - Tombol `Sesi Percakapan Baru` diperbarui dengan gaya eksekutif gelap (`bg-surface-dark text-white`).
+     - Tab sesi aktif diubah menjadi ledger file tab dengan strip aksen kiri terracotta (`border-l-2 border-l-primary bg-white shadow-2xs`).
+     - Input pencarian arsip dilengkapi indikator fokus `focus:ring-1 focus:ring-primary/40`.
+  4. **`ClarificationCard.jsx`**:
+     - Menghapus badge buzzword `(0-Token)` dan menstandarisasi token warna yang usang (`text-text-main`, `text-text-subtle`) ke standar proyek (`text-ink`, `text-muted`, `text-body`).
+- **Hasil Verifikasi**:
+  - Backend compileall: **exit 0**.
+  - Backend pytest: **558 passed in 38.50s** (100% lulus tanpa kegagalan).
+  - Frontend lint: `npm run lint` **0 errors** (100% lulus).
+  - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 1.24s).
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 

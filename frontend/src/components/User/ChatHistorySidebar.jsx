@@ -88,10 +88,10 @@ export default function ChatHistorySidebar({
         <button
           type="button"
           onClick={onNewChat}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-primary text-white text-xs font-semibold shadow-xs hover:bg-primary/90 transition-all cursor-pointer"
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-surface-dark text-white text-xs font-medium shadow-xs hover:bg-black transition-colors cursor-pointer"
         >
-          <Plus size={15} />
-          <span>Chat Baru</span>
+          <Plus size={14} className="text-white" />
+          <span>Sesi Percakapan Baru</span>
         </button>
 
         {/* Input Pencarian Riwayat jika percakapan > 3 */}
@@ -102,14 +102,14 @@ export default function ChatHistorySidebar({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Cari sesi chat…"
-              className="w-full pl-8 pr-7 py-1.5 text-xs bg-surface-soft/60 border border-hairline rounded-lg text-ink placeholder:text-muted/60 focus:outline-none focus:border-primary"
+              placeholder="Cari arsip sesi…"
+              className="w-full pl-8 pr-7 py-1.5 text-xs bg-surface-soft/60 border border-hairline rounded-md text-ink placeholder:text-muted/60 focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/60 transition-colors"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-ink"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-ink cursor-pointer"
               >
                 <X size={12} />
               </button>
@@ -122,12 +122,12 @@ export default function ChatHistorySidebar({
       <div className="flex-1 overflow-y-auto p-2 space-y-4 text-xs">
         {filtered.length === 0 ? (
           <div className="text-center py-8 text-muted px-4">
-            <MessageSquare size={24} className="mx-auto mb-2 opacity-40" />
-            <p className="font-medium">
-              {searchQuery ? 'Tidak ada riwayat cocok' : 'Belum ada riwayat'}
+            <MessageSquare size={22} className="mx-auto mb-2 opacity-30 text-muted" />
+            <p className="font-medium text-ink">
+              {searchQuery ? 'Tidak ada arsip cocok' : 'Belum ada arsip percakapan'}
             </p>
-            <p className="text-[11px] mt-0.5 text-muted/80">
-              {searchQuery ? 'Coba kata kunci lain' : 'Mulai percakapan dengan bertanya di chat'}
+            <p className="text-[11px] mt-0.5 text-muted">
+              {searchQuery ? 'Gunakan kata kunci lain' : 'Mulai eksplorasi dengan mengajukan pertanyaan'}
             </p>
           </div>
         ) : (
@@ -145,19 +145,19 @@ export default function ChatHistorySidebar({
                   return (
                     <div
                       key={conv.id}
-                      className={`group relative flex items-center justify-between rounded-xl px-2.5 py-2 transition-colors cursor-pointer ${
+                      className={`group relative flex items-center justify-between rounded-lg px-2.5 py-2 transition-colors cursor-pointer ${
                         isActive
-                          ? 'bg-primary/10 text-primary font-medium border border-primary/20'
-                          : 'text-ink hover:bg-surface-soft/80'
+                          ? 'bg-white text-ink font-semibold border-l-2 border-l-primary border-y border-r border-hairline shadow-2xs'
+                          : 'text-body hover:text-ink hover:bg-surface-soft/60 border border-transparent'
                       }`}
                       onClick={() => !isConfirmingDelete && onSelectConversation(conv.id)}
                     >
                       <div className="flex items-center gap-2 min-w-0 pr-2">
                         <MessageSquare
                           size={13}
-                          className={`shrink-0 ${isActive ? 'text-primary' : 'text-muted'}`}
+                          className={`shrink-0 ${isActive ? 'text-primary' : 'text-muted/70'}`}
                         />
-                        <span className="truncate text-xs" title={conv.title}>
+                        <span className="truncate text-xs tracking-tight" title={conv.title}>
                           {conv.title || 'Percakapan Tanpa Judul'}
                         </span>
                       </div>

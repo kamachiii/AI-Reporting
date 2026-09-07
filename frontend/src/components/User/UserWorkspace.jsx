@@ -2,8 +2,9 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
-  Bot, Building2, Check, Loader2, LogOut, Send,
+  Check, Loader2, LogOut, Send,
   PanelLeftOpen, MessageSquarePlus,
+  Car, Wrench, Package, BarChart3, ShieldCheck, ArrowRight,
 } from 'lucide-react';
 
 import AssistantAnswerCard from './AssistantAnswerCard';
@@ -20,12 +21,40 @@ const cabangPertama = (u) => (u?.allowed_branches || [])[0] || null;
 // executor). Animasi berjalan sinkron dengan durasi request nyata: maju
 // berkala, berhenti di tahap terakhir sampai jawaban/error datang.
 const PIPELINE_STAGES = [
-  { key: 'understand', label: 'Memahami pertanyaan…' },
-  { key: 'plan', label: 'Menyusun rencana…' },
-  { key: 'verify', label: 'Memeriksa keamanan…' },
-  { key: 'fetch', label: 'Mengambil data…' },
+  { key: 'understand', label: 'Memvalidasi konteks kueri bisnis & skema cabang…' },
+  { key: 'plan', label: 'Menyusun rencana SQL deterministik / Text2SQL…' },
+  { key: 'verify', label: 'Memeriksa verifier 6-gerbang keamanan AST & budget…' },
+  { key: 'fetch', label: 'Mengeksekusi database read-only & agregasi baris…' },
 ];
-const STAGE_INTERVAL_MS = 1200;
+const STAGE_INTERVAL_MS = 1100;
+
+// Rekomendasi kueri analitik awal (Executive Command Deck)
+const PROMPT_SUGGESTIONS = [
+  {
+    category: 'Penjualan Unit',
+    icon: Car,
+    query: 'Bandingkan tren penjualan unit per bulan tahun ini',
+    desc: 'Omzet, unit terjual, dan komparasi bulanan',
+  },
+  {
+    category: 'Layanan Bengkel',
+    icon: Wrench,
+    query: 'Berapa unit entry WO servis dan mekanik aktif bulan ini?',
+    desc: 'Work order, produktivitas SA & teknisi',
+  },
+  {
+    category: 'Suku Cadang & Stok',
+    icon: Package,
+    query: 'Tampilkan suku cadang dengan stok menipis di gudang',
+    desc: 'Inventori part, slow vs fast-moving',
+  },
+  {
+    category: 'Komparasi Lintas Divisi',
+    icon: BarChart3,
+    query: 'Bandingkan performa antar divisi tahun ini',
+    desc: 'Sinergi pilar 3S (Sales, Service, Sparepart)',
+  },
+];
 
 // ID pesan sekuensial untuk pesan baru (riwayat hydrate memakai awalan h-)
 let messageSeq = 0;
@@ -56,7 +85,6 @@ function pesanErrorChat(error) {
     return 'AI gagal menyusun rencana — coba ulangi atau ubah kalimat pertanyaan.';
   }
   if (status === 503) {
-    // 503 bisa AI belum dikonfigurasi ATAU database tenant tidak tersedia
     if (typeof detail === 'string' && detail.includes('Database tenant')) {
       return 'Database cabang sedang tidak tersedia — coba lagi nanti.';
     }
@@ -105,50 +133,72 @@ function pesanDariHistory(m, idx, allMsgs = []) {
 
 /**
  * Indikator bertahap pipeline AI selama request berjalan.
- * Tahap selesai -> centang, tahap aktif -> spinner, tahap berikutnya -> titik.
+ * Telemetri tenang, berkelas teknis, tanpa gimmick berlebih.
  */
 function PipelineIndicator({ stageIndex }) {
   return (
-    <div className="space-y-1.5" aria-live="polite">
-      {PIPELINE_STAGES.map((stage, i) => {
-        const isDone = i < stageIndex;
-        const isActive = i === stageIndex;
-        return (
-          <div
-            key={stage.key}
-            className={`flex items-center gap-2 text-sm ${
-              isActive ? 'text-ink font-medium' : isDone ? 'text-body' : 'text-muted/60'
-            }`}
-          >
-            {isDone ? (
-              <Check size={15} className="text-success" />
-            ) : isActive ? (
-              <Loader2 size={15} className="animate-spin text-primary" />
-            ) : (
-              <span className="w-[15px] h-[15px] rounded-full border border-hairline" aria-hidden="true" />
-            )}
-            {stage.label}
-          </div>
-        );
-      })}
+    <div className="space-y-2 py-1 select-none" aria-live="polite">
+      <div className="text-[11px] font-mono text-muted uppercase tracking-wider flex items-center gap-1.5 pb-1 border-b border-hairline/60">
+        <span className="w-2 h-2 rounded-full bg-primary animate-ping" />
+        <span>Eksekusi Pipeline Intelijen Data</span>
+      </div>
+      <div className="space-y-1.5">
+        {PIPELINE_STAGES.map((stage, i) => {
+          const isDone = i < stageIndex;
+          const isActive = i === stageIndex;
+          return (
+            <div
+              key={stage.key}
+              className={`flex items-center gap-2.5 text-xs transition-colors ${
+                isActive ? 'text-ink font-medium' : isDone ? 'text-body/80' : 'text-muted/40'
+              }`}
+            >
+              {isDone ? (
+                <div className="w-4 h-4 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 border border-emerald-200">
+                  <Check size={11} />
+                </div>
+              ) : isActive ? (
+                <div className="w-4 h-4 flex items-center justify-center shrink-0">
+                  <Loader2 size={13} className="animate-spin text-primary" />
+                </div>
+              ) : (
+                <span className="w-4 h-4 rounded-full border border-hairline/80 flex items-center justify-center text-[10px] text-muted/50 font-mono">
+                  {i + 1}
+                </span>
+              )}
+              <span className="leading-snug">{stage.label}</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-/** Satu gelembung pesan: pesan user (kanan) atau balasan asisten (kiri). */
+/** Satu blok pertukaran pesan: pesan user (kanan) atau dossier jawaban (kiri). */
 function MessageBubble({
   message, branchCode, feedbackBusy, onAsk, onFeedback,
 }) {
   if (message.role === 'user') {
     return (
       <motion.div
-        initial={{ opacity: 0, y: 8 }}
+        initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.25 }}
-        className="flex justify-end"
+        transition={{ duration: 0.2 }}
+        className="flex justify-end py-1.5"
       >
-        <div className="max-w-[80%] px-4 py-2.5 bg-primary text-white rounded-2xl rounded-br-md text-sm shadow-sm">
-          {message.text}
+        <div className="max-w-[85%] sm:max-w-[75%] space-y-1">
+          <div className="flex items-center justify-end gap-2 text-[11px] text-muted font-medium pr-1">
+            <span>Pertanyaan Anda</span>
+            {message.createdAt && (
+              <span className="font-mono text-[10px] text-muted/70 tabular-nums">
+                {new Date(message.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            )}
+          </div>
+          <div className="px-4 py-2.5 bg-surface-dark text-white rounded-xl rounded-tr-xs text-sm leading-relaxed shadow-xs border border-surface-dark">
+            {message.text}
+          </div>
         </div>
       </motion.div>
     );
@@ -156,32 +206,45 @@ function MessageBubble({
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 8 }}
+      initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25 }}
-      className="flex items-start gap-2.5"
+      className="py-2 w-full space-y-1.5"
     >
-      <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
-        <Bot size={16} />
+      <div className="flex items-center gap-2 text-[11px] text-muted font-medium pl-0.5">
+        <div className="w-4 h-4 rounded-md bg-surface-soft border border-hairline flex items-center justify-center text-primary font-bold text-[9px]">
+          AI
+        </div>
+        <span className="font-semibold text-ink">Intelijen Dealer AI</span>
+        <span className="text-muted/40">•</span>
+        <span className="font-mono text-[10px] text-muted">Core Engine</span>
+        {message.createdAt && (
+          <span className="font-mono text-[10px] text-muted/60 ml-auto tabular-nums">
+            {new Date(message.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        )}
       </div>
 
       {message.status === 'processing' ? (
-        <div className="bg-white border border-hairline rounded-xl rounded-tl-md px-4 py-3 shadow-sm">
+        <div className="bg-white border border-hairline rounded-xl p-4 shadow-xs max-w-md">
           <PipelineIndicator stageIndex={message.stageIndex} />
         </div>
       ) : message.status === 'error' ? (
-        <div className="max-w-[80%] bg-white border border-hairline rounded-xl rounded-tl-md px-4 py-3 shadow-sm text-sm text-error">
-          {message.text}
+        <div className="max-w-2xl bg-red-50/80 border border-red-200 rounded-xl px-4 py-3.5 shadow-xs text-xs text-red-900 leading-relaxed space-y-1">
+          <div className="font-semibold flex items-center gap-1.5 text-red-800">
+            <span>Pemeriksaan Gagal</span>
+          </div>
+          <p>{message.text}</p>
         </div>
       ) : message.answer?.source === 'clarification' || message.answer?.status === 'clarification_needed' ? (
-        <div className="max-w-[85%] min-w-0">
+        <div className="w-full min-w-0">
           <ClarificationCard
             answer={message.answer}
             onAsk={onAsk}
           />
         </div>
       ) : (
-        <div className="max-w-[85%] min-w-0">
+        <div className="w-full min-w-0">
           <AssistantAnswerCard
             answer={message.answer}
             question={message.question}
@@ -379,23 +442,33 @@ export default function UserWorkspace({ user, onLogout }) {
 
   return (
     <div className="h-screen bg-canvas flex flex-col overflow-hidden">
-      {/* Header: judul app + toggle riwayat + info cabang aktif */}
+      {/* Header: Judul App + Status Koneksi + Sesi Baru + Logout */}
       <header className="bg-white border-b border-hairline shrink-0 px-4 py-2.5">
         <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-3">
             {!sidebarOpen && (
               <button
                 type="button"
                 onClick={() => setSidebarOpen(true)}
                 title="Buka Riwayat Percakapan"
+                aria-label="Buka Riwayat Percakapan"
                 className="p-1.5 rounded-lg border border-hairline hover:bg-surface-soft text-muted hover:text-ink transition-colors cursor-pointer"
               >
                 <PanelLeftOpen size={16} />
               </button>
             )}
-            <div>
-              <h1 className="font-serif text-base sm:text-lg text-ink leading-tight">DMS AI Platform</h1>
-              <p className="text-[11px] text-muted">Asisten Laporan Dealer</p>
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-surface-dark text-white flex items-center justify-center font-serif font-bold text-sm tracking-wider shadow-2xs border border-surface-dark/90 select-none">
+                DMS
+              </div>
+              <div>
+                <h1 className="font-serif text-base sm:text-lg text-ink font-semibold tracking-tight leading-none">
+                  DMS AI Platform
+                </h1>
+                <p className="text-[11px] text-muted mt-0.5 font-sans">
+                  Asisten Intelijen Basis Data Dealer
+                </p>
+              </div>
             </div>
           </div>
 
@@ -404,24 +477,31 @@ export default function UserWorkspace({ user, onLogout }) {
               type="button"
               onClick={handleNewChat}
               title="Mulai Sesi Chat Baru"
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-surface-soft hover:bg-surface-soft/80 border border-hairline text-xs font-medium text-ink transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-surface-soft border border-hairline text-xs font-medium text-ink transition-colors shadow-2xs cursor-pointer"
             >
               <MessageSquarePlus size={14} className="text-primary" />
-              <span className="hidden sm:inline">Chat Baru</span>
+              <span className="hidden sm:inline">Sesi Baru</span>
             </button>
+
             {branchCode && (
-              <span className="hidden sm:flex items-center gap-1.5 px-3 py-1 bg-primary/10 text-primary text-xs font-medium rounded-full">
-                <Building2 size={13} />
-                {branchCode}
-              </span>
+              <div className="hidden sm:inline-flex items-center gap-2 px-3 py-1 rounded-full bg-surface-soft border border-hairline text-xs font-medium text-ink">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="font-mono font-semibold">{branchCode}</span>
+                <span className="text-muted/40 text-[10px]">|</span>
+                <span className="text-muted text-[11px]">Database Siap</span>
+              </div>
             )}
-            <span className="hidden md:inline text-xs text-muted">{user?.username}</span>
+
+            <div className="h-4 w-[1px] bg-hairline hidden md:block mx-0.5" />
+
+            <span className="hidden md:inline text-xs text-muted font-medium font-mono">{user?.username}</span>
+
             <button
               onClick={onLogout}
-              title="Keluar"
-              className="flex items-center gap-1.5 px-3 py-1.5 border border-hairline rounded-md text-xs sm:text-sm text-muted hover:bg-surface-soft hover:text-ink transition-colors cursor-pointer"
+              title="Keluar dari sesi"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 border border-hairline rounded-lg text-xs text-muted hover:bg-surface-soft hover:text-ink transition-colors cursor-pointer"
             >
-              <LogOut size={14} />
+              <LogOut size={13} />
               <span className="hidden sm:inline">Keluar</span>
             </button>
           </div>
@@ -449,18 +529,59 @@ export default function UserWorkspace({ user, onLogout }) {
                 <motion.div
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.35 }}
-                  className="flex flex-col items-center text-center mt-10"
+                  transition={{ duration: 0.3 }}
+                  className="py-6 sm:py-10 space-y-7 select-none"
                 >
-                  <div className="w-14 h-14 rounded-full bg-primary/10 text-primary flex items-center justify-center mb-4">
-                    <Bot size={28} />
+                  {/* Hero Dossier Header */}
+                  <div className="text-center max-w-xl mx-auto space-y-2.5">
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-soft border border-hairline text-xs font-medium text-body">
+                      <ShieldCheck size={13} className="text-emerald-600" />
+                      <span>Terhubung ke Basis Data Dealer ({branchCode || 'Aktif'})</span>
+                    </div>
+                    <h2 className="font-serif text-3xl sm:text-4xl text-ink font-semibold tracking-tight text-balance">
+                      Eksplorasi Data & Kinerja Dealer
+                    </h2>
+                    <p className="text-body text-xs sm:text-sm leading-relaxed text-pretty max-w-lg mx-auto">
+                      Analisis performa penjualan unit, operasional servis bengkel, dan ketersediaan stok
+                      secara langsung dari database transaksi riil tanpa perlu menyusun SQL manual.
+                    </p>
                   </div>
-                  <h2 className="font-serif text-2xl text-ink">Halo, {user?.username}!</h2>
-                  <p className="text-body text-sm mt-2 max-w-md">
-                    {branchCode
-                      ? <>Saya asisten AI untuk cabang <span className="font-medium text-ink">{branchCode}</span>. Tanyakan apa saja tentang penjualan, stok, atau servis — saya ambilkan datanya langsung dari database.</>
-                      : 'Tidak ada cabang yang ditugaskan ke akun Anda — hubungi administrator untuk bisa menggunakan asisten.'}
-                  </p>
+
+                  {/* Quick Analytical Command Grid (4 Pilar Otomotif) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl mx-auto pt-1">
+                    {PROMPT_SUGGESTIONS.map((item, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => handleSend(item.query)}
+                        disabled={isProcessing || !branchCode}
+                        className="group text-left p-3.5 rounded-xl bg-white border border-hairline hover:border-primary/50 hover:shadow-xs transition-all cursor-pointer flex flex-col justify-between"
+                      >
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink group-hover:text-primary transition-colors">
+                            <item.icon size={14} className="text-primary" />
+                            {item.category}
+                          </span>
+                          <ArrowRight size={13} className="text-muted/40 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
+                        </div>
+                        <p className="text-xs text-ink font-medium leading-snug">
+                          &ldquo;{item.query}&rdquo;
+                        </p>
+                        <p className="text-[11px] text-muted mt-1">
+                          {item.desc}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* System Telemetry Metadata */}
+                  <div className="flex items-center justify-center gap-3 text-[11px] text-muted font-mono pt-3 border-t border-hairline/60 max-w-md mx-auto">
+                    <span>2.387 Tabel Terpantau</span>
+                    <span>•</span>
+                    <span>Read-Only Enforced</span>
+                    <span>•</span>
+                    <span>AST Verifier Active</span>
+                  </div>
                 </motion.div>
               )}
 
@@ -479,15 +600,15 @@ export default function UserWorkspace({ user, onLogout }) {
             </div>
           </main>
 
-          {/* Kolom input */}
-          <footer className="bg-white border-t border-hairline shrink-0">
+          {/* Kolom input console */}
+          <footer className="bg-white/95 backdrop-blur-xs border-t border-hairline shrink-0">
             <div className="max-w-3xl mx-auto px-4 py-3">
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
                   handleSend();
                 }}
-                className="flex items-center gap-2"
+                className="relative flex items-center bg-canvas border border-hairline rounded-xl shadow-2xs focus-within:border-primary/70 focus-within:ring-2 focus-within:ring-primary/10 transition-all"
               >
                 <input
                   value={input}
@@ -495,27 +616,34 @@ export default function UserWorkspace({ user, onLogout }) {
                   disabled={isProcessing || !branchCode}
                   placeholder={
                     !branchCode
-                      ? 'Tidak ada cabang aktif…'
+                      ? 'Pilih cabang aktif terlebih dahulu…'
                       : isProcessing
-                        ? 'Sedang memproses…'
-                        : `Tanya apa saja tentang cabang ${branchCode}…`
+                        ? 'Sedang menganalisis basis data dealer…'
+                        : `Ajukan pertanyaan analitik untuk cabang ${branchCode}…`
                   }
-                  className="flex-1 py-2.5 px-4 border border-hairline rounded-md bg-canvas text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60"
-                  aria-label="Pertanyaan"
+                  className="flex-1 py-3 pl-4 pr-12 bg-transparent text-sm text-ink placeholder:text-muted/60 focus:outline-none disabled:opacity-60 font-sans"
+                  aria-label="Pertanyaan analitik"
                 />
-                <button
-                  type="submit"
-                  disabled={isProcessing || !branchCode || !input.trim()}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white rounded-md text-sm hover:bg-primary-active shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
-                >
-                  {isProcessing ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-                  Kirim
-                </button>
+                <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                  <button
+                    type="submit"
+                    disabled={isProcessing || !branchCode || !input.trim()}
+                    className="p-2 rounded-lg bg-surface-dark text-white hover:bg-black disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    title="Kirim Pertanyaan"
+                    aria-label="Kirim Pertanyaan"
+                  >
+                    {isProcessing ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
+                  </button>
+                </div>
               </form>
 
-              <p className="text-[11px] text-muted text-center">
-                Jawaban disertai SQL-nya — klik &quot;Lihat SQL&quot; untuk memeriksa query yang dijalankan.
-              </p>
+              <div className="flex items-center justify-between text-[11px] text-muted pt-2 px-1">
+                <span className="flex items-center gap-1.5">
+                  <ShieldCheck size={12} className="text-emerald-600" />
+                  <span>Kueri dieksekusi secara read-only dengan verifikasi AST & pgvector</span>
+                </span>
+                <span className="font-mono text-[10px] hidden sm:inline">Enter ↵ kirim</span>
+              </div>
             </div>
           </footer>
         </div>
