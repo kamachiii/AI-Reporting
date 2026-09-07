@@ -250,14 +250,37 @@ export const api = {
   //           truncated, duration_ms, memory_id}
   // memory_id hanya terisi untuk jawaban baru (SQL memory pending) —
   // dipakai tombol feedback "Jawaban benar/salah".
-  askAssistant: async (branchCode, question, mode = 'auto') => {
+  askAssistant: async (branchCode, question, mode = 'auto', conversationId = null) => {
     // Timeout 180 dtk (3 menit): mengakomodasi model penalaran / thinking AI
+    const payload = { branch_code: branchCode, question, mode };
+    if (conversationId) {
+      payload.conversation_id = conversationId;
+    }
     const response = await apiClient.post('/chat/query',
-      { branch_code: branchCode, question, mode }, { timeout: 180000 });
+      payload, { timeout: 180000 });
     return response.data;
   },
-  // Riwayat percakapan: {conversation_id, messages: [{role, content,
-  // created_at}]} — content pesan assistant berupa JSON string jawaban.
+  getConversations: async (branchCode) => {
+    const response = await apiClient.get('/chat/conversations', {
+      params: { branch_code: branchCode },
+    });
+    return response.data;
+  },
+  getConversationMessages: async (conversationId) => {
+    const response = await apiClient.get(`/chat/conversations/${conversationId}`);
+    return response.data;
+  },
+  deleteConversation: async (conversationId) => {
+    const response = await apiClient.delete(`/chat/conversations/${conversationId}`);
+    return response.data;
+  },
+  clearAllConversations: async (branchCode) => {
+    const response = await apiClient.delete('/chat/conversations', {
+      params: { branch_code: branchCode },
+    });
+    return response.data;
+  },
+  // Riwayat percakapan lama / default:
   fetchChatHistory: async (branchCode) => {
     const response = await apiClient.get('/chat/history',
       { params: { branch_code: branchCode } });

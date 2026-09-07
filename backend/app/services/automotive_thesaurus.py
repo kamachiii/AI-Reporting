@@ -35,14 +35,17 @@ AUTOMOTIVE_DOMAIN_RULES = [
         "keywords": [
             "servis", "service", "bengkel", "perawatan", "perbaikan", "reparasi",
             "wo", "work order", "pk", "perintah kerja", "sa", "service advisor",
-            "mekanik", "teknisi", "jasa", "womt", "srvt"
+            "mekanik", "teknisi", "jasa", "srvt", "general repair", "body paint",
+            "unit entry"
         ],
-        "primary_tables": ["womt_wo", "womt_wopart", "womt_wojasa", "glbm_customer"],
+        "primary_tables": ["srvt_wo", "srvt_wodetail", "glbm_customer"],
         "guidelines": [
-            "Tabel utama transaksi servis/work order bengkel adalah 'womt_wo'.",
-            "Untuk rincian suku cadang servis gunakan 'womt_wopart', untuk ongkos jasa gunakan 'womt_wojasa'.",
-            "Wajib menyaring transaksi work order yang valid (womt_wo.batal = false).",
-            "Relasi WO ke detail: womt_wo.nomor = womt_wopart.nomor_wo dan womt_wo.nomor = womt_wojasa.nomor_wo."
+            "Tabel utama transaksi servis/work order bengkel adalah 'srvt_wo' (kolom: nomor, tanggal, nomor_customer, nopolisi, norangka, totalestimasibiaya, penerima, nama_foreman, batal, bodypaint, booking).",
+            "Tabel rincian pekerjaan dan ongkos jasa servis adalah 'srvt_wodetail' (kolom: nomor_wo, nama_tasklist, jasa, part, bahan, kode_mekanik).",
+            "Wajib menyaring transaksi work order yang valid (srvt_wo.batal = false).",
+            "Untuk menghitung total unit entry / jumlah kunjungan servis gunakan COUNT(srvt_wo.nomor).",
+            "Relasi WO ke detail: srvt_wo.nomor = srvt_wodetail.nomor_wo.",
+            "Relasi WO ke customer: srvt_wo.nomor_customer = glbm_customer.nomor."
         ]
     },
     {
@@ -51,13 +54,13 @@ AUTOMOTIVE_DOMAIN_RULES = [
         "keywords": [
             "sparepart", "spare part", "suku cadang", "part", "onderdil", "oli",
             "pelumas", "item", "stok", "stock", "inventori", "gudang", "pembelian",
-            "invt", "prtt"
+            "invt", "prtt", "partcounter", "pembebananpart"
         ],
-        "primary_tables": ["invt_item", "invt_pembelian", "invt_stok"],
+        "primary_tables": ["srvt_partcounterfakturdetail", "srvt_stockparts", "invt_item"],
         "guidelines": [
-            "Tabel master katalog sparepart adalah 'invt_item'.",
-            "Tabel transaksi pengadaan/pembelian suku cadang dari supplier adalah 'invt_pembelian' (filter invt_pembelian.batal = false).",
-            "Tabel posisi saldo dan kuantitas persediaan gudang adalah 'invt_stok'."
+            "Tabel transaksi penjualan sparepart counter adalah 'srvt_partcounterfakturdetail' (kolom: nomor_faktur, kode_parts, qty, harga, subtotal).",
+            "Tabel stok suku cadang gudang bengkel adalah 'srvt_stockparts' (kolom: kodepart, namapart, saldoakhir, hargabeliterakhir).",
+            "Tabel master katalog barang adalah 'invt_item' (atau 'srvt_stockparts')."
         ]
     },
     {

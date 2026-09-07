@@ -199,6 +199,12 @@ class FakeCorePool:
             if not kandidat:
                 return None
             return sorted(kandidat, key=lambda r: (-r["times_used"], r["id"]))[0]
+        if "FROM conversations WHERE id = $1 AND user_id = $2" in sql:
+            cid, uid = args
+            for c in self.conversations:
+                if c["id"] == cid and c["user_id"] == uid:
+                    return dict(c)
+            return None
         raise AssertionError(f"fetchrow tak dikenal: {sql[:90]}")
 
     async def fetchval(self, sql, *args):
@@ -207,6 +213,11 @@ class FakeCorePool:
             return self.tenant["tenant_id"] if (
                 self.tenant and self.tenant["branch_code"] == args[0]) else None
         if "SELECT id FROM conversations" in sql:
+            if len(args) == 3:
+                cid, user_id, branch_code = args
+                cocok = [c for c in self.conversations
+                         if c["id"] == cid and c["user_id"] == user_id and c["branch_code"] == branch_code]
+                return cocok[0]["id"] if cocok else None
             user_id, branch_code = args
             cocok = [c for c in self.conversations
                      if c["user_id"] == user_id and c["branch_code"] == branch_code]
@@ -215,7 +226,8 @@ class FakeCorePool:
             self.next_id += 1
             self.conversations.append({
                 "id": self.next_id, "user_id": args[0],
-                "branch_code": args[1], "title": args[2]})
+                "branch_code": args[1], "title": args[2],
+                "created_at": datetime.now(), "updated_at": datetime.now()})
             return self.next_id
         if "INSERT INTO sql_memory" in sql:
             tenant_id, q_norm, sql_txt, plan_json, sumber, fingerprint, \
@@ -232,6 +244,23 @@ class FakeCorePool:
         raise AssertionError(f"fetchval tak dikenal: {sql[:90]}")
 
     async def execute(self, sql, *args):
+        if "UPDATE conversations SET updated_at" in sql:
+            cid = args[0]
+            for c in self.conversations:
+                if c["id"] == cid:
+                    c["updated_at"] = datetime.now()
+            return "OK"
+        if "DELETE FROM conversations WHERE id = $1" in sql:
+            cid = args[0]
+            self.conversations = [c for c in self.conversations if c["id"] != cid]
+            self.messages = [m for m in self.messages if m["conversation_id"] != cid]
+            return "OK"
+        if "DELETE FROM conversations WHERE user_id = $1 AND branch_code = $2" in sql:
+            uid, bcode = args
+            cids_to_del = {c["id"] for c in self.conversations if c["user_id"] == uid and c["branch_code"] == bcode}
+            self.conversations = [c for c in self.conversations if c["id"] not in cids_to_del]
+            self.messages = [m for m in self.messages if m["conversation_id"] not in cids_to_del]
+            return "OK"
         if "UPDATE sql_memory" in sql:
             mid = args[-1]
             for row in self.sql_memory:
@@ -266,6 +295,20 @@ class FakeCorePool:
         raise AssertionError(f"execute tak dikenal: {sql[:90]}")
 
     async def fetch(self, sql, *args):
+        if "FROM conversations c" in sql:
+            uid, bcode = args
+            convs = [c for c in self.conversations if c["user_id"] == uid and c["branch_code"] == bcode]
+            res = []
+            for c in convs:
+                cnt = sum(1 for m in self.messages if m["conversation_id"] == c["id"])
+                res.append({
+                    "id": c["id"],
+                    "title": c.get("title", "Percakapan Baru"),
+                    "created_at": c.get("created_at", datetime.now()),
+                    "updated_at": c.get("updated_at", datetime.now()),
+                    "message_count": cnt
+                })
+            return res
         if "FROM global_knowledge_base" in sql:
             return []
         if "FROM sql_memory" in sql:
@@ -953,6 +996,44 @@ class TestRateLimitDanHistory:
     def test_history_branch_luar_403(self, lingkungan):
         resp = lingkungan.client.get("/chat/history", params={"branch_code": "SBY_02"})
         assert resp.status_code == 403
+
+    def test_list_dan_manage_conversations(self, lingkungan):
+        # 1. Tambah dua conversation manual ke core pool mock
+        now = datetime.now()
+        c1 = {"id": 101, "user_id": 7, "branch_code": "JKT_01", "title": "Obrolan Unit", "created_at": now, "updated_at": now}
+        c2 = {"id": 102, "user_id": 7, "branch_code": "JKT_01", "title": "Obrolan Servis", "created_at": now, "updated_at": now}
+        lingkungan.core.conversations.extend([c1, c2])
+        lingkungan.core.messages.append({"id": 201, "conversation_id": 101, "role": "user", "content": "tanya 1", "created_at": datetime.now()})
+        lingkungan.core.messages.append({"id": 202, "conversation_id": 101, "role": "assistant", "content": "jawab 1", "created_at": datetime.now()})
+
+        # 2. GET /chat/conversations
+        resp = lingkungan.client.get("/chat/conversations", params={"branch_code": "JKT_01"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 2
+        titles = [d["title"] for d in data]
+        assert "Obrolan Unit" in titles
+        assert "Obrolan Servis" in titles
+
+        # 3. GET /chat/conversations/{id}
+        resp_c1 = lingkungan.client.get("/chat/conversations/101")
+        assert resp_c1.status_code == 200
+        assert len(resp_c1.json()["messages"]) == 2
+
+        # 4. DELETE /chat/conversations/{id}
+        resp_del = lingkungan.client.delete("/chat/conversations/101")
+        assert resp_del.status_code == 200
+        assert resp_del.json()["ok"] is True
+
+        # Cek sisa 1 conversation
+        resp_after = lingkungan.client.get("/chat/conversations", params={"branch_code": "JKT_01"})
+        assert len(resp_after.json()) == 1
+
+        # 5. DELETE /chat/conversations (clear all)
+        resp_clear = lingkungan.client.delete("/chat/conversations", params={"branch_code": "JKT_01"})
+        assert resp_clear.status_code == 200
+        resp_empty = lingkungan.client.get("/chat/conversations", params={"branch_code": "JKT_01"})
+        assert len(resp_empty.json()) == 0
 
 
 @pytest.mark.skipif(not HAS_CHAT, reason="chat pipeline belum ada")

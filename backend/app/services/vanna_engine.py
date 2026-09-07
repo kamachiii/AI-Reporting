@@ -147,10 +147,11 @@ def ekstrak_sql(llm_output: str) -> str:
     text = llm_output.strip()
 
     # Cek jika LLM merespons format JSON murni atau dalam code block
+    CANDIDATE_KEYS = ("sql", "query", "sql_query", "response", "content", "output", "message", "text", "answer")
     try:
         data = json.loads(text)
         if isinstance(data, dict):
-            for k in ("sql", "query", "sql_query"):
+            for k in CANDIDATE_KEYS:
                 if k in data and isinstance(data[k], str):
                     text = data[k].strip()
                     break
@@ -160,7 +161,7 @@ def ekstrak_sql(llm_output: str) -> str:
             try:
                 data = json.loads(m_json.group(1))
                 if isinstance(data, dict):
-                    for k in ("sql", "query", "sql_query"):
+                    for k in CANDIDATE_KEYS:
                         if k in data and isinstance(data[k], str):
                             text = data[k].strip()
                             break
@@ -200,8 +201,12 @@ def _format_ringkasan_otomatis(rows: list, columns: list, question: str = "") ->
         items = []
         for k, v in list(r.items())[:4]:
             val_conv = _konversi_nilai_vanna(v)
-            if any(u in k.lower() for u in ('jual', 'beli', 'total', 'harga', 'selisih', 'omzet')) and isinstance(val_conv, (int, float)):
+            is_qty = any(q in k.lower() for q in ('qty', 'kuantiti', 'kuantitas', 'quantity', 'jumlah', 'unit', 'transaksi', 'count', 'pkb', 'item', 'banyak'))
+            is_money = not is_qty and any(u in k.lower() for u in ('harga', 'omzet', 'nilai', 'biaya', 'saldo', 'bayar', 'subtotal', 'diskon', 'laba', 'rugi', 'profit', 'pendapatan', 'piutang', 'hutang', 'ar_', 'ap_', 'dpp', 'ppn', 'nominal'))
+            if is_money and isinstance(val_conv, (int, float)):
                 items.append(f"{k}: Rp {int(val_conv):,}".replace(",", "."))
+            elif is_qty and isinstance(val_conv, (int, float)):
+                items.append(f"{k}: {int(val_conv):,}".replace(",", "."))
             else:
                 items.append(f"{k}: {val_conv}")
         base_summary = f"Ditemukan 1 baris hasil ({', '.join(items)})."
@@ -268,7 +273,8 @@ async def resolve_ai_config_for_tenant(core_pool, user_id: int, tenant_id: int) 
 
 async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                               question: str, branch_code: str,
-                              llm_call_fn=None) -> dict:
+                              llm_call_fn=None,
+                              conversation_id: int | None = None) -> dict:
     """Eksekusi kueri menggunakan Mode Vanna murni."""
     t0 = time.monotonic()
     user_id = user["user_id"]
@@ -324,7 +330,8 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                     "allow_explain": True
                 }
 
-                conv_id = await ambil_atau_buat_conversation(core_pool, user_id, branch_code, question)
+                conv_id = await ambil_atau_buat_conversation(core_pool, user_id, branch_code, question, conversation_id=conversation_id)
+                response["conversation_id"] = conv_id
                 await simpan_pesan(core_pool, conv_id, "user", question)
                 await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
 
@@ -463,7 +470,8 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                     "allow_explain": True
                 }
 
-                conv_id = await ambil_atau_buat_conversation(core_pool, user_id, branch_code, question)
+                conv_id = await ambil_atau_buat_conversation(core_pool, user_id, branch_code, question, conversation_id=conversation_id)
+                response["conversation_id"] = conv_id
                 await simpan_pesan(core_pool, conv_id, "user", question)
                 await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
 
@@ -506,7 +514,8 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                 "allow_explain": False
             }
 
-            conv_id = await ambil_atau_buat_conversation(core_pool, user_id, branch_code, question)
+            conv_id = await ambil_atau_buat_conversation(core_pool, user_id, branch_code, question, conversation_id=conversation_id)
+            response["conversation_id"] = conv_id
             await simpan_pesan(core_pool, conv_id, "user", question)
             await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
 
@@ -637,7 +646,8 @@ Berikan ringkasan naratif eksekutif singkat (2-3 kalimat) dalam bahasa Indonesia
             logger.warning("Gagal menyimpan ke sql_memory: %s", e_save)
 
         # Simpan ke percakapan agar muncul di UI
-        conv_id = await ambil_atau_buat_conversation(core_pool, user_id, branch_code, question)
+        conv_id = await ambil_atau_buat_conversation(core_pool, user_id, branch_code, question, conversation_id=conversation_id)
+        response["conversation_id"] = conv_id
         await simpan_pesan(core_pool, conv_id, "user", question)
         await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
 

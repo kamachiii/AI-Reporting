@@ -2,7 +2,7 @@
 
 > Dokumen kontinuitas: dibaca PERTAMA kali oleh AI/engineer yang melanjutkan kerja.
 > Update dokumen ini SETIAP selesai satu fase. Jangan hapus riwayat — tambahkan.
-> Terakhir diperbarui: 2026-09-05 (Ekspor Excel Berformat & Grafik Asli + Pertanyaan Emas Dealer selesai — 548 test passed).
+> Terakhir diperbarui: 2026-09-07 (Manajemen Riwayat Chat Multi-Sesi, Tabel Pintar Interaktif, & Penyelarasan Skema Bengkel Riil — 558 test passed).
 
 ## 0. Cara cepat paham konteks (5 menit)
 
@@ -64,6 +64,7 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **Metrik Utilisasi AI Admin & Skenario Demo PKL (Opsi 5)** | selesai | LIVE | Dashboard analitik AI admin (overview, tren Recharts 7-hari, kuota token cabang real-time), modal ubah kuota cabang, dokumen panduan sidang PKL; 554 test backend lulus, lint 0 error, build 0 error |
 | **Penyempurnaan Analisis Multi-Divisi** | selesai | LIVE | Koreksi skema riil dealer (srvt/pwt1/inv1), komparasi sejajar, smart context note, de-duplikasi chip; 557 test backend lulus |
 | **Fix Format Mata Uang vs Kuantitas & Total Transaksi** | selesai | LIVE | Perbaikan deteksi kolom: hapus total_transaksi dari UANG_KEYWORDS, tambahkan kuantiti, transaksi, unit ke KUANTITAS_KEYWORDS di UI, smartInsights, dan Excel exporter; 557 test lulus |
+| **Manajemen Riwayat Chat & Tabel Pintar** | selesai | LIVE | Sidebar riwayat multi-sesi (+ Chat Baru, ganti sesi, hapus riwayat per sesi / semua); Tabel cerdas di kartu jawaban (search filter, sorting kolom asc/desc, paginasi mini 10/25/50/semua, salin tabel TSV/Excel); Koreksi skema bengkel riil srvt_wo & srvt_wodetail (138k & 927k rows); Ekstraksi robust JSON SQL; 558 test lulus |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -856,10 +857,53 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
     - Prioritas evaluasi `_is_currency_column()`: jika `EXPLICIT_CURRENCY_PATTERNS` cocok -> `True`; jika `QUANTITY_PATTERNS` cocok -> `False`; baru evaluasi `CURRENCY_PATTERNS`.
   - **`backend/tests/test_report_exporter.py`**:
     - Ditambahkan assertion untuk `kuantiti_part_terjual` (False), `total_transaksi` (False), `total_pkb` (False), `nilai_transaksi` (True).
+### 3z. Detail Teknis: Manajemen Riwayat Chat Multi-Sesi, Tabel Pintar Interaktif & Penyelarasan Skema Bengkel Riil
+
+- **Latar Belakang & Keputusan Pengguna**:
+  - Pengguna menolak opsi pembangunan halaman dashboard statis terpisah (*Dedicated Executive Dashboard Page*) karena proyek ini berfokus 100% pada **Conversational AI Database Assistant**.
+  - Sebagai gantinya, pengguna menginginkan kemampuan manajemen riwayat percakapan multi-sesi: membuat chat baru, berpindah antar sesi riwayat, dan menghapus riwayat per sesi maupun pembersihan riwayat secara massal.
+  - Sekaligus dilakukan peningkatan pengalaman analisis data: penyelarasan istilah bengkel ke skema riil dealer (`srvt_wo`, `srvt_wodetail`), ekstraksi JSON SQL yang lebih tangguh, serta fitur tabel pintar interaktif.
+- **Implementasi Backend**:
+  - **`backend/app/routers/chat.py`**:
+    - Menambahkan `conversation_id: Optional[int] = None` pada model request `ChatQueryRequest`.
+    - Endpoint baru:
+      - `GET /chat/conversations?branch_code=...`: Mengambil daftar percakapan aktif user untuk cabang terkait, diurutkan descending berdasarkan `updated_at`.
+      - `GET /chat/conversations/{conversation_id}`: Mengambil rincian percakapan beserta seluruh pesan chat di dalamnya.
+      - `DELETE /chat/conversations/{conversation_id}`: Menghapus satu sesi percakapan secara spesifik (pesan terhapus otomatis berkat `ON DELETE CASCADE`).
+      - `DELETE /chat/conversations?branch_code=...`: Menghapus seluruh riwayat percakapan user di cabang terkait.
+  - **`backend/app/services/chat_pipeline.py` & `vanna_engine.py`**:
+    - Memperbarui `ambil_atau_buat_conversation`: jika `conversation_id` diberikan dan valid milik user & branch yang sama, pakai percakapan tersebut dan update `updated_at`. Jika null atau tidak valid, buat sesi percakapan baru dengan judul otomatis dari pertanyaan pertama.
+    - Mengembalikan `conversation_id` pada payload response chat (`answer["conversation_id"] = cid`).
+    - Upgrade `ekstrak_sql()`: memperluas `CANDIDATE_KEYS` untuk menangani respon format JSON dari LLM (termasuk kunci `sql_query`, `output`, `answer`, `response`, dll).
+  - **`backend/app/services/automotive_thesaurus.py`**:
+    - Mengoreksi istilah servis bengkel: mengganti tabel fiktif `womt_wo` / `womt_wopart` dengan skema riil dealer: `srvt_wo` (138.738 baris) dan `srvt_wodetail` (927.136 baris).
+    - Memperbarui kategori `suku_cadang_inventori`: menyertakan `srvt_partcounterfakturdetail` dan `srvt_stockparts`.
+  - **`backend/tests/test_chat_api.py` & `test_automotive_thesaurus.py`**:
+    - Menambahkan pengujian `test_list_dan_manage_conversations` (43/43 tes passed).
+    - Menyelaraskan tes domain thesaurus dengan `srvt_wo` (8/8 tes passed).
+- **Implementasi Frontend**:
+  - **`frontend/src/services/api.js`**:
+    - Menambahkan method: `getConversations`, `getConversationMessages`, `deleteConversation`, `clearAllConversations`.
+    - Memperbarui `askAssistant` untuk mengirimkan parameter `conversationId`.
+  - **`frontend/src/components/User/ChatHistorySidebar.jsx`**:
+    - Komponen panel bilah sisi (*collapsible sidebar*) untuk riwayat percakapan.
+    - Dilengkapi tombol `+ Chat Baru` di bagian atas.
+    - Pengelompokan sesi berbasis waktu ("Hari Ini", "Kemarin", "7 Hari Terakhir", "Lebih Lama").
+    - Filter pencarian sesi chat interaktif secara cepat.
+    - Indikator sesi aktif dan tombol hapus percakapan individual dengan konfirmasi dua langkah, serta tombol *Clear All History*.
+  - **`frontend/src/components/User/AssistantAnswerCard.jsx` (Tabel Pintar Interaktif)**:
+    - **Pencarian Cepat Baris Tabel**: Input saring data real-time di atas tabel.
+    - **Sorting Kolom Multi-Arah**: Header tabel `<th>` dapat diklik untuk mengurutkan secara ASC, DESC, atau reset, dilengkapi ikon indikator `ArrowUp` / `ArrowDown`.
+    - **Mini-Paginasi**: Pemilih baris per halaman (10, 25, 50, Semua) dan tombol navigasi halaman sebelumnya / berikutnya.
+    - **Salin Tabel ke Clipboard**: Tombol `Salin Tabel` di samping `Unduh Excel` untuk menyalin seluruh baris dalam format TSV rapi yang langsung dapat ditempel (*paste*) ke Microsoft Excel, Google Sheets, maupun dokumen lain.
+  - **`frontend/src/components/User/UserWorkspace.jsx`**:
+    - Integrasi penuh `ChatHistorySidebar` dengan kontrol toggle di header.
+    - Penanganan alur percakapan baru vs melanjutkan percakapan lama secara mulus (mirip antarmuka ChatGPT/Claude modern).
 - **Hasil Verifikasi**:
-  - Backend pytest: **557 passed in 39.87s** (100% lulus).
+  - Backend compileall: **exit 0**.
+  - Backend pytest: **558 passed in 36.88s** (100% lulus tanpa kegagalan).
   - Frontend lint: `npm run lint` **0 errors** (100% lulus).
-  - Frontend build: `npm run build` exit code 0 (**100% lulus**).
+  - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 1.35s).
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
@@ -918,9 +962,12 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Metrik Utilisasi AI Admin & Skenario Live Demo Sidang PKL (Opsi 5)** — SELESAI (lihat §3w).
 - [x] **Optimasi UI Multi-Table 3S: Tab Bar Dinamis & Pembersihan Tab Kosong** — SELESAI (lihat §3x).
 - [x] **Penyempurnaan Analisis Multi-Divisi: Koreksi Skema Riil Dealer, Tab Komparasi Sejajar, De-duplikasi Chip & Smart Context Note** — SELESAI (lihat §3y).
+- [x] **Fix Format Mata Uang vs Kuantitas & Total Transaksi** — SELESAI (lihat §3y).
+- [x] **Manajemen Riwayat Chat Multi-Sesi, Tabel Pintar Interaktif & Penyelarasan Skema Bengkel Riil** — SELESAI (lihat §3z).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
-  1. **Dedicated Executive Dashboard Page**: Halaman KPI visual 32 chart otomatis tanpa kueri chat (acuan file Excel).
+  1. *Dedicated Executive Dashboard Page*: Ditutup/dibatalkan atas arahan pengguna untuk mempertahankan identitas murni Conversational AI Assistant.
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.
+  3. **F6 Hardening Skala Besar**: Redis Distributed Rate Limiter & Distributed Schema Cache.
 - [ ] Pembersihan repo (menunggu waktu khusus): `git rm --cached frontend/test-results/.last-run.json`
       (file ter-track padahal sudah di .gitignore); 3 folder `backup_*` root dipindah ke arsip eksternal.
 

@@ -480,16 +480,26 @@ async def tulis_audit(core_pool, *, user_id, branch_code, prompt_text,
 
 
 async def ambil_atau_buat_conversation(core_pool, user_id: int,
-                                       branch_code: str, judul: str) -> int:
-    """Satu conversation per (user, branch) — pakai yang terakhir, atau buat."""
-    cid = await core_pool.fetchval(
-        "SELECT id FROM conversations WHERE user_id = $1 AND branch_code = $2 "
-        "ORDER BY id DESC LIMIT 1", user_id, branch_code)
-    if cid is not None:
-        return cid
+                                       branch_code: str, judul: str,
+                                       conversation_id: int | None = None) -> int:
+    """Satu conversation per (user, branch) — pakai conversation_id jika valid, atau buat baru."""
+    if conversation_id is not None:
+        valid_cid = await core_pool.fetchval(
+            "SELECT id FROM conversations WHERE id = $1 AND user_id = $2 AND branch_code = $3",
+            conversation_id, user_id, branch_code)
+        if valid_cid is not None:
+            try:
+                await core_pool.execute(
+                    "UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = $1",
+                    valid_cid)
+            except Exception:
+                pass
+            return valid_cid
+
+    clean_title = (judul or "Percakapan Baru").strip().replace("\n", " ")[:100]
     return await core_pool.fetchval(
         "INSERT INTO conversations (user_id, branch_code, title) "
-        "VALUES ($1, $2, $3) RETURNING id", user_id, branch_code, judul[:255])
+        "VALUES ($1, $2, $3) RETURNING id", user_id, branch_code, clean_title)
 
 
 async def simpan_pesan(core_pool, conversation_id: int, role: str,
@@ -673,7 +683,8 @@ async def _cek_kuota_token(core_pool, branch_code: str, kuota_harian: int | None
 async def proses_pertanyaan(core_pool, tenant_pool_manager, user: dict,
                             question: str, branch_code: str, *, now=None,
                             llm_call_fn=None,
-                            row_cap: int = 500) -> dict:
+                            row_cap: int = 500,
+                            conversation_id: int | None = None) -> dict:
     """Jalankan seluruh pipeline untuk SATU pertanyaan chat.
 
     Args:
@@ -911,8 +922,10 @@ async def proses_pertanyaan(core_pool, tenant_pool_manager, user: dict,
 
         # ---------- Tahap 6: percakapan (2 pesan) + audit sukses ----------
         cid = await ambil_atau_buat_conversation(
-            core_pool, user["user_id"], branch_code, question)
+            core_pool, user["user_id"], branch_code, question,
+            conversation_id=conversation_id)
         await simpan_pesan(core_pool, cid, "user", question)
+        response["conversation_id"] = cid
         # default=str: params berisi date/datetime dari preset waktu composer
         await simpan_pesan(core_pool, cid, "assistant",
                            json.dumps(response, ensure_ascii=False, default=str))

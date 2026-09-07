@@ -1,9 +1,9 @@
 import { Component, useMemo, useState } from 'react';
 import {
-  AlertTriangle, Check, ChevronDown, ChevronRight, Database, Layers, Sparkles, X, Zap,
+  AlertTriangle, Check, ChevronDown, ChevronRight, ChevronLeft, Database, Layers, Sparkles, X, Zap,
   BarChart2, LineChart as LineChartIcon, Table as TableIcon, Loader2, GraduationCap,
   TrendingUp, TrendingDown, Lightbulb, Compass, Award,
-  Car, Wrench, Package, FileSpreadsheet,
+  Car, Wrench, Package, FileSpreadsheet, ArrowUpDown, ArrowUp, ArrowDown, Copy, Search,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
@@ -278,6 +278,12 @@ export default function AssistantAnswerCard({
   const [trained, setTrained] = useState(false);
   const [activeDomainTab, setActiveDomainTab] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
+  const [tableSearch, setTableSearch] = useState('');
+  const [sortCol, setSortCol] = useState(null);
+  const [sortDir, setSortDir] = useState('asc');
+  const [tablePage, setTablePage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [isCopied, setIsCopied] = useState(false);
 
   // Filter hanya tab yang memiliki data nyata (>0 baris)
   const validTabs = useMemo(() => {
@@ -422,6 +428,79 @@ export default function AssistantAnswerCard({
     } finally {
       setIsExporting(false);
     }
+  };
+
+  const handleSort = (col) => {
+    if (sortCol === col) {
+      if (sortDir === 'asc') {
+        setSortDir('desc');
+      } else {
+        setSortCol(null);
+        setSortDir('asc');
+      }
+    } else {
+      setSortCol(col);
+      setSortDir('asc');
+    }
+    setTablePage(1);
+  };
+
+  const filteredRows = useMemo(() => {
+    if (!tableSearch.trim()) return activeRows;
+    const q = tableSearch.toLowerCase().trim();
+    return activeRows.filter((row) => {
+      const values = Array.isArray(row) ? row : Object.values(row || {});
+      return values.some((val) => {
+        if (val === null || val === undefined) return false;
+        return String(val).toLowerCase().includes(q);
+      });
+    });
+  }, [activeRows, tableSearch]);
+
+  const sortedRows = useMemo(() => {
+    if (!sortCol) return filteredRows;
+    const colIdx = activeColumns.indexOf(sortCol);
+    return [...filteredRows].sort((a, b) => {
+      const valA = Array.isArray(a) ? a[colIdx] : a[sortCol];
+      const valB = Array.isArray(b) ? b[colIdx] : b[sortCol];
+
+      if (valA === null || valA === undefined) return 1;
+      if (valB === null || valB === undefined) return -1;
+
+      const numA = Number(valA);
+      const numB = Number(valB);
+      if (!Number.isNaN(numA) && !Number.isNaN(numB)) {
+        return sortDir === 'asc' ? numA - numB : numB - numA;
+      }
+
+      const strA = String(valA).toLowerCase();
+      const strB = String(valB).toLowerCase();
+      return sortDir === 'asc' ? strA.localeCompare(strB) : strB.localeCompare(strA);
+    });
+  }, [filteredRows, sortCol, sortDir, activeColumns]);
+
+  const totalPages = pageSize === 'all' ? 1 : Math.max(1, Math.ceil(sortedRows.length / pageSize));
+  const paginatedRows = useMemo(() => {
+    if (pageSize === 'all') return sortedRows;
+    const start = (tablePage - 1) * pageSize;
+    return sortedRows.slice(start, start + pageSize);
+  }, [sortedRows, tablePage, pageSize]);
+
+  const handleCopyTable = () => {
+    if (activeRows.length === 0) return;
+    const headerLine = activeColumns.join('\t');
+    const rowLines = activeRows.map((row) => {
+      const cells = Array.isArray(row) ? row : activeColumns.map((c) => row[c]);
+      return cells.map((c) => (c === null || c === undefined ? '' : String(c))).join('\t');
+    });
+    const tsv = [headerLine, ...rowLines].join('\n');
+    navigator.clipboard.writeText(tsv).then(() => {
+      setIsCopied(true);
+      toast.success('Data tabel disalin ke clipboard!');
+      setTimeout(() => setIsCopied(false), 2000);
+    }).catch(() => {
+      toast.error('Gagal menyalin tabel.');
+    });
   };
 
   return (
@@ -659,6 +738,21 @@ export default function AssistantAnswerCard({
                 )}
                 <span>{isExporting ? 'Mengekspor...' : 'Unduh Excel'}</span>
               </button>
+
+              {/* Tombol Salin Tabel ke Clipboard */}
+              <button
+                type="button"
+                onClick={handleCopyTable}
+                title="Salin seluruh data tabel ke clipboard (format TSV/Excel)"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-surface-soft hover:bg-surface-soft/80 text-body border border-hairline transition-colors shadow-2xs hover:shadow-xs cursor-pointer"
+              >
+                {isCopied ? (
+                  <Check size={13} className="text-emerald-600" />
+                ) : (
+                  <Copy size={13} className="text-muted" />
+                )}
+                <span>{isCopied ? 'Tersalin!' : 'Salin Tabel'}</span>
+              </button>
             </div>
 
             {grafikConfig.cocok && (
@@ -698,7 +792,7 @@ export default function AssistantAnswerCard({
                   {grafikConfig.chartData.length} data point
                 </span>
               </div>
-              <div className="h-72 w-full pt-1">
+              <div className="h-64 w-full pt-1">
                 <ResponsiveContainer width="100%" height="100%">
                   {chartType === 'line' ? (
                     <LineChart data={grafikConfig.chartData} margin={{ top: 10, right: 15, left: 5, bottom: 5 }}>
@@ -758,35 +852,144 @@ export default function AssistantAnswerCard({
             </div>
           </SilentChartErrorBoundary>
         ) : (
-          <div className="border border-hairline rounded-lg overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-surface-soft text-xs text-muted">
-                <tr>
-                  {activeColumns.map((col) => (
-                    <th key={col} className="px-3 py-2 font-medium whitespace-nowrap">
-                      {col}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-hairline">
-                {activeRows.map((row, i) => {
-                  const cells = Array.isArray(row) ? row : Object.values(row || {});
-                  return (
-                    <tr key={i} className="hover:bg-surface-soft/50 transition-colors">
-                      {cells.map((cell, j) => (
-                        <td
-                          key={j}
-                          className={`px-3 py-2 whitespace-nowrap ${j === 0 ? 'text-ink font-medium' : 'text-body'}`}
+          <div className="space-y-2">
+            {/* Filter pencarian cepat & pemilih limit per halaman jika data > 5 baris */}
+            {activeRows.length > 5 && (
+              <div className="flex items-center justify-between gap-2 pb-0.5 text-xs flex-wrap">
+                <div className="relative flex-1 min-w-[180px] max-w-xs">
+                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+                  <input
+                    type="text"
+                    placeholder="Saring baris tabel..."
+                    value={tableSearch}
+                    onChange={(e) => {
+                      setTableSearch(e.target.value);
+                      setTablePage(1);
+                    }}
+                    className="w-full pl-8 pr-3 py-1 text-xs bg-surface-soft/60 border border-hairline rounded-md focus:outline-none focus:ring-1 focus:ring-primary/40 text-ink placeholder:text-muted"
+                  />
+                  {tableSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setTableSearch('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-ink cursor-pointer"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5 text-muted ml-auto">
+                  <span>Baris per halaman:</span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(e.target.value === 'all' ? 'all' : Number(e.target.value));
+                      setTablePage(1);
+                    }}
+                    className="bg-surface-soft/60 border border-hairline rounded px-1.5 py-0.5 text-xs text-ink focus:outline-none cursor-pointer"
+                  >
+                    <option value={10}>10</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value="all">Semua ({activeRows.length})</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
+            <div className="border border-hairline rounded-lg overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-surface-soft text-xs text-muted">
+                  <tr>
+                    {activeColumns.map((col) => {
+                      const isSorted = sortCol === col;
+                      return (
+                        <th
+                          key={col}
+                          onClick={() => handleSort(col)}
+                          className="px-3 py-2 font-medium whitespace-nowrap cursor-pointer select-none hover:bg-surface-soft/80 transition-colors"
+                          title={`Klik untuk mengurutkan data berdasarkan ${col}`}
                         >
-                          {formatSel(cell, activeColumns?.[j])}
-                        </td>
-                      ))}
+                          <div className="inline-flex items-center gap-1">
+                            <span>{col}</span>
+                            {isSorted ? (
+                              sortDir === 'asc' ? (
+                                <ArrowUp size={12} className="text-primary" />
+                              ) : (
+                                <ArrowDown size={12} className="text-primary" />
+                              )
+                            ) : (
+                              <ArrowUpDown size={11} className="text-muted/40 hover:text-muted" />
+                            )}
+                          </div>
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-hairline">
+                  {paginatedRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={activeColumns.length} className="px-3 py-4 text-center text-xs text-muted">
+                        Tidak ada data yang cocok dengan pencarian "{tableSearch}".
+                      </td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  ) : (
+                    paginatedRows.map((row, i) => {
+                      const cells = Array.isArray(row) ? row : Object.values(row || {});
+                      return (
+                        <tr key={i} className="hover:bg-surface-soft/50 transition-colors">
+                          {cells.map((cell, j) => (
+                            <td
+                              key={j}
+                              className={`px-3 py-2 whitespace-nowrap ${j === 0 ? 'text-ink font-medium' : 'text-body'}`}
+                            >
+                              {formatSel(cell, activeColumns?.[j])}
+                            </td>
+                          ))}
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Kontrol Paginasi */}
+            {sortedRows.length > 0 && pageSize !== 'all' && (
+              <div className="flex items-center justify-between text-xs text-muted pt-1 px-1">
+                <span>
+                  Menampilkan {Math.min((tablePage - 1) * pageSize + 1, sortedRows.length)}–
+                  {Math.min(tablePage * pageSize, sortedRows.length)} dari {sortedRows.length} data
+                  {filteredRows.length !== activeRows.length && ` (disaring dari ${activeRows.length})`}
+                </span>
+                {totalPages > 1 && (
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={tablePage <= 1}
+                      onClick={() => setTablePage((p) => Math.max(1, p - 1))}
+                      className="p-1 rounded border border-hairline hover:bg-surface-soft disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                      title="Halaman sebelumnya"
+                    >
+                      <ChevronLeft size={13} />
+                    </button>
+                    <span className="px-1.5 font-medium text-ink">
+                      {tablePage} / {totalPages}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={tablePage >= totalPages}
+                      onClick={() => setTablePage((p) => Math.min(totalPages, p + 1))}
+                      className="p-1 rounded border border-hairline hover:bg-surface-soft disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                      title="Halaman berikutnya"
+                    >
+                      <ChevronRight size={13} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

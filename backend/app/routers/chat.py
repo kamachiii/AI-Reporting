@@ -78,6 +78,7 @@ class ChatQueryRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     branch_code: str = Field(min_length=1, max_length=50)
     mode: str = Field(default="auto", max_length=20)
+    conversation_id: Optional[int] = None
 
 
 @router.post("/query")
@@ -98,7 +99,7 @@ async def chat_query(payload: ChatQueryRequest,
             from app.services.vanna_engine import jalankan_mode_vanna
             return await jalankan_mode_vanna(
                 core_pool, get_tenant_pool_manager(), user, payload.question,
-                payload.branch_code)
+                payload.branch_code, conversation_id=payload.conversation_id)
 
         if payload.mode in ("auto", ""):
             t_row = await core_pool.fetchrow(
@@ -110,11 +111,11 @@ async def chat_query(payload: ChatQueryRequest,
                 from app.services.vanna_engine import jalankan_mode_vanna
                 return await jalankan_mode_vanna(
                     core_pool, get_tenant_pool_manager(), user, payload.question,
-                    payload.branch_code)
+                    payload.branch_code, conversation_id=payload.conversation_id)
 
         return await proses_pertanyaan(
             core_pool, get_tenant_pool_manager(), user, payload.question,
-            payload.branch_code)
+            payload.branch_code, conversation_id=payload.conversation_id)
     except KuotaTokenHabis as e:
         raise HTTPException(status_code=429, detail=str(e))
     except TenantTidakAda as e:
@@ -154,6 +155,113 @@ async def chat_query(payload: ChatQueryRequest,
         raise HTTPException(status_code=500, detail="Terjadi kesalahan internal.")
 
 
+@router.get("/conversations")
+async def list_conversations(branch_code: str = Query(min_length=1, max_length=50),
+                             user: dict = Depends(require_user_role)):
+    """Daftar seluruh sesi percakapan user pada satu cabang (terbaru -> terlama)."""
+    allowed = user.get("allowed_branches") or []
+    if branch_code not in allowed:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Cabang '{branch_code}' bukan penugasan Anda.")
+
+    core_pool = await get_core_pool()
+    rows = await core_pool.fetch("""
+        SELECT c.id, c.title, c.created_at, c.updated_at, COUNT(m.id) as message_count
+        FROM conversations c
+        LEFT JOIN messages m ON m.conversation_id = c.id
+        WHERE c.user_id = $1 AND c.branch_code = $2
+        GROUP BY c.id
+        ORDER BY c.updated_at DESC, c.id DESC
+        LIMIT 100
+    """, user["user_id"], branch_code)
+
+    return [
+        {
+            "id": r["id"],
+            "title": r["title"] or "Percakapan Baru",
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+            "message_count": r["message_count"]
+        }
+        for r in rows
+    ]
+
+
+@router.get("/conversations/{conversation_id}")
+async def get_conversation_messages(conversation_id: int,
+                                    user: dict = Depends(require_user_role)):
+    """Ambil pesan spesifik dari satu sesi percakapan."""
+    core_pool = await get_core_pool()
+    conv = await core_pool.fetchrow(
+        "SELECT id, branch_code, title, created_at FROM conversations WHERE id = $1 AND user_id = $2",
+        conversation_id, user["user_id"]
+    )
+    if not conv:
+        raise HTTPException(status_code=404, detail="Percakapan tidak ditemukan.")
+
+    allowed = user.get("allowed_branches") or []
+    if conv["branch_code"] not in allowed:
+        raise HTTPException(status_code=403, detail="Akses cabang ditolak.")
+
+    rows = await core_pool.fetch(
+        "SELECT id, role, content, created_at FROM messages "
+        "WHERE conversation_id = $1 ORDER BY id ASC LIMIT 100", conversation_id
+    )
+    messages = [
+        {
+            "id": r["id"],
+            "role": r["role"],
+            "content": r["content"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None
+        }
+        for r in rows
+    ]
+    return {
+        "conversation_id": conv["id"],
+        "branch_code": conv["branch_code"],
+        "title": conv.get("title") or "Percakapan Baru",
+        "created_at": conv.get("created_at").isoformat() if conv.get("created_at") else None,
+        "messages": messages
+    }
+
+
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: int,
+                              user: dict = Depends(require_user_role)):
+    """Hapus satu sesi percakapan beserta seluruh pesannya."""
+    core_pool = await get_core_pool()
+    conv = await core_pool.fetchrow(
+        "SELECT id, branch_code FROM conversations WHERE id = $1 AND user_id = $2",
+        conversation_id, user["user_id"]
+    )
+    if not conv:
+        raise HTTPException(status_code=404, detail="Percakapan tidak ditemukan.")
+
+    allowed = user.get("allowed_branches") or []
+    if conv["branch_code"] not in allowed:
+        raise HTTPException(status_code=403, detail="Akses cabang ditolak.")
+
+    await core_pool.execute("DELETE FROM conversations WHERE id = $1", conversation_id)
+    return {"ok": True, "deleted_id": conversation_id}
+
+
+@router.delete("/conversations")
+async def delete_all_conversations(branch_code: str = Query(min_length=1, max_length=50),
+                                   user: dict = Depends(require_user_role)):
+    """Hapus seluruh riwayat percakapan user di satu cabang."""
+    allowed = user.get("allowed_branches") or []
+    if branch_code not in allowed:
+        raise HTTPException(status_code=403, detail=f"Cabang '{branch_code}' bukan penugasan Anda.")
+
+    core_pool = await get_core_pool()
+    await core_pool.execute(
+        "DELETE FROM conversations WHERE user_id = $1 AND branch_code = $2",
+        user["user_id"], branch_code
+    )
+    return {"ok": True, "message": f"Seluruh riwayat chat di cabang '{branch_code}' berhasil dihapus."}
+
+
 @router.get("/history")
 async def chat_history(branch_code: str = Query(min_length=1, max_length=50),
                        user: dict = Depends(require_user_role)):
@@ -167,7 +275,7 @@ async def chat_history(branch_code: str = Query(min_length=1, max_length=50),
     core_pool = await get_core_pool()
     conv_id = await core_pool.fetchval(
         "SELECT id FROM conversations WHERE user_id = $1 AND branch_code = $2 "
-        "ORDER BY id DESC LIMIT 1", user["user_id"], branch_code)
+        "ORDER BY updated_at DESC, id DESC LIMIT 1", user["user_id"], branch_code)
     if conv_id is None:
         return {"conversation_id": None, "messages": []}
 

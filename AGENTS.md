@@ -27,8 +27,8 @@ natural dengan data nyata dari database per-cabang (dealer), dengan keamanan ent
 
 ## 2. Status saat ini & urutan baca
 
-**Status (2026-09-03): arsitektur v2 KOMPLET dan LIVE** — sudah dipakai nyata via browser
-(login user → pertanyaan → SQL → data nyata). Head: LIVE. Test: **507 passed**.
+**Status (2026-09-07): arsitektur v2 KOMPLET dan LIVE** — sudah dipakai nyata via browser
+(login user → pertanyaan → SQL → data nyata). Head: LIVE. Test: **558 passed**.
 
 Urutan baca:
 
@@ -124,9 +124,9 @@ Detail kontrak & keputusan: `PROGRESS §3a–3g`.
 ## 7. Sisa kerja / keputusan terbuka
  
 - **Backlog Tertunda (Tercatat untuk Dilanjutkan)**:
-  - **Dedicated Executive Dashboard Page**: Halaman KPI visual 32 chart otomatis tanpa kueri chat (berdasarkan acuan `20260327 - Design Dashboard.xlsx`).
   - **F5 Mode Laporan Eksekutif PDF**: Fitur cetak/ekspor PDF formal bertandatangan (ekspor Excel `.xlsx` akuntansi + chart native sudah tuntas di `7e90f73`).
   - **F6 Hardening Skala Besar**: Redis Distributed Rate Limiter & Distributed Schema Cache (penegakan kuota token harian per tenant & dashboard metrik admin sudah tuntas di `94da6b0`).
+  - *(Catatan: Dedicated Executive Dashboard Page dibatalkan sesuai arahan user agar platform tetap fokus 100% pada Conversational AI Database Assistant)*.
 - Keputusan terbuka desain: `PERANCANGAN-PIPELINE-AI-v2.md` §11 (normalisasi replay
   masih longgar: lowercase+strip tanda baca — pertanyaan beda kapitalisasi-angka dianggap
   beda; retensi; number check numerik).

@@ -27,7 +27,7 @@ def test_deteksi_konteks_servis_dan_wo():
     res = deteksi_konteks_domain("tampilkan daftar WO servis bulan ini beserta mekanik")
     categories = [r["category"] for r in res]
     assert "servis_bengkel" in categories
-    assert any("womt_wo" in r["primary_tables"] for r in res)
+    assert any("srvt_wo" in r["primary_tables"] for r in res)
 
 
 def test_deteksi_konteks_sparepart():

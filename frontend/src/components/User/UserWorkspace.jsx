@@ -1,10 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { Bot, Building2, Check, Loader2, LogOut, Send } from 'lucide-react';
+import {
+  Bot, Building2, Check, Loader2, LogOut, Send,
+  PanelLeftOpen, MessageSquarePlus,
+} from 'lucide-react';
 
 import AssistantAnswerCard from './AssistantAnswerCard';
 import ClarificationCard from './ClarificationCard';
+import ChatHistorySidebar from './ChatHistorySidebar';
 import { api } from '../../services/api';
 
 // Cabang aktif = penugasan PERTAMA user (App.jsx: user.allowed_branches =
@@ -201,6 +205,9 @@ function MessageBubble({
  */
 export default function UserWorkspace({ user, onLogout }) {
   const branchCode = cabangPertama(user);
+  const [conversations, setConversations] = useState([]);
+  const [activeConversationId, setActiveConversationId] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -211,27 +218,89 @@ export default function UserWorkspace({ user, onLogout }) {
     document.title = 'Chat · DMS AI Platform';
   }, []);
 
-  // Hydrate riwayat percakapan cabang ini saat halaman dibuka
+  const loadConversations = useCallback(async (bCode) => {
+    if (!bCode) return [];
+    try {
+      const data = await api.getConversations(bCode);
+      const list = data.conversations || [];
+      setConversations(list);
+      return list;
+    } catch {
+      return [];
+    }
+  }, []);
+
+  // Hydrate percakapan cabang ini saat halaman dibuka
   useEffect(() => {
     if (!branchCode) return undefined;
     let batal = false;
-    api.fetchChatHistory(branchCode)
-      .then((data) => {
-        if (!batal) setMessages(data.messages.map((m, idx, arr) => pesanDariHistory(m, idx, arr)));
-      })
-      .catch(() => {
-        if (!batal) toast.error('Riwayat percakapan gagal dimuat.');
-      });
+    loadConversations(branchCode).then((list) => {
+      if (batal || !list || list.length === 0) return;
+      // Aktifkan sesi percakapan terbaru jika ada
+      const first = list[0];
+      setActiveConversationId(first.id);
+      api.getConversationMessages(first.id)
+        .then((data) => {
+          if (!batal) {
+            setMessages((data.messages || []).map((m, idx, arr) => pesanDariHistory(m, idx, arr)));
+          }
+        })
+        .catch(() => {
+          if (!batal) toast.error('Riwayat percakapan gagal dimuat.');
+        });
+    });
     return () => {
       batal = true;
     };
-  }, [branchCode]);
+  }, [branchCode, loadConversations]);
 
   // Auto-scroll ke pesan terbaru setiap daftar pesan berubah
   // (termasuk saat indikator pipeline berpindah tahap).
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages]);
+
+  const handleSelectConversation = async (convId) => {
+    if (isProcessing || convId === activeConversationId) return;
+    setActiveConversationId(convId);
+    try {
+      const data = await api.getConversationMessages(convId);
+      setMessages((data.messages || []).map((m, idx, arr) => pesanDariHistory(m, idx, arr)));
+    } catch {
+      toast.error('Gagal memuat percakapan yang dipilih.');
+    }
+  };
+
+  const handleNewChat = () => {
+    if (isProcessing) return;
+    setActiveConversationId(null);
+    setMessages([]);
+  };
+
+  const handleDeleteConversation = async (convId) => {
+    try {
+      await api.deleteConversation(convId);
+      toast.success('Percakapan dihapus.');
+      setConversations((prev) => prev.filter((c) => c.id !== convId));
+      if (activeConversationId === convId) {
+        handleNewChat();
+      }
+    } catch {
+      toast.error('Gagal menghapus percakapan.');
+    }
+  };
+
+  const handleClearAllConversations = async () => {
+    if (!branchCode) return;
+    try {
+      await api.clearAllConversations(branchCode);
+      toast.success('Semua riwayat percakapan dihapus.');
+      setConversations([]);
+      handleNewChat();
+    } catch {
+      toast.error('Gagal membersihkan riwayat.');
+    }
+  };
 
   const handleSend = async (rawText) => {
     const text = typeof rawText === 'string' ? rawText : input;
@@ -258,12 +327,16 @@ export default function UserWorkspace({ user, onLogout }) {
     }, STAGE_INTERVAL_MS);
 
     try {
-      const answer = await api.askAssistant(branchCode, trimmed);
+      const answer = await api.askAssistant(branchCode, trimmed, activeConversationId);
       setMessages((prev) => prev.map((m) => (
         m.id === assistantId
           ? { ...m, status: 'done', answer, question: trimmed, createdAt: new Date().toISOString() }
           : m
       )));
+      if (answer.conversation_id) {
+        setActiveConversationId(answer.conversation_id);
+      }
+      loadConversations(branchCode);
     } catch (error) {
       // Bubble error ikut masuk riwayat lokal
       setMessages((prev) => prev.map((m) => (
@@ -306,14 +379,36 @@ export default function UserWorkspace({ user, onLogout }) {
 
   return (
     <div className="h-screen bg-canvas flex flex-col overflow-hidden">
-      {/* Header: judul app + info cabang aktif (penugasan pertama user) */}
-      <header className="bg-white border-b border-hairline shrink-0">
-        <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
-          <div>
-            <h1 className="font-serif text-lg text-ink leading-tight">DMS AI Platform</h1>
-            <p className="text-xs text-muted">Asisten Laporan Dealer</p>
+      {/* Header: judul app + toggle riwayat + info cabang aktif */}
+      <header className="bg-white border-b border-hairline shrink-0 px-4 py-2.5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            {!sidebarOpen && (
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(true)}
+                title="Buka Riwayat Percakapan"
+                className="p-1.5 rounded-lg border border-hairline hover:bg-surface-soft text-muted hover:text-ink transition-colors cursor-pointer"
+              >
+                <PanelLeftOpen size={16} />
+              </button>
+            )}
+            <div>
+              <h1 className="font-serif text-base sm:text-lg text-ink leading-tight">DMS AI Platform</h1>
+              <p className="text-[11px] text-muted">Asisten Laporan Dealer</p>
+            </div>
           </div>
+
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleNewChat}
+              title="Mulai Sesi Chat Baru"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-surface-soft hover:bg-surface-soft/80 border border-hairline text-xs font-medium text-ink transition-colors cursor-pointer"
+            >
+              <MessageSquarePlus size={14} className="text-primary" />
+              <span className="hidden sm:inline">Chat Baru</span>
+            </button>
             {branchCode && (
               <span className="hidden sm:flex items-center gap-1.5 px-3 py-1 bg-primary/10 text-primary text-xs font-medium rounded-full">
                 <Building2 size={13} />
@@ -324,91 +419,107 @@ export default function UserWorkspace({ user, onLogout }) {
             <button
               onClick={onLogout}
               title="Keluar"
-              className="flex items-center gap-1.5 px-3 py-1.5 border border-hairline rounded-md text-sm text-muted hover:bg-surface-soft hover:text-ink transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-hairline rounded-md text-xs sm:text-sm text-muted hover:bg-surface-soft hover:text-ink transition-colors cursor-pointer"
             >
-              <LogOut size={15} />
-              Keluar
+              <LogOut size={14} />
+              <span className="hidden sm:inline">Keluar</span>
             </button>
           </div>
         </div>
       </header>
 
-      {/* Area percakapan */}
-      <main className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">
-          {messages.length === 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.35 }}
-              className="flex flex-col items-center text-center mt-10"
-            >
-              <div className="w-14 h-14 rounded-full bg-primary/10 text-primary flex items-center justify-center mb-4">
-                <Bot size={28} />
-              </div>
-              <h2 className="font-serif text-2xl text-ink">Halo, {user?.username}!</h2>
-              <p className="text-body text-sm mt-2 max-w-md">
-                {branchCode
-                  ? <>Saya asisten AI untuk cabang <span className="font-medium text-ink">{branchCode}</span>. Tanyakan apa saja tentang penjualan, stok, atau servis — saya ambilkan datanya langsung dari database.</>
-                  : 'Tidak ada cabang yang ditugaskan ke akun Anda — hubungi administrator untuk bisa menggunakan asisten.'}
+      {/* Main Container: Sidebar Riwayat (Kiri) + Area Chat (Kanan) */}
+      <div className="flex-1 flex overflow-hidden">
+        <ChatHistorySidebar
+          conversations={conversations}
+          activeId={activeConversationId}
+          onSelectConversation={handleSelectConversation}
+          onNewChat={handleNewChat}
+          onDeleteConversation={handleDeleteConversation}
+          onClearAll={handleClearAllConversations}
+          isOpen={sidebarOpen}
+          onToggleOpen={() => setSidebarOpen((prev) => !prev)}
+        />
+
+        <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
+          {/* Area percakapan */}
+          <main className="flex-1 overflow-y-auto">
+            <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">
+              {messages.length === 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.35 }}
+                  className="flex flex-col items-center text-center mt-10"
+                >
+                  <div className="w-14 h-14 rounded-full bg-primary/10 text-primary flex items-center justify-center mb-4">
+                    <Bot size={28} />
+                  </div>
+                  <h2 className="font-serif text-2xl text-ink">Halo, {user?.username}!</h2>
+                  <p className="text-body text-sm mt-2 max-w-md">
+                    {branchCode
+                      ? <>Saya asisten AI untuk cabang <span className="font-medium text-ink">{branchCode}</span>. Tanyakan apa saja tentang penjualan, stok, atau servis — saya ambilkan datanya langsung dari database.</>
+                      : 'Tidak ada cabang yang ditugaskan ke akun Anda — hubungi administrator untuk bisa menggunakan asisten.'}
+                  </p>
+                </motion.div>
+              )}
+
+              {messages.map((m) => (
+                <MessageBubble
+                  key={m.id}
+                  message={m}
+                  branchCode={branchCode}
+                  feedbackBusy={feedbackBusy}
+                  onAsk={handleSend}
+                  onFeedback={handleFeedback}
+                />
+              ))}
+
+              <div ref={bottomRef} />
+            </div>
+          </main>
+
+          {/* Kolom input */}
+          <footer className="bg-white border-t border-hairline shrink-0">
+            <div className="max-w-3xl mx-auto px-4 py-3">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleSend();
+                }}
+                className="flex items-center gap-2"
+              >
+                <input
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  disabled={isProcessing || !branchCode}
+                  placeholder={
+                    !branchCode
+                      ? 'Tidak ada cabang aktif…'
+                      : isProcessing
+                        ? 'Sedang memproses…'
+                        : `Tanya apa saja tentang cabang ${branchCode}…`
+                  }
+                  className="flex-1 py-2.5 px-4 border border-hairline rounded-md bg-canvas text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60"
+                  aria-label="Pertanyaan"
+                />
+                <button
+                  type="submit"
+                  disabled={isProcessing || !branchCode || !input.trim()}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white rounded-md text-sm hover:bg-primary-active shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                >
+                  {isProcessing ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+                  Kirim
+                </button>
+              </form>
+
+              <p className="text-[11px] text-muted text-center">
+                Jawaban disertai SQL-nya — klik &quot;Lihat SQL&quot; untuk memeriksa query yang dijalankan.
               </p>
-            </motion.div>
-          )}
-
-          {messages.map((m) => (
-            <MessageBubble
-              key={m.id}
-              message={m}
-              branchCode={branchCode}
-              feedbackBusy={feedbackBusy}
-              onAsk={handleSend}
-              onFeedback={handleFeedback}
-            />
-          ))}
-
-          <div ref={bottomRef} />
+            </div>
+          </footer>
         </div>
-      </main>
-
-      {/* Kolom input */}
-      <footer className="bg-white border-t border-hairline shrink-0">
-        <div className="max-w-3xl mx-auto px-4 py-3">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSend();
-            }}
-            className="flex items-center gap-2"
-          >
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              disabled={isProcessing || !branchCode}
-              placeholder={
-                !branchCode
-                  ? 'Tidak ada cabang aktif…'
-                  : isProcessing
-                    ? 'Sedang memproses…'
-                    : `Tanya apa saja tentang cabang ${branchCode}…`
-              }
-              className="flex-1 py-2.5 px-4 border border-hairline rounded-md bg-canvas text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60"
-              aria-label="Pertanyaan"
-            />
-            <button
-              type="submit"
-              disabled={isProcessing || !branchCode || !input.trim()}
-              className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white rounded-md text-sm hover:bg-primary-active shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {isProcessing ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-              Kirim
-            </button>
-          </form>
-
-          <p className="text-[11px] text-muted text-center">
-            Jawaban disertai SQL-nya — klik &quot;Lihat SQL&quot; untuk memeriksa query yang dijalankan.
-          </p>
-        </div>
-      </footer>
+      </div>
     </div>
   );
 }
