@@ -254,6 +254,19 @@ def _is_data_cutoff_question(question: str, active_context: dict | None = None) 
     if not (pola_bulan or pola_tidak_ada_bulan or pola_transaksi_terakhir):
         return None
 
+    month_val = None
+    month_match = pola_bulan or pola_tidak_ada_bulan
+    if month_match and month_match.group(1):
+        raw_m = month_match.group(1).lower()
+        month_dict = {
+            "januari": 1, "februari": 2, "maret": 3, "april": 4, "mei": 5, "juni": 6,
+            "juli": 7, "agustus": 8, "september": 9, "oktober": 10, "november": 11, "desember": 12
+        }
+        if raw_m in month_dict:
+            month_val = month_dict[raw_m]
+        elif raw_m.isdigit():
+            month_val = int(raw_m)
+
     thn_match = re.search(r"\b(20\d{2})\b", q_lower)
     target_year = None
     if thn_match:
@@ -281,6 +294,7 @@ def _is_data_cutoff_question(question: str, active_context: dict | None = None) 
             "needs_clarification": True,
             "target_year": None,
             "topic": topic,
+            "month": month_val or 11,
             "is_transaksi_terakhir": bool(pola_transaksi_terakhir),
         }
 
@@ -288,6 +302,7 @@ def _is_data_cutoff_question(question: str, active_context: dict | None = None) 
         "needs_clarification": False,
         "target_year": target_year,
         "topic": topic,
+        "month": month_val or 11,
         "is_transaksi_terakhir": bool(pola_transaksi_terakhir),
     }
 
@@ -583,6 +598,9 @@ async def ambil_konteks_percakapan_aktif(core_pool, conversation_id: int | None)
                 try:
                     import json as _json
                     data = _json.loads(raw)
+                    # Abaikan pesan klarifikasi agar contoh divisi tidak mencemari topik riwayat sesi
+                    if data.get("status") == "clarification_needed" or data.get("source") == "clarification":
+                        continue
                     text_to_scan = f"{data.get('question', '')} {data.get('sql', '')} {data.get('ringkasan', '')}"
                 except Exception:
                     pass
@@ -614,6 +632,99 @@ async def ambil_konteks_percakapan_aktif(core_pool, conversation_id: int | None)
     except Exception as e:
         logger.warning("Gagal ambil konteks percakapan aktif %s: %s", conversation_id, e)
         return {"year": None, "topic": None, "has_prior_chat": False}
+
+
+async def rekonsiliasi_slot_percakapan(core_pool, conversation_id: int | None, question: str) -> tuple[str, bool]:
+    """Rekonsiliasi Conversational Slot-Filling: mendeteksi balasan klarifikasi pengguna dan menyintesis kueri utuh.
+
+    Prinsip Conversational Slot-Filling:
+    Jika sesi aktif sebelumnya sedang menanti klarifikasi (status 'clarification_needed'),
+    dan balasan pengguna saat ini menyajikan slot yang hilang (misal: 'penjualan unit 2025' atau '2025'),
+    sistem secara cerdas merekonstruksi kueri awal menjadi kueri utuh tanpa perlu form tombol kaku.
+
+    Returns:
+        tuple: (synthesized_question, is_reconciled)
+    """
+    if not conversation_id or not question:
+        return question, False
+
+    try:
+        # Ambil pesan asisten terakhir pada percakapan aktif ini
+        row = await core_pool.fetchrow(
+            "SELECT content FROM messages WHERE conversation_id = $1 AND role = 'assistant' ORDER BY id DESC LIMIT 1",
+            conversation_id
+        )
+        if not row:
+            return question, False
+
+        raw_content = row["content"] or ""
+        try:
+            assistant_data = json.loads(raw_content)
+        except Exception:
+            return question, False
+
+        # Periksa apakah pesan asisten sebelumnya sedang menunggu klarifikasi parameter
+        pending = assistant_data.get("pending_clarification")
+        if not pending or assistant_data.get("status") != "clarification_needed":
+            return question, False
+
+        q_lower = question.strip().lower()
+
+        # Deteksi Pergantian Topik (Topic Shift): jika pengguna bertanya hal baru yang berdiri sendiri
+        kata_tanya_baru = ["siapa", "berapa stok", "daftar customer", "daftar pelanggan", "5 mobil", "5 customer"]
+        if any(kt in q_lower for kt in kata_tanya_baru):
+            logger.info("Pengguna berpindah topik percakapan dari pending clarification: %s", question)
+            return question, False
+
+        # Ekstrak slot tahun dari balasan pengguna
+        y_match = re.search(r'\b(20[12]\d)\b', q_lower)
+        extracted_year = int(y_match.group(1)) if y_match else None
+
+        # Ekstrak slot divisi / domain
+        extracted_domain = None
+        if any(w in q_lower for w in ["beli", "pembelian", "kulakan", "pengadaan"]):
+            extracted_domain = "pembelian"
+        elif any(w in q_lower for w in ["servis", "service", "bengkel", "pkb", "wo"]):
+            extracted_domain = "servis"
+        elif any(w in q_lower for w in ["sparepart", "suku cadang", "part"]):
+            extracted_domain = "sparepart"
+        elif any(w in q_lower for w in ["jual", "penjualan", "omzet", "unit"]):
+            extracted_domain = "penjualan"
+        elif any(w in q_lower for w in ["semua", "seluruh", "konsolidasi", "semua divisi", "seluruh divisi"]):
+            extracted_domain = "all"
+
+        # Jika pengguna tidak memberikan slot tahun maupun domain, bukan balasan slot
+        if not extracted_year and not extracted_domain:
+            return question, False
+
+        intent = pending.get("intent")
+        captured_slots = pending.get("captured_slots") or {}
+        year = extracted_year or captured_slots.get("year")
+        domain = extracted_domain or captured_slots.get("domain")
+        month = captured_slots.get("month", 11)
+
+        if intent == "data_cutoff":
+            if year:
+                if domain == "penjualan":
+                    synthesized = f"Kenapa data penjualan unit tahun {year} hanya sampai bulan {month}?"
+                elif domain == "servis":
+                    synthesized = f"Kenapa data servis bengkel tahun {year} hanya sampai bulan {month}?"
+                elif domain == "sparepart":
+                    synthesized = f"Kenapa data suku cadang tahun {year} hanya sampai bulan {month}?"
+                elif domain == "pembelian":
+                    synthesized = f"Kenapa data pembelian unit tahun {year} hanya sampai bulan {month}?"
+                else:
+                    synthesized = f"Kenapa data transaksi tahun {year} hanya sampai bulan {month}?"
+                logger.info("Conversational slot-filling merekonstruksi: '%s' + '%s' -> '%s'", pending.get("original_question"), question, synthesized)
+                return synthesized, True
+            elif domain:
+                synthesized = f"Kenapa data {domain} hanya sampai bulan {month}?"
+                return synthesized, True
+
+        return question, False
+    except Exception as e:
+        logger.warning("Gagal rekonsiliasi slot percakapan: %s", e)
+        return question, False
 
 
 def _deteksi_kueri_komparasi_periode(question: str, inherited_topic: str | None = None) -> dict | None:
@@ -764,6 +875,9 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
     try:
         tenant = await resolve_tenant(core_pool, branch_code)
         tenant_id = tenant.get("tenant_id") or tenant.get("id")
+
+        # Conversational Slot-Filling: Rekonsiliasi jawaban klarifikasi pengguna jika ada sesi aktif
+        question, is_reconciled = await rekonsiliasi_slot_percakapan(core_pool, conversation_id, question)
         q_norm = normalisasi_pertanyaan(question)
 
         # Deteksi topik riwayat percakapan sebelumnya untuk multi-turn chat continuity
@@ -778,37 +892,51 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
             # Jika tahun dan konteks tidak teridentifikasi: kembalikan kartu klarifikasi interaktif
             if cutoff_info.get("needs_clarification"):
                 durasi_ms = int((time.monotonic() - t0) * 1000)
+                clarification_msg = (
+                    "Pertanyaan Anda mengenai batas data transaksi memerlukan informasi divisi data dan tahun yang ingin diperiksa. "
+                    "Data transaksi apa (misalnya Penjualan Unit, Servis Bengkel, atau Suku Cadang) dan tahun berapa yang ingin Anda analisis?"
+                )
                 response = {
                     "source": "clarification",
                     "confidence": "B",
                     "status": "clarification_needed",
                     "question": question,
-                    "clarification_message": (
-                        "Pertanyaan Anda mengenai keterbatasan data memerlukan konteks tahun dan divisi. "
-                        "Data tahun dan divisi mana yang ingin Anda periksa?"
-                    ),
+                    "clarification_message": clarification_msg,
                     "category": "data_cutoff",
+                    "pending_clarification": {
+                        "intent": "data_cutoff",
+                        "original_question": question,
+                        "missing_slots": ["domain", "year"],
+                        "captured_slots": {"month": cutoff_info.get("month", 11)},
+                    },
                     "options": [
                         {
-                            "id": "cutoff_all_2025",
-                            "icon": "Layers",
-                            "label": "Seluruh Divisi Operasional Tahun 2025",
-                            "deskripsi": "Audit batas data Penjualan Unit, Servis Bengkel, dan Suku Cadang tahun 2025",
-                            "prompt": "Kenapa data tahun 2025 hanya sampai bulan 11?",
-                        },
-                        {
-                            "id": "cutoff_unit_2025",
+                            "id": "penjualan",
                             "icon": "Car",
-                            "label": "Penjualan Unit Kendaraan Tahun 2025",
-                            "deskripsi": "Audit batas data penjualan unit kendaraan tahun 2025",
-                            "prompt": "Kenapa data penjualan unit tahun 2025 hanya sampai bulan 11?",
+                            "label": "Penjualan Unit",
+                            "deskripsi": "Data transaksi unit kendaraan",
+                            "prompt": "Data penjualan unit",
                         },
                         {
-                            "id": "cutoff_servis_2025",
+                            "id": "servis",
                             "icon": "Wrench",
-                            "label": "Jasa Servis Bengkel Tahun 2025",
-                            "deskripsi": "Audit batas data servis bengkel tahun 2025",
-                            "prompt": "Kenapa data servis bengkel tahun 2025 hanya sampai bulan 11?",
+                            "label": "Jasa Servis Bengkel",
+                            "deskripsi": "Data perawatan dan servis bengkel",
+                            "prompt": "Data servis bengkel",
+                        },
+                        {
+                            "id": "sparepart",
+                            "icon": "Wrench",
+                            "label": "Suku Cadang & Sparepart",
+                            "deskripsi": "Data transaksi suku cadang",
+                            "prompt": "Data suku cadang",
+                        },
+                        {
+                            "id": "all",
+                            "icon": "Layers",
+                            "label": "Seluruh Divisi",
+                            "deskripsi": "Total data seluruh divisi operasional",
+                            "prompt": "Data seluruh divisi",
                         },
                     ],
                     "sql": "",
@@ -819,10 +947,7 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                     "truncated": False,
                     "duration_ms": durasi_ms,
                     "memory_id": None,
-                    "ringkasan": (
-                        "Pertanyaan Anda mengenai keterbatasan data memerlukan konteks tahun dan divisi. "
-                        "Data tahun dan divisi mana yang ingin Anda periksa?"
-                    ),
+                    "ringkasan": clarification_msg,
                     "saran": [],
                     "metode": "clarification",
                     "allow_explain": False,

@@ -238,6 +238,51 @@ def test_ambil_konteks_percakapan_aktif_empty():
     assert ctx == {"year": None, "topic": None, "has_prior_chat": False}
 
 
+def test_rekonsiliasi_slot_percakapan():
+    import asyncio
+    import json
+    from app.services.vanna_engine import rekonsiliasi_slot_percakapan
+
+    class _StubPool:
+        def __init__(self, assistant_content):
+            self.content = assistant_content
+        async def fetchrow(self, query, *args):
+            return {"content": self.content}
+
+    # Asisten sebelumnya mengirim status clarification_needed
+    assistant_json = json.dumps({
+        "status": "clarification_needed",
+        "pending_clarification": {
+            "intent": "data_cutoff",
+            "original_question": "kenapa data hanya sampai bulan 11?",
+            "missing_slots": ["domain", "year"],
+            "captured_slots": {"month": 11}
+        }
+    })
+    pool = _StubPool(assistant_json)
+
+    # 1. User membalas dengan domain dan tahun: 'penjualan unit 2025'
+    res_q, is_rec = asyncio.run(rekonsiliasi_slot_percakapan(pool, 10, "penjualan unit 2025"))
+    assert is_rec is True
+    assert res_q == "Kenapa data penjualan unit tahun 2025 hanya sampai bulan 11?"
+
+    # 2. User membalas servis bengkel tahun 2024
+    res_q2, is_rec2 = asyncio.run(rekonsiliasi_slot_percakapan(pool, 10, "servis bengkel 2024"))
+    assert is_rec2 is True
+    assert res_q2 == "Kenapa data servis bengkel tahun 2024 hanya sampai bulan 11?"
+
+    # 3. User hanya menyebut tahun '2025'
+    res_q3, is_rec3 = asyncio.run(rekonsiliasi_slot_percakapan(pool, 10, "tahun 2025"))
+    assert is_rec3 is True
+    assert res_q3 == "Kenapa data transaksi tahun 2025 hanya sampai bulan 11?"
+
+    # 4. User berpindah topik (Topic Shift)
+    res_q4, is_rec4 = asyncio.run(rekonsiliasi_slot_percakapan(pool, 10, "siapa 5 customer terbesar?"))
+    assert is_rec4 is False
+    assert res_q4 == "siapa 5 customer terbesar?"
+
+
+
 
 
 

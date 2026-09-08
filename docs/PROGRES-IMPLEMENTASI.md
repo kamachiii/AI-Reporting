@@ -1524,6 +1524,43 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
     - Skenario 2 (Multi-Turn): Dalam sesi yang membahas servis 2025, kueri lanjutan langsung menghasilkan audit eksplanatori cut-off data servis 2025.
     - Skenario 3 (Eksplisit): Kueri *"kenapa data 2026 hanya sampai bulan 6?"* langsung terjawab akurat tanpa ambiguitas.
 
+### 3as. Arsitektur Conversational Slot-Filling & Natural Clarification Flow (2026-09-08)
+
+- **Latar Belakang & Masukan Pengguna**:
+  Pengguna menyoroti tiga hal fundamental dari implementasi klarifikasi sebelumnya:
+  1. *"Kenapa dia tahu 2025?"*: Opsi pilihan sebelumnya masih menyertakan teks "Tahun 2025" pada label tombolnya, padahal pengguna sama sekali belum menyebutkan tahun 2025.
+  2. *"Kenapa dalam bentuk button kaku?"*: Tampilan kartu tombol form besar terasa seperti kuesioner statis, bukan asisten percakapan cerdas.
+  3. *"Emang gabisa dari chat lagi kayak chatbot lain?"*: Pengguna ingin kebebasan membalas langsung di input chat (misal: *"penjualan unit 2025"* atau *"servis 2024"*), dan AI harus cerdas menyambungkan jawaban tersebut dengan pertanyaan awal (*Conversational Slot-Filling*).
+
+- **Rekayasa Arsitektur yang Diterapkan**:
+  1. **Conversational Slot-Filling Engine (`rekonsiliasi_slot_percakapan`)**:
+     - Memeriksa pesan asisten terakhir pada percakapan aktif: jika berstatus `clarification_needed` dan memuat `pending_clarification` (misal: `intent: "data_cutoff"`, `captured_slots: {"month": 11}`).
+     - Menganalisis pesan baru dari pengguna:
+       - Ekstraksi slot tahun: regex `20[12]\d`.
+       - Ekstraksi slot domain: `penjualan`, `servis`, `sparepart`, `pembelian`, `all`.
+     - *Query Reconstruction / Synthesis*: Jika slot terdeteksi, merekonstruksi pertanyaan utuh tanpa ambiguitas (contoh: *"kenapa data hanya sampai bulan 11?"* + balasan *"penjualan unit 2025"* -> disintesiskan menjadi *"Kenapa data penjualan unit tahun 2025 hanya sampai bulan 11?"*).
+     - *Topic Shift Protection*: Jika pengguna bertanya hal baru yang tidak berhubungan (misal: *"siapa 5 customer terbesar?"*), sistem mendeteksi perpindahan topik dan memproses pertanyaan baru secara independen tanpa memaksakan slot-filling lama.
+  2. **Eliminasi Asumsi 2025 pada Opsi Klarifikasi**:
+     - Template klarifikasi awal diubah menjadi netral total:
+       `"Pertanyaan Anda mengenai batas data transaksi memerlukan informasi divisi data dan tahun yang ingin diperiksa. Data transaksi apa (misalnya Penjualan Unit, Servis Bengkel, atau Suku Cadang) dan tahun berapa yang ingin Anda analisis?"`
+     - Opsi saran diubah menjadi chip netral tanpa tahun: `Penjualan Unit`, `Jasa Servis Bengkel`, `Suku Cadang & Sparepart`, `Seluruh Divisi`.
+  3. **Proteksi Polusi Topik Asisten (`ambil_konteks_percakapan_aktif`)**:
+     - Pesan asisten berstatus `clarification_needed` secara eksplisit dikecualikan dari pemindaian kata kunci topik, sehingga kata-kata contoh ("servis", "penjualan", "sparepart") dalam pertanyaan klarifikasi tidak mencemari topik riwayat percakapan.
+  4. **Redesign Antarmuka Percakapan (`ClarificationCard.jsx`)**:
+     - Mengubah kartu tombol besar kaku menjadi bubble chat asisten editorial yang mengalir.
+     - Menyematkan panduan ramah: *"Ketik balasan Anda di kolom pesan di bawah, atau pilih opsi cepat berikut:"*.
+     - Menyajikan opsi dalam bentuk horizontal pill chips (`rounded-full`) yang elegan, dapat diklik untuk pengiriman cepat, atau pengguna dapat mengetik bebas di kolom chat.
+
+- **Hasil Verifikasi**:
+  - Backend compile: `compileall app` lolos 100% (exit code 0).
+  - Backend pytest: `pytest tests/ -q` lolos 100% (**569 passed in 44.69s**, +1 unit test `test_rekonsiliasi_slot_percakapan`).
+  - Frontend lint: `npm run lint` lolos (**0 errors**).
+  - Frontend build: `npm run build` lolos (exit code 0, 1.22s).
+  - Live Multi-Turn End-to-End Test (`test_live_slot_filling.py`):
+    - Skenario A (Balas Bebas via Chat): Turn 1 minta klarifikasi tanpa 2025 -> Turn 2 user ketik *"penjualan unit 2025"* -> AI merekonstruksi dan mengeksekusi audit penjualan unit 2025 secara presisi.
+    - Skenario B (Balas Hanya Tahun): User ketik *"2025"* -> AI mengaudit seluruh divisi operasional tahun 2025.
+    - Skenario C (Pergantian Topik): User mengetik *"siapa 5 customer terbesar?"* -> AI langsung mengeksekusi kueri baru via Vanna tanpa terjebak di slot lama.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -1593,6 +1630,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Hardening Domain Suku Cadang/Inventori, Audit Form Accessibility & De-duplikasi Saran** — SELESAI (lihat §3ap).
 - [x] **Koreksi Inversi Nilai Komparasi Tahunan, Formatting Kuantitas Suku Cadang & Audit Eksplanatori Cut-Off Data** — SELESAI (lihat §3aq).
 - [x] **Isolasi Sesi Percakapan Riwayat Chat & Klarifikasi Konteks Pertanyaan Keterbatasan Data** — SELESAI (lihat §3ar).
+- [x] **Arsitektur Conversational Slot-Filling & Natural Clarification Flow** — SELESAI (lihat §3as).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. *Dedicated Executive Dashboard Page*: Ditutup/dibatalkan atas arahan pengguna untuk mempertahankan identitas murni Conversational AI Assistant.
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.

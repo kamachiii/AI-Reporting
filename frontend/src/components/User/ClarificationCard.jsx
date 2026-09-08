@@ -1,4 +1,4 @@
-import { HelpCircle, Car, Wrench, Layers, ArrowRight } from 'lucide-react';
+import { HelpCircle, Car, Wrench, Layers } from 'lucide-react';
 
 const ICON_MAP = {
   Car,
@@ -7,12 +7,13 @@ const ICON_MAP = {
 };
 
 /**
- * Komponen kartu dialog interaktif saat kueri pengguna terdeteksi ambigu
- * (Interactive Clarification Loop).
+ * Komponen dialog klarifikasi percakapan interaktif
+ * (Multi-turn Conversational Clarification).
+ * Mendukung balasan bebas via input chat maupun opsi chip cepat.
  */
 export default function ClarificationCard({ answer, onAsk }) {
   const options = answer?.options || [];
-  const message = answer?.clarification_message || answer?.ringkasan || 'Silakan pilih opsi yang sesuai:';
+  const message = answer?.clarification_message || answer?.ringkasan || 'Silakan sebutkan parameter data yang ingin Anda periksa:';
 
   return (
     <div className="bg-surface-card border border-hairline rounded-lg p-5 shadow-2xs space-y-4 max-w-2xl">
@@ -31,49 +32,36 @@ export default function ClarificationCard({ answer, onAsk }) {
         )}
       </div>
 
-      {/* Pertanyaan Klarifikasi */}
-      <p className="text-[15px] text-ink font-serif italic leading-relaxed">
+      {/* Pertanyaan Klarifikasi Alami */}
+      <p className="text-[15px] text-ink font-serif leading-relaxed">
         &ldquo;{message}&rdquo;
       </p>
 
-      {/* Daftar Pilihan Opsi */}
-      <div className="space-y-2 pt-1">
-        <div className="text-[10px] font-mono text-muted-soft uppercase tracking-widest font-medium">
-          Pilih salah satu domain data untuk melanjutkan:
+      {/* Panduan Balas di Chat & Quick Action Chips */}
+      {options.length > 0 && (
+        <div className="space-y-2.5 pt-2 border-t border-hairline/60">
+          <div className="text-[11px] text-muted font-sans flex items-center justify-between">
+            <span>Ketik balasan Anda di kolom pesan di bawah, atau pilih opsi cepat berikut:</span>
+          </div>
+          <div className="flex flex-wrap gap-2 pt-0.5">
+            {options.map((opt) => {
+              const IconComp = ICON_MAP[opt.icon] || HelpCircle;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => onAsk && onAsk(opt.prompt)}
+                  className="group inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-medium border border-hairline bg-canvas hover:bg-surface-cream-strong hover:border-primary/50 text-ink hover:text-primary transition-all cursor-pointer shadow-2xs hover:shadow-xs"
+                >
+                  <IconComp size={13} className="text-muted group-hover:text-primary transition-colors shrink-0" />
+                  <span>{opt.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
-        <div className="grid grid-cols-1 gap-2">
-          {options.map((opt) => {
-            const IconComp = ICON_MAP[opt.icon] || HelpCircle;
-            return (
-              <button
-                key={opt.id}
-                type="button"
-                onClick={() => onAsk && onAsk(opt.prompt)}
-                className="w-full group text-left p-3.5 rounded-md border border-hairline bg-canvas hover:bg-surface-cream-strong hover:border-primary/50 transition-all flex items-center justify-between gap-3 cursor-pointer shadow-2xs hover:shadow-xs"
-              >
-                <div className="flex items-start gap-3 min-w-0">
-                  <div className="w-8 h-8 rounded-md bg-surface-card border border-hairline text-ink flex items-center justify-center shrink-0 group-hover:border-primary/40 group-hover:text-primary transition-colors">
-                    <IconComp size={15} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-medium text-ink group-hover:text-primary transition-colors font-sans">
-                      {opt.label}
-                    </div>
-                    {opt.deskripsi && (
-                      <div className="text-[11px] text-muted mt-0.5 line-clamp-1">
-                        {opt.deskripsi}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className="text-muted group-hover:text-primary group-hover:translate-x-0.5 transition-all shrink-0">
-                  <ArrowRight size={14} />
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      )}
     </div>
   );
 }
+
