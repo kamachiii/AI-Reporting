@@ -291,6 +291,15 @@ export default function UserWorkspace({ user, onLogout }) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [feedbackBusy, setFeedbackBusy] = useState(null);
   const bottomRef = useRef(null);
+  const mainRef = useRef(null);
+  const textareaRef = useRef(null);
+  const isAtBottomRef = useRef(true);
+
+  const handleScroll = useCallback(() => {
+    if (!mainRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = mainRef.current;
+    isAtBottomRef.current = scrollHeight - scrollTop - clientHeight < 100;
+  }, []);
 
   useEffect(() => {
     document.title = 'Chat · DMS AI Platform';
@@ -332,10 +341,10 @@ export default function UserWorkspace({ user, onLogout }) {
     };
   }, [branchCode, loadConversations]);
 
-  // Auto-scroll ke pesan terbaru setiap daftar pesan berubah
-  // (termasuk saat indikator pipeline berpindah tahap).
+  // Auto-scroll pintar: HANYA scroll ke bawah jika user berada di dasar percakapan,
+  // mencegah "scroll jumping" ketika user sedang membaca ke atas.
   useEffect(() => {
-    if (messages.length > 0) {
+    if (messages.length > 0 && isAtBottomRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
   }, [messages]);
@@ -394,12 +403,35 @@ export default function UserWorkspace({ user, onLogout }) {
     }
   };
 
+  const handleInputChange = (e) => {
+    setInput(e.target.value);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
+    }
+  };
+
+  const handleKeyDownInput = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
   const handleSend = async (rawText) => {
     const text = typeof rawText === 'string' ? rawText : input;
     const trimmed = text.trim();
     if (!trimmed || isProcessing || !branchCode) return;
 
     setInput('');
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+    isAtBottomRef.current = true;
+    setTimeout(() => {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }, 50);
+
     setIsProcessing(true);
     const assistantId = nextMessageId();
     setMessages((prev) => [
@@ -565,7 +597,7 @@ export default function UserWorkspace({ user, onLogout }) {
           </AnimatePresence>
 
           {/* Area percakapan */}
-          <main className="flex-1 overflow-y-auto">
+          <main ref={mainRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
             <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">
               {messages.length === 0 && (
                 <motion.div
@@ -617,12 +649,12 @@ export default function UserWorkspace({ user, onLogout }) {
                   </div>
 
                   {/* System Telemetry Metadata */}
-                  <div className="flex items-center justify-center gap-3 text-[11px] text-muted-soft font-mono pt-3 border-t border-hairline/60 max-w-md mx-auto">
-                    <span>2.387 Tabel Terpantau</span>
+                  <div className="flex items-center justify-center gap-3 text-[11px] text-muted-soft font-sans pt-3 border-t border-hairline/60 max-w-md mx-auto">
+                    <span>Koneksi Cabang Terverifikasi</span>
                     <span>•</span>
-                    <span>Read-Only Enforced</span>
+                    <span>Akses Read-Only Aman</span>
                     <span>•</span>
-                    <span>AST Verifier Active</span>
+                    <span>Siap Menganalisis Data</span>
                   </div>
                 </motion.div>
               )}
@@ -650,13 +682,16 @@ export default function UserWorkspace({ user, onLogout }) {
                   e.preventDefault();
                   handleSend();
                 }}
-                className="relative flex items-center bg-canvas border border-hairline rounded-md shadow-2xs focus-within:border-primary focus-within:ring-3 focus-within:ring-primary/15 transition-all"
+                className="relative flex items-end bg-canvas border border-hairline rounded-md shadow-2xs focus-within:border-primary focus-within:ring-3 focus-within:ring-primary/15 transition-all p-1"
               >
-                <input
+                <textarea
+                  ref={textareaRef}
                   id="chat-query"
                   name="chat-query"
+                  rows={1}
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  onChange={handleInputChange}
+                  onKeyDown={handleKeyDownInput}
                   disabled={isProcessing || !branchCode}
                   placeholder={
                     !branchCode
@@ -665,28 +700,26 @@ export default function UserWorkspace({ user, onLogout }) {
                         ? 'Sedang menganalisis basis data dealer…'
                         : `Ajukan pertanyaan analitik untuk cabang ${branchCode}…`
                   }
-                  className="flex-1 h-11 pl-4 pr-12 bg-transparent text-sm text-ink placeholder:text-muted-soft focus:outline-none disabled:opacity-60 font-sans"
+                  className="flex-1 min-h-[38px] max-h-[160px] pl-3 pr-2 py-2 bg-transparent text-sm text-ink placeholder:text-muted-soft focus:outline-none disabled:opacity-60 font-sans resize-none leading-relaxed"
                   aria-label="Pertanyaan analitik"
                 />
-                <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                  <button
-                    type="submit"
-                    disabled={isProcessing || !branchCode || !input.trim()}
-                    className="p-2 rounded-md bg-primary hover:bg-primary-active text-on-primary disabled:bg-primary-disabled disabled:text-muted disabled:cursor-not-allowed transition-all active:scale-95 cursor-pointer shadow-2xs"
-                    title="Kirim Pertanyaan"
-                    aria-label="Kirim Pertanyaan"
-                  >
-                    {isProcessing ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
-                  </button>
-                </div>
+                <button
+                  type="submit"
+                  disabled={isProcessing || !branchCode || !input.trim()}
+                  className="p-2 mb-0.5 rounded-md bg-primary hover:bg-primary-active text-on-primary disabled:bg-primary-disabled disabled:text-muted disabled:cursor-not-allowed transition-all active:scale-95 cursor-pointer shadow-2xs shrink-0"
+                  title="Kirim Pertanyaan (Enter)"
+                  aria-label="Kirim Pertanyaan"
+                >
+                  {isProcessing ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
+                </button>
               </form>
 
               <div className="flex items-center justify-between text-[11px] text-muted-soft pt-2 px-1">
                 <span className="flex items-center gap-1.5">
                   <ShieldCheck size={12} className="text-emerald-600" />
-                  <span>Kueri dieksekusi secara read-only dengan verifikasi AST & pgvector</span>
+                  <span>Kueri dieksekusi secara aman dengan verifikasi read-only</span>
                 </span>
-                <span className="font-mono text-[10px] hidden sm:inline">Enter ↵ kirim</span>
+                <span className="font-mono text-[10px] hidden sm:inline">Enter ↵ kirim · Shift+Enter baris baru</span>
               </div>
             </div>
           </footer>

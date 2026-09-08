@@ -924,7 +924,7 @@ def _is_general_guide_question(question: str) -> bool:
         "min", "bot", "ai", "apa", "aja", "saja", "deh", "nih", "tuh", "ke", "buat", "untuk"
     }
     words = [w for w in q_clean.split() if w not in fillers]
-    if words in [["data"], ["data", "data"], ["database"], ["semua", "data"], ["seluruh", "data"], []]:
+    if words in [["data"], ["data", "data"], ["database"], []]:
         return True
 
     # 5. Deteksi Kueri Non-Data (Short casual message tanpa kata kunci bisnis otomotif apa pun)
@@ -936,7 +936,8 @@ def _is_general_guide_question(question: str) -> bool:
         "tahun", "bulan", "periode", "terlaris", "terbanyak", "terbesar", "tertinggi", "terendah",
         "ranking", "peringkat", "daftar", "tabel", "rincian", "detail", "bandingkan",
         "perbandingan", "grafik", "laporan", "kenapa", "mengapa", "kapan", "siapa", "berapa",
-        "hitung", "total", "jumlah", "rekap", "analisis", "rata-rata", "2024", "2025", "2026"
+        "hitung", "total", "jumlah", "rekap", "analisis", "rata-rata", "semua", "seluruh",
+        "2024", "2025", "2026"
     }
     if len(raw_words) <= 4:
         has_business_kw = any(any(kw in w for kw in BUSINESS_DATA_KEYWORDS) for w in raw_words)
@@ -992,15 +993,37 @@ async def tangani_kueri_panduan_umum(
     ai_config: dict | None = None,
 ) -> dict:
     """Mode Panduan Orientasi: memberikan ringkasan modul data operasional dealer yang tersedia."""
-    ringkasan = (
-        "Selamat datang di Asisten AI Database Dealer. Platform ini terhubung langsung ke database operasional cabang Anda.\n\n"
-        "Berikut adalah modul data utama yang siap Anda analisis:\n\n"
-        "1. Penjualan Unit Kendaraan: Volume penjualan, tren omzet bulanan dan tahunan, ranking model mobil terlaris, rincian faktur penjualan, dan performa salesman.\n"
-        "2. Jasa Servis Bengkel: Volume Work Order (PKB), pendapatan jasa perawatan, jenis pekerjaan servis, dan histori servis kendaraan.\n"
-        "3. Suku Cadang & Sparepart: Pergerakan persediaan suku cadang, penjualan counter/part shop, dan omzet suku cadang.\n"
-        "4. Pelanggan & Customer: Profil pelanggan terdaftar, histori pembelian unit, dan persebaran wilayah pelanggan.\n\n"
-        "Silakan ketik pertanyaan spesifik yang ingin Anda ketahui atau klik salah satu rekomendasi pertanyaan di bawah ini."
-    )
+    has_prior_chat = False
+    if conversation_id:
+        try:
+            prior_cnt = await core_pool.fetchval(
+                "SELECT COUNT(*) FROM messages WHERE conversation_id = $1",
+                conversation_id
+            )
+            if prior_cnt and prior_cnt > 0:
+                has_prior_chat = True
+        except Exception:
+            pass
+
+    if has_prior_chat:
+        ringkasan = (
+            "Berikut panduan modul data operasional dealer yang dapat Anda analisis:\n\n"
+            "1. Penjualan Unit Kendaraan: Volume penjualan, tren omzet bulanan dan tahunan, ranking model mobil terlaris, rincian faktur penjualan, dan performa salesman.\n"
+            "2. Jasa Servis Bengkel: Volume Work Order (PKB), pendapatan jasa perawatan, jenis pekerjaan servis, dan histori servis kendaraan.\n"
+            "3. Suku Cadang & Sparepart: Pergerakan persediaan suku cadang, penjualan counter/part shop, dan omzet suku cadang.\n"
+            "4. Pelanggan & Customer: Profil pelanggan terdaftar, histori pembelian unit, dan persebaran wilayah pelanggan.\n\n"
+            "Silakan ketik pertanyaan spesifik mengenai data yang ingin Anda analisis, atau klik salah satu rekomendasi pertanyaan di bawah ini."
+        )
+    else:
+        ringkasan = (
+            "Selamat datang di Asisten AI Database Dealer. Platform ini terhubung langsung ke database operasional cabang Anda.\n\n"
+            "Berikut adalah modul data utama yang siap Anda analisis:\n\n"
+            "1. Penjualan Unit Kendaraan: Volume penjualan, tren omzet bulanan dan tahunan, ranking model mobil terlaris, rincian faktur penjualan, dan performa salesman.\n"
+            "2. Jasa Servis Bengkel: Volume Work Order (PKB), pendapatan jasa perawatan, jenis pekerjaan servis, dan histori servis kendaraan.\n"
+            "3. Suku Cadang & Sparepart: Pergerakan persediaan suku cadang, penjualan counter/part shop, dan omzet suku cadang.\n"
+            "4. Pelanggan & Customer: Profil pelanggan terdaftar, histori pembelian unit, dan persebaran wilayah pelanggan.\n\n"
+            "Silakan ketik pertanyaan spesifik yang ingin Anda ketahui atau klik salah satu rekomendasi pertanyaan di bawah ini."
+        )
     saran = [
         "Tampilkan 5 model mobil dengan penjualan tertinggi",
         "Berapa total pendapatan servis bengkel tahun 2025?",
@@ -1577,6 +1600,7 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                             return {
                                 "id": domain_def["id"],
                                 "title": domain_def["title"],
+                                "label": domain_def["title"],
                                 "icon": domain_def["icon"],
                                 "sql": sql_query,
                                 "columns": cols,
@@ -1590,6 +1614,7 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                             return {
                                 "id": domain_def["id"],
                                 "title": domain_def["title"],
+                                "label": domain_def["title"],
                                 "icon": domain_def["icon"],
                                 "sql": sql_query,
                                 "columns": [],

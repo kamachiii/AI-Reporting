@@ -19,6 +19,11 @@ FANOUT_RULES: List[Dict[str, Any]] = [
         "trigger_patterns": [
             r"\b(?:penjualan|omzet|omset|pendapatan|revenue|transaksi)\b",
             r"\b(?:berapa|total|data|rekap|ringkasan)\s+(?:penjualan|omzet|omset|pendapatan)\b",
+            r"\b(?:semua|seluruh)\s+data\b",
+            r"\bdata\s+(?:semua|seluruh)\b",
+            r"\b(?:semua|seluruh)\s+divisi\b",
+            r"\b(?:rekap|performa|kinerja)\s+(?:semua|seluruh|dealer)\b",
+            r"^(?:gw\s+mau\s+|minta\s+|tampilkan\s+)?(?:semua|seluruh)(?:\s+data)?$",
         ],
         # Jika salah satu qualifier ini ada, pertanyaan SUDAH SPESIFIK -> Jalankan single query normal!
         "qualifiers": [
@@ -522,6 +527,7 @@ def susun_tab_komparasi_divisi(domain_results: List[Dict[str, Any]], question: s
     return {
         "id": "komparasi",
         "title": "Komparasi Antar Divisi",
+        "label": "Komparasi Antar Divisi",
         "icon": "BarChart3",
         "sql": combined_sql,
         "columns": ["divisi", "total_transaksi", "total_omzet", "kontribusi_omzet"],

@@ -1,7 +1,7 @@
 import { Component, useMemo, useState } from 'react';
 import {
   AlertTriangle, Check, ChevronRight, ChevronLeft, Database, Layers, X,
-  Loader2, GraduationCap, TrendingUp, TrendingDown, Lightbulb, Compass, Award,
+  Loader2, TrendingUp, TrendingDown, Lightbulb, Compass, Award,
   Car, Wrench, Package, FileSpreadsheet, ArrowUpDown, ArrowUp, ArrowDown, Copy, Search,
   SplitSquareVertical, Calendar, ArrowRight, Table2,
   BarChart2, LineChart as LineChartIcon, Table as TableIcon,
@@ -545,8 +545,6 @@ export default function AssistantAnswerCard({
   const [chartType, setChartType] = useState('bar'); // 'bar' | 'line'
   const [penjelasan, setPenjelasan] = useState(null);
   const [loadingExplain, setLoadingExplain] = useState(false);
-  const [trainingBusy, setTrainingBusy] = useState(false);
-  const [trained, setTrained] = useState(false);
   const [activeDomainTab, setActiveDomainTab] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
   const [tableSearch, setTableSearch] = useState('');
@@ -663,24 +661,6 @@ export default function AssistantAnswerCard({
       toast.error(typeof detail === 'string' ? detail : 'Gagal memuat penjelasan naratif.');
     } finally {
       setLoadingExplain(false);
-    }
-  };
-
-  const handleTrain = async () => {
-    if (trainingBusy || trained || !branchCode) return;
-    setTrainingBusy(true);
-    try {
-      await api.trainVanna({
-        branchCode,
-        question: question || answer.question || '',
-        sql: activeSql,
-      });
-      setTrained(true);
-      toast.success('Jawaban berhasil dilatih ke AI (pgvector)!');
-    } catch {
-      toast.error('Gagal melatih AI.');
-    } finally {
-      setTrainingBusy(false);
     }
   };
 
@@ -958,10 +938,6 @@ export default function AssistantAnswerCard({
                 <span>Hasil Basis Data Terverifikasi</span>
               </span>
             )}
-
-            <span className="text-[11px] text-muted font-mono bg-surface-card px-2 py-0.5 rounded-md border border-hairline">
-              Keyakinan: <strong className="text-ink">{answer.confidence || 'B'}</strong>
-            </span>
           </div>
 
           <div className="flex items-center gap-2.5 text-xs text-muted font-mono">
@@ -1358,8 +1334,8 @@ export default function AssistantAnswerCard({
                           key={col}
                           onClick={() => handleSort(col)}
                           className={`px-3 py-2 font-medium whitespace-nowrap cursor-pointer select-none hover:bg-surface-cream-strong/50 transition-colors ${
-                            isNum ? 'text-right' : 'text-left'
-                          }`}
+                            j === 0 ? 'sticky left-0 bg-surface-card z-10 shadow-[1px_0_0_0_rgba(0,0,0,0.08)]' : ''
+                          } ${isNum ? 'text-right' : 'text-left'}`}
                           title={`Klik untuk mengurutkan data berdasarkan ${col}`}
                         >
                           <div className={`inline-flex items-center gap-1 ${isNum ? 'justify-end w-full' : ''}`}>
@@ -1390,7 +1366,7 @@ export default function AssistantAnswerCard({
                     paginatedRows.map((row, i) => {
                       const cells = Array.isArray(row) ? row : Object.values(row || {});
                       return (
-                        <tr key={i} className="hover:bg-surface-card/40 transition-colors">
+                        <tr key={i} className="hover:bg-surface-card/40 transition-colors group">
                           {cells.map((cell, j) => {
                             const isDateOrTime = formatTanggalWaktu(cell) !== null;
                             const isNum = !isDateOrTime && (typeof cell === 'number' || (typeof cell === 'string' && cell.trim() !== '' && !Number.isNaN(Number(cell))));
@@ -1398,11 +1374,13 @@ export default function AssistantAnswerCard({
                               <td
                                 key={j}
                                 className={`px-3 py-2 whitespace-nowrap ${
-                                  isNum
-                                    ? 'text-right font-mono tabular-nums text-ink'
-                                    : isDateOrTime
-                                      ? 'text-left font-mono tabular-nums text-body'
-                                      : (j === 0 ? 'text-ink font-medium' : 'text-body')
+                                  j === 0
+                                    ? 'sticky left-0 bg-canvas group-hover:bg-surface-card z-10 shadow-[1px_0_0_0_rgba(0,0,0,0.08)] text-ink font-medium'
+                                    : isNum
+                                      ? 'text-right font-mono tabular-nums text-ink'
+                                      : isDateOrTime
+                                        ? 'text-left font-mono tabular-nums text-body'
+                                        : 'text-body'
                                 }`}
                               >
                                 {formatSel(cell, activeColumns?.[j])}
@@ -1468,14 +1446,13 @@ export default function AssistantAnswerCard({
         {/* Meta info: baris + durasi + jam */}
         <p className="text-[11px] text-muted">
           {answer.row_count} baris{durasi && ` · ${durasi}`}
-          {answer.attempts > 1 && ` · ${answer.attempts} percobaan`}
           {createdAt &&
             ` · ${new Date(createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`}
         </p>
 
-        {/* Feedback & Instant Training (Human-in-the-Loop) */}
-        <div className="flex items-center justify-between gap-2 pt-2 border-t border-hairline flex-wrap">
-          {answer.memory_id && !memoryStatus && (onConfirm || onReject) ? (
+        {/* Feedback (Human-in-the-Loop) */}
+        {answer.memory_id && !memoryStatus && (onConfirm || onReject) && (
+          <div className="flex items-center justify-between gap-2 pt-2 border-t border-hairline flex-wrap">
             <div className="flex items-center gap-2">
               <span className="text-xs text-muted">Apakah jawaban ini benar?</span>
               {onConfirm && (
@@ -1501,27 +1478,8 @@ export default function AssistantAnswerCard({
                 </button>
               )}
             </div>
-          ) : (
-            <div />
-          )}
-
-          {/* Tombol Latih AI Instan */}
-          {branchCode && answer.sql && (
-            <button
-              type="button"
-              onClick={handleTrain}
-              disabled={trainingBusy || trained}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs border border-hairline rounded-md transition-colors cursor-pointer ${
-                trained
-                  ? 'bg-success/10 text-success border-success/30'
-                  : 'text-muted hover:text-primary hover:bg-primary/5'
-              } disabled:opacity-50`}
-            >
-              {trainingBusy ? <Loader2 size={12} className="animate-spin" /> : <GraduationCap size={12} />}
-              {trained ? 'Telah Dilatih ke AI' : 'Latih Jawaban Ini'}
-            </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Tawaran Proaktif Rincian Terpisah (Gaya 1 -> Gaya 2) - 100% Icon Lucide, Zero Emoji */}

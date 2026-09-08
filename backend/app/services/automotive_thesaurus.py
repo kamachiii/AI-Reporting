@@ -16,15 +16,17 @@ AUTOMOTIVE_DOMAIN_RULES = [
         "keywords": [
             "omzet", "penjualan", "sales", "unit", "mobil", "terjual", "laku",
             "pendapatan", "revenue", "spk", "pesanan", "faktur", "do", "delivery order",
-            "untt", "unit_jual", "deal", "leasing", "cash"
+            "untt", "unit_jual", "deal", "leasing", "cash", "terlaris", "terpopuler",
+            "ranking mobil", "model mobil", "tipe mobil", "mobil terlaris"
         ],
-        "primary_tables": ["untt_penjualan", "untt_pesanankendaraan", "glbm_kendaraan", "glbm_customer", "vw_untt_penjualan"],
+        "primary_tables": ["untt_penjualan", "untt_datakendaraan", "untm_tipe", "untt_pesanankendaraan", "glbm_kendaraan", "glbm_customer"],
         "guidelines": [
-            "Tabel utama transaksi penjualan unit adalah 'untt_penjualan' (atau view 'vw_untt_penjualan').",
+            "Tabel utama transaksi penjualan unit adalah 'untt_penjualan'.",
             "Wajib memfilter transaksi sah (bukan retur atau batal): untt_penjualan.batal = false AND untt_penjualan.retur = false (kolom batal dan retur bertipe BOOLEAN di PostgreSQL).",
             "Untuk total omzet/nilai uang penjualan gunakan SUM(untt_penjualan.hjakhir) atau SUM(untt_penjualan.hargajual).",
             "Untuk jumlah unit kendaraan terjual gunakan COUNT(untt_penjualan.nomor).",
             "Kolom tanggal transaksi adalah untt_penjualan.tanggal.",
+            "PENTING untuk kueri nama/tipe mobil atau mobil terlaris (misal '5 mobil terlaris'): tabel 'untt_penjualan' TIDAK memiliki kolom 'kode_barang' atau 'nama_barang'. Gunakan relasi 3 tabel: untt_penjualan p JOIN untt_datakendaraan dk ON p.norangka = dk.norangka JOIN untm_tipe t ON dk.kode_tipe = t.kode (kolom nama tipe mobil adalah t.nama). Rumus: SELECT t.nama AS tipe_mobil, COUNT(p.nomor) AS unit_terjual, SUM(p.hjakhir) AS total_omzet FROM untt_penjualan p JOIN untt_datakendaraan dk ON p.norangka = dk.norangka JOIN untm_tipe t ON dk.kode_tipe = t.kode WHERE p.batal = false AND p.retur = false GROUP BY t.nama ORDER BY unit_terjual DESC LIMIT 5.",
             "Relasi ke Surat Pesanan Kendaraan (SPK): untt_penjualan.nomor_pesanan = untt_pesanankendaraan.nomor.",
             "Relasi ke Customer: untt_pesanankendaraan.nomor_customer = glbm_customer.nomor."
         ]
@@ -36,7 +38,7 @@ AUTOMOTIVE_DOMAIN_RULES = [
             "servis", "service", "bengkel", "perawatan", "perbaikan", "reparasi",
             "wo", "work order", "pk", "perintah kerja", "sa", "service advisor",
             "mekanik", "teknisi", "jasa", "srvt", "general repair", "body paint",
-            "unit entry"
+            "unit entry", "bulanan", "tren bulanan", "tren servis"
         ],
         "primary_tables": ["srvt_wo", "srvt_wodetail", "glbm_customer"],
         "guidelines": [
@@ -44,6 +46,7 @@ AUTOMOTIVE_DOMAIN_RULES = [
             "Tabel rincian pekerjaan dan ongkos jasa servis adalah 'srvt_wodetail' (kolom: nomor_wo, nama_tasklist, jasa, part, bahan, kode_mekanik).",
             "Wajib menyaring transaksi work order yang valid (srvt_wo.batal = false).",
             "Untuk menghitung total unit entry / jumlah kunjungan servis gunakan COUNT(srvt_wo.nomor).",
+            "Untuk kueri tren servis bulanan (misal 'Tren volume transaksi servis bulanan sepanjang tahun 2024'): kelompokkan per bulan dengan EXTRACT(MONTH FROM tanggal)::INT AS bulan, COUNT(nomor) AS volume_servis, SUM(totalestimasibiaya) AS total_pendapatan_servis FROM srvt_wo WHERE batal = false AND tanggal >= '2024-01-01' AND tanggal < '2025-01-01' GROUP BY bulan ORDER BY bulan ASC.",
             "Relasi WO ke detail: srvt_wo.nomor = srvt_wodetail.nomor_wo.",
             "Relasi WO ke customer: srvt_wo.nomor_customer = glbm_customer.nomor."
         ]

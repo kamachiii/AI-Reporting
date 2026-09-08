@@ -1675,6 +1675,46 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Frontend lint: `npm run lint` lolos (**0 errors**).
   - Frontend build: `npm run build` lolos (exit code 0, 1.25s).
 
+### 3aw. Resolusi Kueri Mobil Terlaris, Anti-Loop Greeting Fanout, Textarea Auto-Resize, Smart Scroll & Pembersihan Total UI Pengguna (commit: HEAD)
+
+- **Latar Belakang & Masukan Pengguna (Audit Sesi tester02)**:
+  1. *Bug Kueri Mobil Terlaris*: Kueri *"tampilkan 5 mobil terlaris"* gagal karena LLM menebak view/kolom fiktif `kode_barang`/`namatipe` di tabel `vw_untt_penjualan`. Pada skema dealer Otobitz riil, nama tipe mobil hanya dapat diperoleh lewat relasi join 3 tabel: `untt_penjualan p JOIN untt_datakendaraan dk ON p.norangka = dk.norangka JOIN untm_tipe t ON dk.kode_tipe = t.kode`.
+  2. *Looping Greeting (Amnesia Dialog)*: Balasan user seperti *"gw mau semua data"* atau *"semua"* setelah asisten memaparkan 4 modul operasional memicu salam pembuka *"Selamat datang di Asisten AI Database Dealer..."* berulang-ulang tanpa menyajikan data.
+  3. *Scroll Jumping Mengganggu*: Setiap 1,1 detik saat asisten memproses kueri, `UserWorkspace.jsx` memanggil auto-scroll paksa ke bawah, menarik layar secara kasar ketika user sedang membaca tabel data atau narasi ke atas.
+  4. *Input Terbatas Single-Line*: Input bar chat masih menggunakan `<input type="text">` satu baris kaku yang menyulitkan pengguna mengetik pertanyaan panjang atau membuat baris baru.
+  5. *Bocoran Dapur Teknis di UI Chat Pengguna*: Kartu balasan masih memuat badge teknis internal (*"Keyakinan: B"*, *"· X percobaan"*), tombol developer *"Latih Jawaban Ini"* (GraduationCap), dan footer empty state teknis (*"2.387 Tabel Terpantau • AST Verifier Active"*).
+  6. *Tabel Lebar Sulit Dibaca*: Pada layar sedang/kecil, scrolling horizontal menyebabkan hilangnya konteks nama entitas/baris pertama.
+
+- **Solusi & Rekayasa**:
+  1. **Knowledge Base & Thesaurus Otomotif (`automotive_thesaurus.py` & Vector KB)**:
+     - Menambahkan aturan domain baku, sinonim kata kunci (`terlaris`, `ranking mobil`, `model mobil`, `tipe mobil`), tabel utama (`untt_penjualan`, `untt_datakendaraan`, `untm_tipe`), dan formula join eksplisit untuk kueri mobil terlaris.
+     - Menambahkan contoh SQL terverifikasi golden-set ke `global_knowledge_base` dan menyinkronkan embedding ke `tenant_vector_kb`.
+  2. **Fan-Out 3S untuk Kueri Konsolidasi (`fanout_engine.py` & `vanna_engine.py`)**:
+     - Memperluas trigger pattern fanout untuk menangkap frasa *"semua data"*, *"seluruh data"*, *"semua divisi"*, dan balasan kata tunggal *"semua"* / *"semuanya"* untuk langsung mengeksekusi multi-table 3S fan-out (Unit Kendaraan, Jasa Servis Bengkel, Suku Cadang & Sparepart).
+     - Menambahkan pengecekan `has_prior_chat` di `tangani_kueri_panduan_umum`: jika sesi percakapan sudah berjalan, asisten dilarang mengulang ucapan salam pembuka formal.
+     - Menambahkan properti `label` berdampingan dengan `title` pada hasil sub-domain fanout untuk konsistensi frontend.
+  3. **Textarea Auto-Resize & Keyboard Navigation (`UserWorkspace.jsx`)**:
+     - Mengganti `<input type="text">` dengan `<textarea>` auto-resize responsif (tinggi otomatis bertambah dinamis dari min 38px hingga maks 160px).
+     - Menambahkan dukungan navigasi keyboard standar industri: `Enter` untuk mengirim pertanyaan, `Shift+Enter` untuk menyisipkan baris baru (*newline*).
+  4. **Smart Auto-Scroll Bebas Jumping (`UserWorkspace.jsx`)**:
+     - Menambahkan container scroll ref dan pendeteksi posisi scroll `isAtBottomRef`.
+     - Auto-scroll halus HANYA berjalan jika user sedang berada di dasar chat (<100px dari dasar) atau saat user baru saja mengirim pertanyaan baru. Jika user sedang men-scroll ke atas untuk membaca data, layar tetap tenang dan tidak meloncat.
+  5. **Pembersihan Total UI & Humanisasi (`AssistantAnswerCard.jsx` & `UserWorkspace.jsx`)**:
+     - Menghapus badge teknis *"Keyakinan: B"* dari header kartu balasan.
+     - Menghapus metrik *"· X percobaan"* dari footer kartu balasan.
+     - Menghapus tombol developer *"Latih Jawaban Ini"* dari sisi pengguna biasa (mekanisme feedback terpusat pada *"Jawaban benar / Jawaban salah"*).
+     - Menambahkan *Sticky First Column* (`sticky left-0 bg-surface-card z-10 shadow-[1px_0_0_0_rgba(0,0,0,0.08)]`) pada tabel data sehingga nama entitas/kolom pertama tetap terkunci saat scroll horizontal.
+     - Mengubah metadata empty state menjadi kalimat humanis: *"Koneksi Cabang Terverifikasi • Akses Read-Only Aman • Siap Menganalisis Data"*.
+
+- **Hasil Verifikasi**:
+  - Backend compile: `compileall app` lolos 100% (exit code 0).
+  - Backend test suite: `pytest tests/ -q` lolos 100% (**574 passed in 45.74s**).
+  - Frontend lint: `npm run lint` lolos (**0 errors, 0 warnings pada file baru/ubahan**).
+  - Frontend build: `npm run build` lolos (**exit code 0, 1.10s**).
+  - Live E2E Database Test (`test_e2e_user_queries.py`):
+    - Kueri *"tampilkan 5 mobil terlaris"* berhasil dieksekusi 100% akurat terhadap database dealer riil: New Brio Satya E CVT (2.392 unit, Rp 477,2 M), New Brio Satya E MT (1.606 unit, Rp 320,3 M), New Jazz RS CVT (617 unit), New Brio RS CVT (615 unit), HR-V E CVT (605 unit).
+    - Kueri lanjutan *"gw mau semua data"* dan *"semua"* sukses merespons Fan-Out 3S (Unit Kendaraan: 24 baris, Jasa Servis Bengkel: 24 baris, Suku Cadang & Sparepart: 24 baris) dengan 0 loop greeting.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -1747,6 +1787,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Arsitektur Conversational Slot-Filling & Natural Clarification Flow** — SELESAI (lihat §3as).
 - [x] **Arsitektur Multi-Mode Percakapan: Mode Data, Penjelasan Eksplanatori, dan Panduan Orientasi Sistem** — SELESAI (lihat §3at).
 - [x] **Eliminasi Bocoran Teknis Database Sisi User & Audit Log Telemetri AI Terstruktur (Provider, Model, Kategori, Diagnosa Error)** — SELESAI (lihat §3av).
+- [x] **Resolusi Kueri Mobil Terlaris, Anti-Loop Greeting Fanout, Textarea Auto-Resize, Smart Scroll & Pembersihan Total UI Pengguna** — SELESAI (lihat §3aw).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. *Dedicated Executive Dashboard Page*: Ditutup/dibatalkan atas arahan pengguna untuk mempertahankan identitas murni Conversational AI Assistant.
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.
