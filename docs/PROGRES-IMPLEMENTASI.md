@@ -1319,6 +1319,48 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Backend pytest: **562 passed** (100% lulus dalam 53.09s).
   - Frontend lint: **0 error** (100% lulus).
 
+### 3an. Standardisasi Satuan Finansial Eksekutif: Juta, Miliar, Triliun (2026-09-08)
+
+- **Latar Belakang & Masalah**:
+  - Pengguna mendapati bahwa pada bagian "Ringkasan Eksekutif" dan indikator analitik tertentu, angka-angka besar ditampilkan sebagai angka mentah ribuan panjang (cth: `total Rp 189.924.000.000`) atau salah melabeli kolom biaya otomotif (cth: `310.578.000 hpunit` atau `225.713.358.000 nominal pembelian`) karena kolom mengandung substring `unit` atau `total` sehingga tertangkap oleh cabang penanganan kuantitas/frekuensi.
+  - Pengguna menginstruksikan agar seluruh ringkasan eksekutif secara otomatis menggunakan satuan mata uang Indonesia human-readable: **Juta**, **Miliar**, dan **Triliun** dengan pemisah desimal koma standar Indonesia (`Rp 189,92 Miliar`, `Rp 310,58 Juta`, `Rp 2,5 Triliun`).
+
+- **Perubahan Teknis**:
+  1. **`backend/app/services/vanna_engine.py`**:
+     - Menambahkan fungsi helper `_format_rupiah_human(val)` yang mengonversi angka `>= 1_000_000_000_000` ke `Rp X,XX Triliun`, `>= 1_000_000_000` ke `Rp X,XX Miliar`, `>= 1_000_000` ke `Rp X,XX Juta`, dengan pembulatan 2 desimal rapi (menghilangkan trailing nol) dan koma desimal Indonesia.
+     - Memperbarui `_format_ringkasan_otomatis`:
+       - Single row (`n == 1`): Mendeteksi kolom biaya/finansial otomotif eksplisit (`hpunit`, `hpdpp`, `hpppn`, `hppbm`, `hjunit`, `hjakhir`, `totalestimasibiaya`, `totalakhir`, `nominal`) sebelum kuantitas, dan memformat dengan `_format_rupiah_human`.
+       - Comparison row (`"tahun" in columns`): Memformat `col_uang` dengan `total {_format_rupiah_human(u_val)}` (sehingga menghasilkan `total Rp 189,92 Miliar` alih-alih `total Rp 189.924.000.000`).
+  2. **`backend/app/services/fanout_engine.py`**:
+     - Memperbarui `_format_rupiah_singkat` untuk mendukung Triliun, Miliar, dan Juta secara konsisten (menggantikan singkatan `M` dan `Jt`).
+     - Memperluas `UANG_KEYWORDS_ALL` mencakup `nominal`, `pembelian`, `penjualan`, `hpunit`, `hpdpp`, `hpppn`, `hppbm`, `hjunit`, `hjakhir`, `totalestimasibiaya`, `totalakhir`.
+     - Memperbaiki `susun_tab_komparasi_divisi`: Mencegah kolom bernilai uang seperti `total_pembelian` atau `nominal_pembelian` salah teragregasi ke dalam `div_volume` (volume transaksi). Kolom uang selalu teragregasi ke `div_omzet`.
+     - Memperbaiki tab rincian transaksi (`is_rincian_item`): Mengagregasi total nominal baris sampel dan menampilkan `{title}: {len(rows)} transaksi (total {_format_rupiah_singkat(total_nominal)})` secara elegan.
+  3. **`frontend/src/utils/smartInsights.js`**:
+     - Menambahkan ambang batas `>= 1_000_000_000_000` (`Triliun`) pada `formatAngkaAtauUang`.
+     - Menyelaraskan format desimal ke standar Indonesia (koma `,` dan peniadaan `.00` / `,00`).
+  4. **`frontend/src/components/User/AssistantAnswerCard.jsx`**:
+     - Menambahkan helper `formatNominalSingkat(num)`.
+     - Memperbarui `bersihkanRingkasan(teks)`:
+       - Mengonversi format key-value numerik besar menjadi satuan singkat.
+       - Regex pendeteksi angka nominal besar yang didahului `Rp` atau `total Rp` (cth: `total Rp 189.924.000.000` -> `total Rp 189,92 Miliar`).
+       - Regex pendeteksi kolom biaya atau nominal yang tertempel suffix teks (cth: `225.713.358.000 nominal pembelian` -> `Rp 225,71 Miliar`, `310.578.000 hpunit` -> `Rp 310,58 Juta`).
+       - Ekspansi otomatis singkatan lama `M` / `Jt` / `T` menjadi `Miliar` / `Juta` / `Triliun`.
+  5. **Pengujian Unit & Verifikasi**:
+     - `backend/tests/test_vanna_engine.py`: Menambahkan pengujian `_format_rupiah_human` dan `_format_ringkasan_otomatis` untuk memastikan assertion format Rupiah human-readable lulus.
+     - `backend/tests/test_fanout_engine.py`: Memperbarui assertion `test_susun_ringkasan_eksekutif_multi` untuk memeriksa `Miliar`.
+
+- **Verifikasi & Bukti Nyata**:
+  - Backend compileall: **exit 0**.
+  - Backend pytest: **562 passed in 81.86s** (100% lulus tanpa kegagalan).
+  - Frontend lint: `npm run lint` **0 errors** (100% lulus).
+  - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 2.01s).
+  - Live Browser Viewport Test via Chrome DevTools MCP:
+    - Terverifikasi pada browser `http://localhost:5173/`:
+      - Ringkasan Eksekutif: `Perbandingan per tahun: Tahun 2024: 952 transaksi (total Rp 189,92 Miliar), Tahun 2025: 350 transaksi (total Rp 69,83 Miliar).`
+      - Ringkasan Tab Rincian: `Rincian Tahun 2024: Rp 310,58 Juta • Rincian Tahun 2025: Rp 137,31 Juta.`
+      - Indikator Statistik Utama: `Tertinggi: Tahun 2024 (Rp 189,92 Miliar)`, `Total: Rp 259,75 Miliar`, `Rata-rata: Rp 129,87 Miliar`.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -1383,6 +1425,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Format Otomatis Cerdas Tanggal dan Waktu pada Tabel dan Ekspor Excel** — SELESAI (lihat §3ak).
 - [x] **Perbaikan Indikator Statistik Utama, Pelatihan AI Sisi User & Verifikasi Menyeluruh** — SELESAI (lihat §3al).
 - [x] **Penyelarasan Konteks Percakapan Multi-Turn & Koreksi Kolom Skema Riil Tabel Rincian** — SELESAI (lihat §3am).
+- [x] **Standardisasi Satuan Finansial Eksekutif: Juta, Miliar, Triliun** — SELESAI (lihat §3an).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. *Dedicated Executive Dashboard Page*: Ditutup/dibatalkan atas arahan pengguna untuk mempertahankan identitas murni Conversational AI Assistant.
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.

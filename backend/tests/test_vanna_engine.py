@@ -6,6 +6,7 @@ from app.services.vanna_engine import (
     ekstrak_sql,
     susun_prompt_vanna,
     _format_ringkasan_otomatis,
+    _format_rupiah_human,
     jalankan_mode_vanna,
 )
 
@@ -35,6 +36,26 @@ def test_format_ringkasan_otomatis():
         [{"a": 1}, {"a": 2}, {"a": 3}],
         ["a"]
     )
+    # Uji format Rupiah singkat (Juta, Miliar, Triliun)
+    assert _format_rupiah_human(189924000000) == "Rp 189,92 Miliar"
+    assert _format_rupiah_human(310578000) == "Rp 310,58 Juta"
+    assert _format_rupiah_human(2500000000000) == "Rp 2,5 Triliun"
+    assert _format_rupiah_human(50000) == "Rp 50.000"
+
+    ringkasan_komparasi = _format_ringkasan_otomatis(
+        [
+            {"tahun": 2024, "total_transaksi": 1050, "total_pembelian": 189924000000},
+            {"tahun": 2025, "total_transaksi": 419, "total_pembelian": 75578000000},
+        ],
+        ["tahun", "total_transaksi", "total_pembelian"]
+    )
+    assert "total Rp 189,92 Miliar" in ringkasan_komparasi
+
+    ringkasan_tunggal = _format_ringkasan_otomatis(
+        [{"hpunit": 310578000}],
+        ["hpunit"]
+    )
+    assert "hpunit: Rp 310,58 Juta" in ringkasan_tunggal
 
 class _AsyncContextManager:
     def __init__(self, val):

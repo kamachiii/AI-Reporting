@@ -22,9 +22,9 @@ function formatDurasi(ms) {
 const UANG_KEYWORDS = [
   'harga', 'omzet', 'omset', 'beli', 'jual', 'biaya', 'uang', 'dpp', 'ppn',
   'nominal', 'saldo', 'total_pembelian', 'total_penjualan', 'total_nilai',
-  'hpunit', 'hpdpp', 'hpppn', 'hppbm', 'tarif', 'subtotal', 'diskon',
+  'pembelian', 'penjualan', 'hpunit', 'hpdpp', 'hpppn', 'hppbm', 'tarif', 'subtotal', 'diskon',
   'selisih', 'laba', 'rugi', 'profit', 'margin', 'pendapatan', 'piutang', 'hutang',
-  'nilai_transaksi',
+  'nilai_transaksi', 'hjakhir', 'hjunit',
 ];
 
 // Kolom yang pasti kuantitas / hitungan unit — BUKAN uang
@@ -42,6 +42,7 @@ const EKSPLISIT_UANG = [
   'jumlah_nominal', 'jumlah_uang', 'jumlah_biaya', 'jumlah_rupiah', 'jumlah_rp',
   'total_nominal', 'total_biaya', 'total_rupiah', 'total_rp', 'total_nilai',
   'nilai_transaksi', 'hpunit', 'hpdpp', 'hpppn', 'hppbm', 'hp_unit', 'harga_unit', 'harga_per_unit',
+  'total_pembelian', 'total_penjualan', 'total_omzet', 'nominal_pembelian', 'nominal_penjualan',
 ];
 
 function isKolomUang(colName) {
@@ -52,23 +53,74 @@ function isKolomUang(colName) {
   return UANG_KEYWORDS.some((k) => col.includes(k));
 }
 
-/** Bersihkan notasi ilmiah dan angka di teks ringkasan agar rapi dengan format Rp. */
+/** Format angka besar ke format Rupiah standar eksekutif (Triliun, Miliar, Juta). */
+function formatNominalSingkat(num) {
+  if (num === null || num === undefined || Number.isNaN(Number(num))) return 'Rp 0';
+  const val = Number(num);
+  const abs = Math.abs(val);
+  const prefix = val < 0 ? '-Rp ' : 'Rp ';
+
+  if (abs >= 1_000_000_000_000) {
+    const valStr = (abs / 1_000_000_000_000).toFixed(2).replace(/\.?0+$/, '').replace('.', ',');
+    return `${prefix}${valStr} Triliun`;
+  }
+  if (abs >= 1_000_000_000) {
+    const valStr = (abs / 1_000_000_000).toFixed(2).replace(/\.?0+$/, '').replace('.', ',');
+    return `${prefix}${valStr} Miliar`;
+  }
+  if (abs >= 1_000_000) {
+    const valStr = (abs / 1_000_000).toFixed(2).replace(/\.?0+$/, '').replace('.', ',');
+    return `${prefix}${valStr} Juta`;
+  }
+  return `${prefix}${new Intl.NumberFormat('id-ID').format(Math.round(abs))}`;
+}
+
+/** Bersihkan notasi ilmiah dan angka di teks ringkasan agar rapi dengan format Rupiah human-readable (Juta, Miliar, Triliun). */
 function bersihkanRingkasan(teks) {
   if (!teks) return '';
-  return teks.replace(/([a-zA-Z0-9_]+:\s*)([+-]?\d+(?:\.\d+)?[eE][+-]?\d+|[+-]?\d+)/g, (match, prefix, numStr) => {
+
+  let hasil = teks;
+
+  // 1. Tangani format prefix key: value (mis. total_penjualan: 189924000000 atau omzet: 4.5e8)
+  hasil = hasil.replace(/([a-zA-Z0-9_]+:\s*)([+-]?\d+(?:\.\d+)?[eE][+-]?\d+|[+-]?\d+)/g, (match, prefix, numStr) => {
     const num = Number(numStr);
     if (Number.isNaN(num)) return match;
     const isUang = isKolomUang(prefix);
     const isPersen = prefix.toLowerCase().includes('persen') || prefix.toLowerCase().includes('pct');
-    const formatted = new Intl.NumberFormat('id-ID', { maximumFractionDigits: 2 }).format(Math.abs(Math.round(num)));
     if (isUang) {
-      return `${prefix}${num < 0 ? '-Rp ' : 'Rp '}${formatted}`;
+      return `${prefix}${formatNominalSingkat(num)}`;
     }
     if (isPersen) {
+      const formatted = new Intl.NumberFormat('id-ID', { maximumFractionDigits: 2 }).format(Math.abs(num));
       return `${prefix}${num < 0 ? '-' : ''}${formatted}%`;
     }
+    const formatted = new Intl.NumberFormat('id-ID', { maximumFractionDigits: 2 }).format(Math.abs(Math.round(num)));
     return `${prefix}${num < 0 ? '-' : ''}${formatted}`;
   });
+
+  // 2. Tangani angka nominal besar yang didahului 'Rp' atau 'total Rp' (mis. "total Rp 189.924.000.000" -> "total Rp 189,92 Miliar")
+  hasil = hasil.replace(/(\b(?:total\s+)?Rp\s*)([0-9]{1,3}(?:\.[0-9]{3})+(?:,\d+)?|[0-9]{7,})/gi, (match, prefix, numStr) => {
+    const rawDigits = numStr.replace(/\./g, '').replace(',', '.');
+    const num = Number(rawDigits);
+    if (Number.isNaN(num) || Math.abs(num) < 1_000_000) return match;
+    const isTotal = /total/i.test(prefix);
+    return `${isTotal ? 'total ' : ''}${formatNominalSingkat(num)}`;
+  });
+
+  // 3. Tangani kolom biaya otomotif atau nominal yang tertempel suffix (mis. "225.713.358.000 nominal pembelian" -> "Rp 225,71 Miliar" atau "310.578.000 hpunit" -> "Rp 310,58 Juta")
+  hasil = hasil.replace(/([0-9]{1,3}(?:\.[0-9]{3})+(?:,\d+)?|[0-9]{7,})\s*(?:nominal\s+pembelian|nominal\s+penjualan|nominal|pembelian|penjualan|hpunit|hpdpp|hpppn|hppbm|hjunit|hjakhir)\b/gi, (match, numStr) => {
+    const rawDigits = numStr.replace(/\./g, '').replace(',', '.');
+    const num = Number(rawDigits);
+    if (Number.isNaN(num) || Math.abs(num) < 1_000_000) return match;
+    return formatNominalSingkat(num);
+  });
+
+  // 4. Ekspansi singkatan lama 'M' / 'Jt' / 'T' jika masih ada di ringkasan (mis. "Rp 452,8 M" -> "Rp 452,8 Miliar")
+  hasil = hasil.replace(/Rp\s*([0-9]+(?:,[0-9]+)?)\s*M\b/g, 'Rp $1 Miliar');
+  hasil = hasil.replace(/Rp\s*([0-9]+(?:,[0-9]+)?)\s*Jt\b/g, 'Rp $1 Juta');
+  hasil = hasil.replace(/Rp\s*([0-9]+(?:,[0-9]+)?)\s*T\b/g, 'Rp $1 Triliun');
+
+  return hasil;
 }
 
 /**

@@ -68,10 +68,15 @@ function formatAngkaAtauUang(num, colName = '') {
 
   if (isUang) {
     let formatted;
-    if (absNum >= 1000000000) {
-      formatted = `${(absNum / 1000000000).toFixed(2).replace(/\.00$/, '')} Miliar`;
+    if (absNum >= 1000000000000) {
+      const valStr = (absNum / 1000000000000).toFixed(2).replace(/\.?0+$/, '').replace('.', ',');
+      formatted = `${valStr} Triliun`;
+    } else if (absNum >= 1000000000) {
+      const valStr = (absNum / 1000000000).toFixed(2).replace(/\.?0+$/, '').replace('.', ',');
+      formatted = `${valStr} Miliar`;
     } else if (absNum >= 1000000) {
-      formatted = `${(absNum / 1000000).toFixed(2).replace(/\.00$/, '')} Juta`;
+      const valStr = (absNum / 1000000).toFixed(2).replace(/\.?0+$/, '').replace('.', ',');
+      formatted = `${valStr} Juta`;
     } else {
       formatted = new Intl.NumberFormat('id-ID').format(Math.round(absNum));
     }

@@ -91,9 +91,9 @@ def test_susun_ringkasan_eksekutif_multi():
     assert "Unit Kendaraan" in summary
     assert "Jasa Servis Bengkel" in summary
     assert "Suku Cadang" in summary
-    assert "Rp 452,8 M" in summary
-    assert "Rp 18,4 M" in summary
-    assert "Rp 26,1 M" in summary
+    assert "Rp 452,8 Miliar" in summary
+    assert "Rp 18,4 Miliar" in summary
+    assert "Rp 26,1 Miliar" in summary
 
 
 def test_cek_apakah_perlu_komparasi():

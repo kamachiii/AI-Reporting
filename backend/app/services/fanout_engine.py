@@ -236,15 +236,25 @@ def ekstrak_multi_sql(raw_llm_output: str, domain_ids: List[str]) -> Dict[str, s
 
 
 def _format_rupiah_singkat(val: float) -> str:
-    """Format angka besar ke format Rupiah singkat (Miliar / Juta)."""
-    abs_val = abs(val)
-    if abs_val >= 1_000_000_000:
-        return f"Rp {val / 1_000_000_000:.1f} M".replace(".", ",")
+    """Format angka besar ke format Rupiah singkat (Triliun / Miliar / Juta)."""
+    try:
+        num = float(val)
+    except (ValueError, TypeError):
+        return f"Rp {val}"
+
+    abs_val = abs(num)
+    if abs_val >= 1_000_000_000_000:
+        formatted = f"{num / 1_000_000_000_000:.2f}".rstrip('0').rstrip('.').replace(".", ",")
+        return f"Rp {formatted} Triliun"
+    elif abs_val >= 1_000_000_000:
+        formatted = f"{num / 1_000_000_000:.2f}".rstrip('0').rstrip('.').replace(".", ",")
+        return f"Rp {formatted} Miliar"
     elif abs_val >= 1_000_000:
-        return f"Rp {val / 1_000_000:.1f} Jt".replace(".", ",")
+        formatted = f"{num / 1_000_000:.2f}".rstrip('0').rstrip('.').replace(".", ",")
+        return f"Rp {formatted} Juta"
     elif abs_val >= 1_000:
-        return f"Rp {val:,.0f}".replace(",", ".")
-    return f"Rp {val:,.0f}"
+        return f"Rp {num:,.0f}".replace(",", ".")
+    return f"Rp {num:,.0f}"
 
 
 def _ekstrak_dua_periode(question: str) -> Optional[tuple[str, str]]:
@@ -398,10 +408,16 @@ def susun_tab_komparasi_divisi(domain_results: List[Dict[str, Any]], question: s
         raw_records = item.get("raw_records", [])
 
         # Cari index kolom omzet dan volume
+        UANG_KEYWORDS_ALL = (
+            "omzet", "omset", "harga", "nilai", "biaya", "pendapatan", "jasa", "part",
+            "nominal", "pembelian", "penjualan", "rupiah", "rp", "dpp", "ppn", "tarif",
+            "subtotal", "saldo", "diskon", "laba", "rugi", "profit", "margin", "piutang", "hutang",
+            "hpunit", "hpdpp", "hpppn", "hppbm", "hp_unit", "hjunit", "hjakhir", "totalakhir", "totalestimasibiaya"
+        )
         omzet_idx = -1
         volume_idx = -1
         for idx, col in enumerate(columns):
-            if any(u in col for u in ["omzet", "omset", "harga", "nilai", "rupiah", "biaya", "pendapatan", "total_uang", "total_penjualan", "jasa", "part"]):
+            if any(u in col for u in UANG_KEYWORDS_ALL):
                 omzet_idx = idx
             elif any(c in col for c in ["total", "count", "jumlah", "qty", "unit", "item", "pkb"]):
                 volume_idx = idx
@@ -417,7 +433,7 @@ def susun_tab_komparasi_divisi(domain_results: List[Dict[str, Any]], question: s
                     k_l = str(k).lower()
                     try:
                         num = float(v or 0)
-                        if any(u in k_l for u in ["omzet", "omset", "harga", "nilai", "biaya", "pendapatan", "jasa", "part"]):
+                        if any(u in k_l for u in UANG_KEYWORDS_ALL):
                             div_omzet += num
                         elif any(c in k_l for c in ["total", "count", "jumlah", "qty", "unit", "item", "pkb"]):
                             div_volume += int(num)
@@ -499,6 +515,25 @@ def susun_ringkasan_eksekutif_multi(domain_results: List[Dict[str, Any]], questi
             parts.append(f"{title}: (Data tidak tercatat pada periode ini)")
             continue
             
+        # Cek apakah item ini tab rincian detail transaksi (banyak baris tanpa kolom total)
+        is_rincian_item = "Rincian" in str(title) or (len(rows) > 1 and not any("total" in str(c).lower() for c in columns))
+        if is_rincian_item:
+            uang_col = next((c for c in columns if any(u in c.lower() for u in ["hpunit", "hpdpp", "hpppn", "hppbm", "hjunit", "hjakhir", "harga", "nilai", "omzet", "biaya", "total"])), None)
+            total_nominal = 0.0
+            if uang_col:
+                for r in rows:
+                    rv = r.get(uang_col) if isinstance(r, dict) else None
+                    if rv is not None:
+                        try:
+                            total_nominal += float(rv)
+                        except (ValueError, TypeError):
+                            pass
+            if total_nominal > 0:
+                parts.append(f"{title}: {len(rows)} transaksi (total {_format_rupiah_singkat(total_nominal)})")
+            else:
+                parts.append(f"{title}: {len(rows)} transaksi")
+            continue
+
         first_row = rows[0]
         stat_items = []
         if isinstance(first_row, dict):
@@ -514,11 +549,18 @@ def susun_ringkasan_eksekutif_multi(domain_results: List[Dict[str, Any]], questi
                 continue
             try:
                 num_v = float(v)
-                if any(u in k_lower for u in ["omzet", "omset", "harga", "nilai", "rupiah", "biaya", "pendapatan", "total_uang", "total_penjualan"]):
+                is_money = any(u in k_lower for u in [
+                    "hpunit", "hpdpp", "hpppn", "hppbm", "hp_unit", "hjunit", "hjakhir",
+                    "total_uang", "total_penjualan", "total_pembelian", "total_omzet",
+                    "totalestimasibiaya", "totalakhir", "nominal", "pembelian", "penjualan",
+                    "omzet", "omset", "harga", "nilai", "rupiah", "rp", "biaya", "pendapatan", "jasa", "part"
+                ])
+                if is_money:
                     if num_v > 0 or not stat_items:
                         stat_items.append(f"{_format_rupiah_singkat(num_v)}")
                 elif any(c in k_lower for c in ["total", "count", "jumlah", "qty", "unit", "item", "pkb"]):
-                    stat_items.append(f"{int(num_v):,} {k_lower.replace('total_', '').replace('_', ' ')}".replace(",", "."))
+                    clean_label = k_lower.replace('total_', '').replace('_', ' ')
+                    stat_items.append(f"{int(num_v):,} {clean_label}".replace(",", "."))
             except (ValueError, TypeError):
                 pass
                 

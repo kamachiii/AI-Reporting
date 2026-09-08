@@ -208,6 +208,28 @@ def _konversi_nilai_vanna(v):
     return _konversi_nilai(v)
 
 
+def _format_rupiah_human(val: float | int) -> str:
+    """Format nilai numerik ke format Rupiah dengan kata (Triliun, Miliar, Juta)."""
+    try:
+        num = float(val)
+    except (ValueError, TypeError):
+        return f"Rp {val}"
+
+    abs_val = abs(num)
+    if abs_val >= 1_000_000_000_000:
+        formatted = f"{num / 1_000_000_000_000:.2f}".rstrip('0').rstrip('.').replace(".", ",")
+        return f"Rp {formatted} Triliun"
+    elif abs_val >= 1_000_000_000:
+        formatted = f"{num / 1_000_000_000:.2f}".rstrip('0').rstrip('.').replace(".", ",")
+        return f"Rp {formatted} Miliar"
+    elif abs_val >= 1_000_000:
+        formatted = f"{num / 1_000_000:.2f}".rstrip('0').rstrip('.').replace(".", ",")
+        return f"Rp {formatted} Juta"
+    elif abs_val >= 1_000:
+        return f"Rp {int(num):,}".replace(",", ".")
+    return f"Rp {int(num) if num.is_integer() else num}"
+
+
 def _format_ringkasan_otomatis(rows: list, columns: list, question: str = "") -> str:
     """Ringkasan naratif deterministik otomatis tanpa panggil LLM lagi (hemat 100% token)."""
     n = len(rows)
@@ -220,10 +242,12 @@ def _format_ringkasan_otomatis(rows: list, columns: list, question: str = "") ->
         items = []
         for k, v in list(r.items())[:4]:
             val_conv = _konversi_nilai_vanna(v)
-            is_qty = any(q in k.lower() for q in ('qty', 'kuantiti', 'kuantitas', 'quantity', 'jumlah', 'unit', 'transaksi', 'count', 'pkb', 'item', 'banyak'))
-            is_money = not is_qty and any(u in k.lower() for u in ('harga', 'omzet', 'nilai', 'biaya', 'saldo', 'bayar', 'subtotal', 'diskon', 'laba', 'rugi', 'profit', 'pendapatan', 'piutang', 'hutang', 'ar_', 'ap_', 'dpp', 'ppn', 'nominal'))
+            k_lower = str(k).lower()
+            is_explicit_money = any(u in k_lower for u in ('hpunit', 'hpdpp', 'hpppn', 'hppbm', 'hp_unit', 'hjunit', 'hjakhir', 'total_uang', 'total_penjualan', 'total_pembelian', 'total_omzet', 'totalestimasibiaya', 'totalakhir'))
+            is_qty = not is_explicit_money and any(q in k_lower for q in ('qty', 'kuantiti', 'kuantitas', 'quantity', 'jumlah', 'unit', 'transaksi', 'count', 'pkb', 'item', 'banyak'))
+            is_money = is_explicit_money or (not is_qty and any(u in k_lower for u in ('harga', 'omzet', 'omset', 'nilai', 'biaya', 'saldo', 'bayar', 'subtotal', 'diskon', 'laba', 'rugi', 'profit', 'pendapatan', 'piutang', 'hutang', 'ar_', 'ap_', 'dpp', 'ppn', 'nominal')))
             if is_money and isinstance(val_conv, (int, float)):
-                items.append(f"{k}: Rp {int(val_conv):,}".replace(",", "."))
+                items.append(f"{k}: {_format_rupiah_human(val_conv)}")
             elif is_qty and isinstance(val_conv, (int, float)):
                 items.append(f"{k}: {int(val_conv):,}".replace(",", "."))
             else:
@@ -235,8 +259,8 @@ def _format_ringkasan_otomatis(rows: list, columns: list, question: str = "") ->
         parts = []
         for r in rows[:4]:
             thn = r.get("tahun")
-            col_qty = next((c for c in columns if any(k in c.lower() for k in ('transaksi', 'jumlah', 'unit', 'qty'))), None)
-            col_uang = next((c for c in columns if any(k in c.lower() for k in ('harga', 'beli', 'jual', 'total', 'nilai', 'omzet')) and c != col_qty and c.lower() != 'tahun'), None)
+            col_qty = next((c for c in columns if any(k in c.lower() for k in ('transaksi', 'jumlah', 'unit', 'qty')) and not any(m in c.lower() for m in ('hpunit', 'hjunit'))), None)
+            col_uang = next((c for c in columns if any(k in c.lower() for k in ('harga', 'beli', 'jual', 'total', 'nilai', 'omzet', 'hpunit', 'hjunit')) and c != col_qty and c.lower() != 'tahun'), None)
 
             sub = []
             if col_qty and r.get(col_qty) is not None:
@@ -244,7 +268,7 @@ def _format_ringkasan_otomatis(rows: list, columns: list, question: str = "") ->
                 sub.append(f"{int(q_val):,} transaksi".replace(",", "."))
             if col_uang and r.get(col_uang) is not None:
                 u_val = r.get(col_uang)
-                sub.append(f"total Rp {int(u_val):,}".replace(",", "."))
+                sub.append(f"total {_format_rupiah_human(u_val)}")
 
             if thn is not None:
                 if len(sub) > 1:
