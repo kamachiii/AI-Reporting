@@ -1289,6 +1289,36 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Frontend lint: **0 error** (100% lulus).
   - Frontend build: **exit code 0** (1.21s).
 
+## 3am. Penyelarasan Konteks Percakapan Multi-Turn & Koreksi Kolom Skema Riil Tabel Rincian
+
+- **Latar Belakang & Masalah (Laporan Pengguna)**:
+  1. *"data juga berbeda dari yg sebelumnyaa..":* Pengguna sebelumnya membandingkan **pembelian** unit 2025 vs 2026 (`untt_pembelian`, 2025 = Rp 75,58 Miliar). Kemudian menanyakan pertanyaan lanjutan eliptikal: *"bagaimana jika dibandingakn dengan 2024 vs 2025?"*. Karena sistem tidak meneruskan konteks topik percakapan aktif (`pembelian`), AI salah mengasumsikan pertanyaan sebagai **penjualan** (`untt_penjualan`, 2025 = Rp 69,82 Miliar), sehingga data tahun 2025 tampak berubah/inkonsisten bagi pengguna.
+  2. *"baru lohh gw tes, langsung gabisa..":* Ketika pengguna mengklik chip saran rincian terpisah, kueri rincian terpisah `untt_penjualan` gagal total di database tenant dengan pesan kesalahan: `column "hargajual" does not exist` (karena nama kolom fisik PostgreSQL di tabel dealer adalah `hjunit`). Akibatnya sistem merender: *"Tidak ada data"*.
+  3. Chip rekomendasi memunculkan anomali teks: duplikasi kata `"rincian transaksi transaksi"` serta kekosongan string tahun (`"tahun  vs  "`).
+  4. SQL Memory replay memutar ulang entri salah yang pernah tersimpan karena tidak memvalidasi kesesuaian domain (*topic mismatch*).
+
+- **Akar Masalah & Solusi Teknis**:
+  1. **Multi-Turn Context Inheritance (`vanna_engine.py`)**:
+     - Fungsi `deteksi_topik_riwayat_percakapan(core_pool, conversation_id)`: Memeriksa riwayat pesan user terdahulu dan judul sesi percakapan untuk mendeteksi topik aktif (`pembelian`, `penjualan`, `servis`, `sparepart`).
+     - Jika pengguna mengajukan pertanyaan perbandingan tanpa menyebutkan entitas (misal: *"bagaimana jika dibandingakn dengan 2024 vs 2025?"*), konteks `pembelian` otomatis disuntikkan ke RAG pgvector dan prompt LLM:
+       `Active Multi-turn Conversation Context: The user is currently discussing 'pembelian'...`.
+     - Kueri yang dihasilkan konsisten menargetkan `untt_pembelian`: 2024 (963 unit, Rp 230,28 Miliar) & 2025 (349 unit, Rp 75,58 Miliar — persis sama dengan kartu sebelumnya).
+  2. **Koreksi Kolom Skema Fisik Dealer (`vanna_engine.py` & `fanout_engine.py`)**:
+     - Memperbaiki kolom `untt_penjualan` dari `"hargajual"` menjadi kolom fisik riil `"nomor, tanggal, nomor_pesanan, norangka, hjunit, diskon, hjakhir"`.
+     - Menyelaraskan `date_col` di `fanout_engine.py` untuk tabel dealer (`tanggal` untuk `untt_penjualan`/`srvt_wo`/`prtt_penjualan`, dan `tglinvoice` untuk `untt_pembelian`).
+     - Menambahkan parameter `p1`, `p2`, dan `topic` pada kamus kembalian `cek_apakah_minta_rincian_terpisah` sehingga saran chip terisi sempurna tanpa ada kata tahun yang kosong.
+  3. **Pemberantasan Duplikasi Kata Chip Saran**:
+     - Menghilangkan frasa `transaksi transaksi`. Menggunakan `transaksi {subject}` jika subjek spesifik terdeteksi (cth: `transaksi pembelian`), atau `data transaksi` jika subjek bersifat umum.
+  4. **Topic-Aware SQL Memory Replay**:
+     - Menambahkan guard `topic_mismatch` sebelum memutar ulang `sql_memory`: jika sesi aktif membahas `pembelian` namun SQL tersimpan menargetkan `untt_penjualan`, SQL Memory replay dilewati (dianggap MISS) dan dialihkan ke pemrosesan topik aktif.
+
+- **Verifikasi & Bukti Nyata**:
+  - Test skrip `test_multi_turn_fix.py`: **4/4 passed (100%)**.
+  - Test follow-up kueri `test_followup.py`: berhasil menghasilkan SQL `untt_pembelian` 2024 vs 2025 dengan omzet Rp 230,28 M vs Rp 75,58 Miliar (konsistensi terbukti).
+  - Test rincian terpisah `test_rincian_pembelian.py`: Tab 2024 (50 baris) & Tab 2025 (50 baris) berhasil dieksekusi dan tampil lengkap di browser.
+  - Backend pytest: **562 passed** (100% lulus dalam 53.09s).
+  - Frontend lint: **0 error** (100% lulus).
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -1352,6 +1382,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Strukturisasi Knowledge Base 3S: Global KB vs Tenant Database KB & Sinkronisasi Pgvector** — SELESAI (lihat §3ai).
 - [x] **Format Otomatis Cerdas Tanggal dan Waktu pada Tabel dan Ekspor Excel** — SELESAI (lihat §3ak).
 - [x] **Perbaikan Indikator Statistik Utama, Pelatihan AI Sisi User & Verifikasi Menyeluruh** — SELESAI (lihat §3al).
+- [x] **Penyelarasan Konteks Percakapan Multi-Turn & Koreksi Kolom Skema Riil Tabel Rincian** — SELESAI (lihat §3am).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. *Dedicated Executive Dashboard Page*: Ditutup/dibatalkan atas arahan pengguna untuk mempertahankan identitas murni Conversational AI Assistant.
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.
