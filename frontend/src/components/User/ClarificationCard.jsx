@@ -32,29 +32,31 @@ export default function ClarificationCard({ answer, onAsk }) {
         )}
       </div>
 
-      {/* Pertanyaan Klarifikasi Alami */}
-      <p className="text-[15px] text-ink font-serif leading-relaxed">
-        &ldquo;{message}&rdquo;
+      {/* Pertanyaan Klarifikasi Alami (Sans-serif berorientasi keterbacaan tinggi) */}
+      <p className="text-[14px] text-ink font-sans font-normal leading-relaxed">
+        {message}
       </p>
 
       {/* Panduan Balas di Chat & Quick Action Chips */}
       {options.length > 0 && (
-        <div className="space-y-2.5 pt-2 border-t border-hairline/60">
-          <div className="text-[11px] text-muted font-sans flex items-center justify-between">
-            <span>Ketik balasan Anda di kolom pesan di bawah, atau pilih opsi cepat berikut:</span>
+        <div className="space-y-2.5 pt-3 border-t border-hairline">
+          <div className="text-xs text-muted font-sans font-medium flex items-center justify-between">
+            <span>Ketik balasan Anda di kolom pesan di bawah, atau pilih opsi cepat:</span>
           </div>
           <div className="flex flex-wrap gap-2 pt-0.5">
             {options.map((opt) => {
               const IconComp = ICON_MAP[opt.icon] || HelpCircle;
+              const displayLabel = (opt.label || '').replace(/\s*tahun\s*2025/gi, '').trim();
+              const promptVal = opt.prompt ? opt.prompt.replace(/\s*tahun\s*2025/gi, '').trim() : displayLabel;
               return (
                 <button
                   key={opt.id}
                   type="button"
-                  onClick={() => onAsk && onAsk(opt.prompt)}
+                  onClick={() => onAsk && onAsk(promptVal)}
                   className="group inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-medium border border-hairline bg-canvas hover:bg-surface-cream-strong hover:border-primary/50 text-ink hover:text-primary transition-all cursor-pointer shadow-2xs hover:shadow-xs"
                 >
                   <IconComp size={13} className="text-muted group-hover:text-primary transition-colors shrink-0" />
-                  <span>{opt.label}</span>
+                  <span>{displayLabel}</span>
                 </button>
               );
             })}
