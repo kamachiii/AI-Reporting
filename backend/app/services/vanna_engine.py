@@ -870,34 +870,54 @@ async def resolve_ai_config_for_tenant(core_pool, user_id: int, tenant_id: int) 
 
 
 def _is_general_guide_question(question: str) -> bool:
-    """Deteksi apakah pertanyaan pengguna merupakan sapaan atau permintaan panduan umum/vague data."""
+    """Deteksi apakah pertanyaan pengguna merupakan sapaan, percakapan santai, atau permintaan panduan umum."""
     if not question:
         return False
     q = question.strip().lower()
     q_clean = re.sub(r'[?!.,;:\'"]+', ' ', q).strip()
     q_clean = re.sub(r'\s+', ' ', q_clean)
 
-    # 1. Salam / Sapaan langsung
+    # 1. Normalisasi karakter huruf berulang (contoh: "alohaa" -> "aloha", "halooo" -> "halo", "heyyy" -> "hey")
+    q_normalized_words = [re.sub(r'(.)\1{1,}', r'\1', w) for w in q_clean.split()]
+    q_normalized_phrase = " ".join(q_normalized_words)
+
+    # 2. Daftar sapaan komprehensif (termasuk variasi informal, gaul, dan sapaan daerah)
     greetings = {
-        "halo", "hai", "hello", "hi", "hey", "hei", "p", "ping", "tes", "test", "testing",
+        "halo", "hai", "hello", "hi", "hey", "hei", "helo", "aloha", "alo", "hola",
+        "oi", "woi", "yo", "yoo", "p", "ping", "tes", "test", "testing",
+        "pagi", "siang", "sore", "malam",
         "selamat pagi", "selamat siang", "selamat sore", "selamat malam",
-        "assalamualaikum", "assalamu'alaikum"
+        "met pagi", "met siang", "met sore", "met malam",
+        "assalamualaikum", "assalamu'alaikum", "samlikum", "shalom",
+        "apa kabar", "gimana kabar", "kabar baik",
+        "permisi", "punten", "kulo nuwun", "sampurasun",
+        "terima kasih", "makasih", "thanks", "thx", "ok", "oke", "siap", "mantap", "keren"
     }
-    if q_clean in greetings or (len(q_clean.split()) <= 2 and q_clean.split()[0] in greetings):
+
+    raw_words = q_clean.split()
+    raw_first_word = raw_words[0] if raw_words else ""
+    norm_first_word = q_normalized_words[0] if q_normalized_words else ""
+
+    if q_clean in greetings or q_normalized_phrase in greetings:
         return True
 
-    # 2. Pertanyaan kapabilitas / menu / bantuan
+    if len(raw_words) <= 2:
+        if raw_first_word in greetings or norm_first_word in greetings:
+            return True
+
+    # 3. Pertanyaan kapabilitas / menu / bantuan
     guide_phrases = [
         "ada data apa aja", "ada data apa saja", "ada data apa", "data apa aja yang ada",
         "data apa saja yang ada", "data apa yang tersedia", "data apa saja yang tersedia",
         "bisa bantu apa", "bisa bantu apa saja", "bisa apa saja", "kamu bisa apa",
         "apa yang bisa kamu lakukan", "bagaimana cara pakai", "cara pakainya gimana",
-        "panduan penggunaan", "bantu saya", "menu apa saja", "fitur apa saja"
+        "panduan penggunaan", "bantu saya", "menu apa saja", "fitur apa saja",
+        "siapa kamu", "kamu siapa", "kenalan", "kamu robot apa"
     ]
     if any(q_clean.startswith(gp) or q_clean == gp for gp in guide_phrases):
         return True
 
-    # 3. Permintaan data yang sangat samar (vague data request tanpa spesifikasi entitas)
+    # 4. Permintaan data yang sangat samar (vague data request tanpa spesifikasi entitas)
     fillers = {
         "kasih", "minta", "berikan", "tampilkan", "bagi", "kirim", "lihat", "cek",
         "coba", "tolong", "dong", "aku", "saya", "kami", "ya", "kan", "lah", "sih",
@@ -906,6 +926,22 @@ def _is_general_guide_question(question: str) -> bool:
     words = [w for w in q_clean.split() if w not in fillers]
     if words in [["data"], ["data", "data"], ["database"], ["semua", "data"], ["seluruh", "data"], []]:
         return True
+
+    # 5. Deteksi Kueri Non-Data (Short casual message tanpa kata kunci bisnis otomotif apa pun)
+    BUSINESS_DATA_KEYWORDS = {
+        "jual", "penjualan", "beli", "pembelian", "omzet", "omset", "harga", "biaya", "uang",
+        "unit", "mobil", "tipe", "model", "stok", "stock", "servis", "service", "bengkel",
+        "pkb", "wo", "part", "parts", "sparepart", "suku cadang", "customer", "pelanggan",
+        "sales", "salesman", "mekanik", "transaksi", "faktur", "invoice", "laba", "rugi",
+        "tahun", "bulan", "periode", "terlaris", "terbanyak", "terbesar", "tertinggi", "terendah",
+        "ranking", "peringkat", "daftar", "tabel", "rincian", "detail", "bandingkan",
+        "perbandingan", "grafik", "laporan", "kenapa", "mengapa", "kapan", "siapa", "berapa",
+        "hitung", "total", "jumlah", "rekap", "analisis", "rata-rata", "2024", "2025", "2026"
+    }
+    if len(raw_words) <= 4:
+        has_business_kw = any(any(kw in w for kw in BUSINESS_DATA_KEYWORDS) for w in raw_words)
+        if not has_business_kw:
+            return True
 
     return False
 
@@ -1689,6 +1725,65 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
             sql = ekstrak_sql(raw_output)
             if not sql.lower().startswith("select") and not sql.lower().startswith("with"):
                 raise ValueError(f"AI tidak menghasilkan kueri SELECT yang valid: {raw_output[:200]}")
+
+            # 4.1 Anti-Dummy SQL Interceptor: cegah LLM "ngobrol" via query dummy tanpa FROM tabel (misal: SELECT 'Alohaa!' AS pesan)
+            sql_clean = re.sub(r'--.*', '', sql).strip()
+            has_from_table = bool(re.search(r'\bfrom\s+[a-zA-Z0-9_"]+', sql_clean, re.IGNORECASE))
+            if not has_from_table:
+                logger.info("Anti-Dummy SQL Interceptor menangkap kueri tanpa FROM tabel: %s", sql)
+                extracted_text = ""
+                str_match = re.search(r"'(.*?)'", sql, re.DOTALL)
+                if str_match:
+                    extracted_text = str_match.group(1).strip()
+                if not extracted_text:
+                    extracted_text = (
+                        "Halo! Senang bertemu dengan Anda. Silakan tanyakan data transaksi operasional dealer cabang Anda, "
+                        "seperti penjualan unit kendaraan, jasa servis bengkel, atau suku cadang."
+                    )
+                extracted_text = _bersihkan_emoji_teks(extracted_text)
+                durasi_ms = int((time.monotonic() - t0) * 1000)
+                response = {
+                    "source": "conversational",
+                    "confidence": "A",
+                    "status": "success",
+                    "question": question,
+                    "ringkasan": extracted_text,
+                    "sql": "",
+                    "params": [],
+                    "columns": [],
+                    "rows": [],
+                    "row_count": 0,
+                    "truncated": False,
+                    "duration_ms": durasi_ms,
+                    "memory_id": None,
+                    "saran": [
+                        "Tampilkan 5 model mobil dengan penjualan tertinggi",
+                        "Berapa total pendapatan servis bengkel tahun 2025?",
+                        "Daftar 10 customer dengan transaksi pembelian unit terbesar",
+                        "Tren volume transaksi servis bulanan sepanjang tahun 2024",
+                    ],
+                    "metode": "conversational_guide",
+                    "is_conversational_text": True,
+                    "allow_explain": False,
+                }
+                conv_id = await ambil_atau_buat_conversation(
+                    core_pool, user_id, branch_code, question, conversation_id=conversation_id
+                )
+                response["conversation_id"] = conv_id
+                await simpan_pesan(core_pool, conv_id, "user", question)
+                await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
+                await tulis_audit(
+                    core_pool,
+                    user_id=user_id,
+                    branch_code=branch_code,
+                    prompt_text=question,
+                    ai_json_filter={"mode": "conversational_intercepted", "raw_sql": sql},
+                    generated_sql="",
+                    execution_time_ms=durasi_ms,
+                    status="success",
+                    error_message=None,
+                )
+                return response
 
             # 5. Eksekusi ke Database Tenant (Timeout 15 detik + 1x Auto Self-Repair)
             db_rows = None

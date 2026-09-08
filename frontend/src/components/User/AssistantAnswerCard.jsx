@@ -806,33 +806,60 @@ export default function AssistantAnswerCard({
     });
   };
 
+  const isDummySqlResponse = Boolean(
+    activeColumns.length === 1 &&
+    (String(activeColumns[0]).toLowerCase() === 'pesan' || String(activeColumns[0]).toLowerCase() === 'message' || String(activeColumns[0]).toLowerCase() === 'greeting')
+  );
+
   const isConversational = Boolean(
     answer?.is_conversational_text ||
     answer?.metode === 'conversational_explanation' ||
-    answer?.metode === 'conversational_guide'
+    answer?.metode === 'conversational_guide' ||
+    isDummySqlResponse
   );
 
   if (isConversational) {
-    const isGuide = answer?.metode === 'conversational_guide';
-    const textContent = bersihkanRingkasan(answer.ringkasan || '');
+    const isGuide = answer?.metode === 'conversational_guide' || isDummySqlResponse;
+    let rawText = answer.ringkasan || '';
+    const dummyMatch = rawText.match(/Ditemukan \d+ baris hasil \(pesan:\s*(.*?)\)\.?$/i);
+    if (dummyMatch && dummyMatch[1]) {
+      rawText = dummyMatch[1];
+    } else if (isDummySqlResponse && activeRows?.[0]) {
+      const firstVal = Array.isArray(activeRows[0]) ? activeRows[0][0] : Object.values(activeRows[0])[0];
+      if (firstVal && typeof firstVal === 'string') {
+        rawText = firstVal;
+      }
+    }
+    // Bersihkan karakter emoji
+    rawText = rawText.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim();
+    const textContent = bersihkanRingkasan(rawText);
     const rawParagraphs = textContent.split('\n\n').filter(Boolean);
+
+    const conversationalSaran = (Array.isArray(answer.saran) && answer.saran.length > 0)
+      ? answer.saran
+      : [
+          'Tampilkan 5 model mobil dengan penjualan tertinggi',
+          'Berapa total pendapatan servis bengkel tahun 2025?',
+          'Daftar 10 customer dengan transaksi pembelian unit terbesar',
+          'Tren volume transaksi servis bulanan sepanjang tahun 2024',
+        ];
 
     return (
       <div className="bg-canvas border border-hairline rounded-lg shadow-2xs p-4 sm:p-5 space-y-4">
         {/* Header Badge */}
-        <div className="flex items-center justify-between gap-3 border-b border-hairline pb-3 flex-wrap">
+        <div className="flex items-center justify-between gap-3 border-b border-hairline pb-2.5 flex-wrap">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-surface-card border border-hairline text-ink text-xs font-medium">
-              {isGuide ? <Compass size={12} className="text-primary" /> : <Lightbulb size={12} className="text-primary" />}
-              <span>{isGuide ? 'Panduan Asisten AI' : 'Penjelasan Data Percakapan'}</span>
+              <Compass size={13} className="text-primary" />
+              <span>Asisten Dealer</span>
             </span>
             <span className="text-[11px] text-muted font-mono bg-surface-card px-2 py-0.5 rounded-md border border-hairline">
-              Modus: <strong className="text-ink">{isGuide ? 'Panduan Sistem' : 'Eksplanatori'}</strong>
+              {isGuide ? 'Panduan Modul' : 'Penjelasan Konteks'}
             </span>
           </div>
 
           <div className="flex items-center gap-2.5 text-xs text-muted font-mono">
-            {durasi && <span className="tabular-nums font-mono">{durasi}</span>}
+            {durasi && !answer.sql && <span className="tabular-nums font-mono">{durasi}</span>}
           </div>
         </div>
 
@@ -886,14 +913,14 @@ export default function AssistantAnswerCard({
         </div>
 
         {/* Suggestion Chips */}
-        {Array.isArray(answer.saran) && answer.saran.length > 0 && onAsk && (
+        {conversationalSaran.length > 0 && onAsk && (
           <div className="pt-3 border-t border-hairline space-y-2">
             <p className="text-[11px] text-muted flex items-center gap-1.5 font-medium">
               <Compass size={12} className="text-primary" />
               <span>{isGuide ? 'Rekomendasi pertanyaan siap klik:' : 'Pertanyaan eksplorasi lanjutan:'}</span>
             </p>
             <div className="flex items-center gap-2 flex-wrap">
-              {answer.saran.map((s, idx) => (
+              {conversationalSaran.map((s, idx) => (
                 <button
                   key={`${s}-${idx}`}
                   type="button"

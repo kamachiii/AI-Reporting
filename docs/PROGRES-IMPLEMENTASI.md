@@ -1604,6 +1604,40 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
     - **Turn 2** (*"siapa 5 customer terbesar"*): menghasilkan tabel 5 customer teratas dari database.
     - **Turn 3** (*"loh data apa ini?"*): menghasilkan teks naratif manusiawi yang menjelaskan tabel customer di atas tanpa mengeksekusi SQL atau melempar tabel baru.
 
+### 3au. Anti-Dummy SQL Interceptor, Normalisasi Variasi Sapaan Cepat (<200ms) & Hardening Balon Obrolan Alami (2026-09-08)
+
+- **Masalah Riil Pengguna (Kasus Kueri *"alohaa"* ID #338)**:
+  1. *Waktu Tunggu 58,8 Detik*: Saat pengguna mengetik sapaan informal *"alohaa"*, filter kata kaku sebelumnya gagal mendeteksi huruf berulang `aa`, sehingga input dilempar ke Text-to-SQL.
+  2. *LLM Mengarang Dummy SQL*: LLM Vanna yang dipaksa menghasilkan SQL mengarang kueri fiktif:
+     `SELECT 'Alohaa! 👋 Silakan ajukan pertanyaan Anda tentang data penjualan, stok unit, BPKB, STNK, atau transaksi DMS otomotif.' AS pesan;`
+  3. *Tampilan Laporan Frankenstein yang Cacat*:
+     Sistem mengeksekusi SQL tersebut dan membungkus sapaan satu baris menjadi laporan eksekutif lengkap dengan badge *"Hasil Basis Data Terverifikasi"*, hitungan *1 baris*, tombol *"Unduh Excel"*, *"Salin Tabel"*, tabel 1 baris ber-kolom `Pesan`, emoji `👋`, dan tombol training rating.
+
+- **Solusi Tiga Lapis (Triple-Shield Architecture)**:
+  1. **Layer 1: Normalisasi Karakter Berulang & Sapaan Komprehensif (`vanna_engine.py`)**:
+     - `_is_general_guide_question`: Menambahkan algoritma kompresi karakter berulang `re.sub(r'(.)\1{1,}', r'\1', w)` sehingga variasi kasual seperti `alohaa` -> `aloha`, `halooo` -> `halo`, `heyyy` -> `hey`, `woiii` -> `woi` terdeteksi seketika.
+     - Memperluas kamus sapaan informal, kedaerahan, dan sapaan waktu (`aloha`, `alo`, `oi`, `pagi`, `siang`, `met pagi`, `apa kabar`, dsb.).
+     - Menambahkan deteksi pesan pendek non-data (jika $\le 4$ kata dan tidak memuat entitas/metrik bisnis otomotif, otomatis diperlakukan sebagai obrolan).
+     - **Hasil**: Waktu respon kueri *"alohaa"* terpangkas dari **58,8 detik** menjadi **0,203 detik** (<100ms internal processing).
+  2. **Layer 2: Anti-Dummy SQL Interceptor (`vanna_engine.py`)**:
+     - Jika LLM suatu saat tetap menghasilkan kueri tanpa klausul `FROM <table>` (misal: `SELECT '...' AS pesan`), engine backend secara tegas **mencegat kueri sebelum dieksekusi**.
+     - Teks pesan di-ekstrak, dibersihkan dari emoji, dan dikonversi langsung menjadi respon percakapan alami (`is_conversational_text: True`, `sql: ""`, `rows: []`, `columns: []`).
+     - Mencegah kueri dummy masuk ke database dan mencegah tercatatnya cache kotor di `sql_memory`.
+  3. **Layer 3: Hardening Balon Obrolan Alami Frontend (`AssistantAnswerCard.jsx`)**:
+     - Menambahkan proteksi `isDummySqlResponse`: jika kolom tunggal bernilai `pesan` atau `message`, antarmuka otomatis dialihkan ke render balon chat asisten alami.
+     - Header kartu percakapan diselaraskan menjadi badge berwibawa: `[Compass] Asisten Dealer • Panduan Modul` (tanpa tombol Excel, tanpa tabel, tanpa toggle SQL).
+     - Menambahkan fallback 4 suggestion chips default agar pengguna selalu memiliki rekomendasi pertanyaan siap klik.
+  4. **Pembersihan Data Eksisting**:
+     - Menghapus entri `sql_memory` ID #80 dan men-sanitasi pesan #338 di database menjadi bubble percakapan bersih.
+
+- **Hasil Verifikasi**:
+  - Backend compile: `compileall app` lolos 100% (exit code 0).
+  - Backend pytest: **572 passed in 37.33s** (100% lulus).
+  - Frontend lint: `npm run lint` lolos (**0 errors**).
+  - Frontend build: `npm run build` lolos (exit code 0, 1.25s).
+  - Live Alohaa Test (`test_live_alohaa.py`): Berhasil dalam **0,203 detik** (0 baris, 0 SQL, 0 emoji).
+  - Anti-Dummy SQL Interceptor Test (`test_anti_dummy_sql.py`): Berhasil mencegat kueri dummy fiktif 100% lulus.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai

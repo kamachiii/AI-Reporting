@@ -285,7 +285,10 @@ def test_rekonsiliasi_slot_percakapan():
 def test_is_general_guide_question():
     from app.services.vanna_engine import _is_general_guide_question
 
-    # Sapaan & kueri panduan umum
+    # Sapaan & kueri panduan umum (termasuk variasi alohaa & informal)
+    assert _is_general_guide_question("alohaa") is True
+    assert _is_general_guide_question("aloha") is True
+    assert _is_general_guide_question("halooo") is True
     assert _is_general_guide_question("kasih aku dong data data") is True
     assert _is_general_guide_question("minta data dong") is True
     assert _is_general_guide_question("tampilkan data") is True
@@ -294,6 +297,8 @@ def test_is_general_guide_question():
     assert _is_general_guide_question("halo") is True
     assert _is_general_guide_question("hai min") is True
     assert _is_general_guide_question("selamat pagi") is True
+    assert _is_general_guide_question("oi") is True
+    assert _is_general_guide_question("apa kabar") is True
 
     # Kueri data spesifik tidak boleh tertangkap
     assert _is_general_guide_question("tampilkan 5 mobil terlaris") is False
