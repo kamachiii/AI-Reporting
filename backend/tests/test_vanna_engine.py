@@ -359,6 +359,9 @@ def test_tangani_kueri_panduan_umum_dan_eksplanatori():
     assert res_guide["rows"] == []
     assert "Penjualan Unit" in res_guide["ringkasan"]
     assert "Jasa Servis Bengkel" in res_guide["ringkasan"]
+    assert "untt_penjualan" not in res_guide["ringkasan"]
+    assert "srvt_wo" not in res_guide["ringkasan"]
+    assert "glbm_customer" not in res_guide["ringkasan"]
     assert len(res_guide["saran"]) >= 3
 
     # 2. Test Mode Eksplanatori ketika ada tabel untt_penjualan sebelumnya
@@ -381,6 +384,8 @@ def test_tangani_kueri_panduan_umum_dan_eksplanatori():
     assert res_explan["rows"] == []
     assert "Penjualan Unit Kendaraan" in res_explan["ringkasan"]
     assert "nama_model" in res_explan["ringkasan"]
+    assert "untt_penjualan" not in res_explan["ringkasan"]
+    assert "tabel `" not in res_explan["ringkasan"]
     assert len(res_explan["saran"]) >= 3
 
     # 3. Test Mode Eksplanatori ketika tidak ada pesan sebelumnya (sesi baru)
@@ -389,7 +394,7 @@ def test_tangani_kueri_panduan_umum_dan_eksplanatori():
         tangani_kueri_eksplanatori(pool_empty, 99, "ini data apa?", 1, "TST_01", 0.0)
     )
     assert res_explan_empty["is_conversational_text"] is True
-    assert "Tidak ada data atau tabel sebelumnya" in res_explan_empty["ringkasan"]
+    assert "Belum ada data tabel" in res_explan_empty["ringkasan"]
 
 
 

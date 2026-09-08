@@ -989,15 +989,16 @@ async def tangani_kueri_panduan_umum(
     user_id: int,
     branch_code: str,
     t0: float,
+    ai_config: dict | None = None,
 ) -> dict:
     """Mode Panduan Orientasi: memberikan ringkasan modul data operasional dealer yang tersedia."""
     ringkasan = (
         "Selamat datang di Asisten AI Database Dealer. Platform ini terhubung langsung ke database operasional cabang Anda.\n\n"
         "Berikut adalah modul data utama yang siap Anda analisis:\n\n"
-        "1. Penjualan Unit Kendaraan (tabel untt_penjualan): Volume penjualan, tren omzet bulanan dan tahunan, ranking model mobil terlaris, rincian faktur penjualan, dan performa salesman.\n"
-        "2. Jasa Servis Bengkel (tabel srvt_wo & srvt_wodetail): Volume Work Order (PKB), pendapatan jasa perawatan, jenis pekerjaan servis, dan histori servis kendaraan.\n"
+        "1. Penjualan Unit Kendaraan: Volume penjualan, tren omzet bulanan dan tahunan, ranking model mobil terlaris, rincian faktur penjualan, dan performa salesman.\n"
+        "2. Jasa Servis Bengkel: Volume Work Order (PKB), pendapatan jasa perawatan, jenis pekerjaan servis, dan histori servis kendaraan.\n"
         "3. Suku Cadang & Sparepart: Pergerakan persediaan suku cadang, penjualan counter/part shop, dan omzet suku cadang.\n"
-        "4. Pelanggan & Customer (tabel glbm_customer): Profil pelanggan terdaftar, histori pembelian unit, dan persebaran wilayah pelanggan.\n\n"
+        "4. Pelanggan & Customer: Profil pelanggan terdaftar, histori pembelian unit, dan persebaran wilayah pelanggan.\n\n"
         "Silakan ketik pertanyaan spesifik yang ingin Anda ketahui atau klik salah satu rekomendasi pertanyaan di bawah ini."
     )
     saran = [
@@ -1033,12 +1034,19 @@ async def tangani_kueri_panduan_umum(
     await simpan_pesan(core_pool, conv_id, "user", question)
     await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
 
+    ai_provider = ai_config.get("provider") if ai_config else None
+    ai_model = ai_config.get("model") if ai_config else None
     await tulis_audit(
         core_pool,
         user_id=user_id,
         branch_code=branch_code,
         prompt_text=question,
-        ai_json_filter={"mode": "conversational_guide"},
+        ai_json_filter={
+            "provider": ai_provider,
+            "model": ai_model,
+            "category": "conversational_guide",
+            "mode": "conversational_guide",
+        },
         generated_sql="",
         execution_time_ms=durasi_ms,
         status="success",
@@ -1054,6 +1062,7 @@ async def tangani_kueri_eksplanatori(
     user_id: int,
     branch_code: str,
     t0: float,
+    ai_config: dict | None = None,
 ) -> dict:
     """Mode Percakapan Eksplanatori: menjelaskan secara naratif hasil kueri/tabel sebelumnya."""
     durasi_ms = int((time.monotonic() - t0) * 1000)
@@ -1070,53 +1079,56 @@ async def tangani_kueri_eksplanatori(
         "customer": "Nama pelanggan yang bertransaksi",
         "nama_model": "Model atau tipe varian unit kendaraan",
         "model": "Model atau tipe kendaraan",
-        "tipe": "Tipe spesifik kendaraan",
-        "warna": "Warna unit kendaraan",
-        "hjakhir": "Total nilai nominal transaksi setelah memperhitungkan diskon dan pajak (Rupiah)",
-        "hargajual": "Harga jual bruto kendaraan sebelum diskon",
-        "hargabeli": "Harga beli / harga pokok perolehan kendaraan",
-        "total_omzet": "Akumulasi total nilai penjualan bruto (Rupiah)",
-        "total_penjualan": "Total nominal penjualan unit kendaraan (Rupiah)",
-        "total_unit": "Jumlah kuantitas fisik kendaraan yang ditransaksikan",
-        "total_unit_terjual": "Jumlah fisik unit mobil yang terjual",
-        "wo_no": "Nomor Work Order / Perintah Kerja bengkel",
-        "nopolisi": "Nomor plat polisi kendaraan pelanggan yang diservis",
-        "total_jasa": "Biaya jasa pengerjaan perawatan atau perbaikan oleh bengkel (Rupiah)",
-        "total_part": "Nilai suku cadang yang digunakan dalam servis bengkel (Rupiah)",
-        "nama_foreman": "Nama kepala regu teknisi yang mengawasi pengerjaan servis",
-        "penerima": "Service Advisor yang menerima kendaraan di bengkel",
-        "tahun": "Tahun transaksi",
-        "bulan": "Bulan transaksi",
+        "tipe": "Varian atau tipe spesifikasi kendaraan",
+        "total_unit": "Kuantitas atau jumlah unit mobil terjual",
+        "hjakhir": "Nilai uang atau nominal omzet bersih transaksi (Rupiah)",
+        "total_omzet": "Total akumulasi nilai penjualan kotor/bersih",
+        "omzet": "Total nominal pendapatan penjualan",
+        "hargajual": "Harga transaksi sebelum potongan diskon",
+        "diskon": "Nilai potongan harga yang diberikan ke pelanggan",
+        "uangmuka": "Uang muka atau Down Payment (DP) transaksi",
+        "nama_salesman": "Nama tenaga penjual (sales) penanggung jawab transaksi",
+        "salesman": "Tenaga penjual (sales) yang menangani",
+        "pekerjaan": "Deskripsi atau nama paket perbaikan/servis yang dikerjakan bengkel",
+        "nama_jasa": "Uraian nama pekerjaan jasa servis kendaraan",
+        "biaya_jasa": "Nominal tarif pekerjaan jasa bengkel",
+        "nama_part": "Nama suku cadang atau komponen sparepart kendaraan",
+        "kode_part": "Kode katalog resmi suku cadang",
+        "qty": "Jumlah unit/kuantitas barang yang dikeluarkan atau terjual",
+        "total_harga": "Total nominal biaya atau harga transaksi",
     }
 
-    prev_row = None
-    if conversation_id:
-        prev_row = await core_pool.fetchrow(
-            "SELECT content FROM messages WHERE conversation_id = $1 AND role = 'assistant' ORDER BY id DESC LIMIT 1",
-            conversation_id,
-        )
+    # Ambil pesan asisten terakhir dari percakapan aktif
+    prev_asst_msg = await core_pool.fetchrow(
+        "SELECT content FROM messages "
+        "WHERE conversation_id = $1 AND role = 'assistant' "
+        "ORDER BY id DESC LIMIT 1",
+        conversation_id,
+    )
 
-    if not prev_row:
+    ringkasan = ""
+    saran = []
+
+    if not prev_asst_msg or not prev_asst_msg["content"]:
         ringkasan = (
-            "Tidak ada data atau tabel sebelumnya yang aktif dalam sesi percakapan ini. "
-            "Silakan ajukan pertanyaan data tertentu, misalnya: 'Tampilkan 5 model mobil terlaris' "
-            "atau 'Berapa total pendapatan servis bengkel tahun 2025?'."
+            "Belum ada data tabel atau laporan transaksi sebelumnya dalam sesi percakapan ini. "
+            "Untuk memeriksa data operasional nyata, Anda dapat meminta data penjualan unit, "
+            "servis bengkel, atau suku cadang."
         )
         saran = [
             "Tampilkan 5 model mobil dengan penjualan tertinggi",
             "Berapa total pendapatan servis bengkel tahun 2025?",
-            "Daftar 10 customer dengan transaksi pembelian unit terbesar",
+            "Tren volume transaksi servis bulanan sepanjang tahun 2024",
         ]
     else:
-        prev_data = {}
         try:
-            prev_data = json.loads(prev_row["content"])
+            prev_data = json.loads(prev_asst_msg["content"])
         except Exception:
-            pass
+            prev_data = {}
 
-        if prev_data.get("metode") == "conversational_guide" or (not prev_data.get("sql") and not prev_data.get("rows")):
+        if not isinstance(prev_data, dict) or not prev_data.get("rows"):
             ringkasan = (
-                "Pesan sebelumnya merupakan ringkasan panduan modul data yang tersedia di dealer Anda. "
+                "Pesan sebelumnya tidak memuat data tabel transaksi untuk dijelaskan. "
                 "Untuk memeriksa data operasional nyata, Anda dapat meminta data penjualan unit, "
                 "servis bengkel, atau suku cadang."
             )
@@ -1133,10 +1145,8 @@ async def tangani_kueri_eksplanatori(
             row_count = prev_data.get("row_count", len(rows))
 
             modul_nama = "Operasional Dealer"
-            modul_tabel = ""
             if "untt_penjualan" in sql or any(k in prev_q.lower() for k in ["jual", "penjualan", "mobil", "unit"]):
                 modul_nama = "Penjualan Unit Kendaraan"
-                modul_tabel = "untt_penjualan"
                 saran = [
                     "Berapa total omzet penjualan unit per bulan di tahun 2025?",
                     "Tampilkan 5 customer dengan pembelian unit terbanyak",
@@ -1144,7 +1154,6 @@ async def tangani_kueri_eksplanatori(
                 ]
             elif "srvt_wo" in sql or "srvt_wodetail" in sql or any(k in prev_q.lower() for k in ["servis", "service", "bengkel", "pkb", "wo"]):
                 modul_nama = "Jasa Servis & Perawatan Bengkel"
-                modul_tabel = "srvt_wo & srvt_wodetail"
                 saran = [
                     "Berapa total pendapatan jasa servis bengkel tahun 2025?",
                     "Tampilkan 5 jenis pekerjaan servis yang paling sering dikerjakan",
@@ -1152,7 +1161,6 @@ async def tangani_kueri_eksplanatori(
                 ]
             elif "untt_pembelian" in sql or any(k in prev_q.lower() for k in ["beli", "pembelian", "kulakan", "pengadaan"]):
                 modul_nama = "Pembelian Unit Kendaraan"
-                modul_tabel = "untt_pembelian"
                 saran = [
                     "Berapa total unit yang dibeli dealer tahun 2025?",
                     "Daftar supplier unit kendaraan utama",
@@ -1160,7 +1168,6 @@ async def tangani_kueri_eksplanatori(
                 ]
             elif "srvm_" in sql or any(k in prev_q.lower() for k in ["sparepart", "suku cadang", "part"]):
                 modul_nama = "Suku Cadang & Sparepart"
-                modul_tabel = "srvm_parts"
                 saran = [
                     "Tampilkan 10 suku cadang dengan perputaran tercepat",
                     "Berapa total nilai penjualan suku cadang tahun 2025?",
@@ -1168,7 +1175,6 @@ async def tangani_kueri_eksplanatori(
                 ]
             elif "glbm_customer" in sql or any(k in prev_q.lower() for k in ["customer", "pelanggan"]):
                 modul_nama = "Master Data Pelanggan / Customer"
-                modul_tabel = "glbm_customer"
                 saran = [
                     "Daftar pelanggan aktif dengan transaksi terbanyak",
                     "Persebaran pelanggan berdasarkan kota",
@@ -1185,9 +1191,8 @@ async def tangani_kueri_eksplanatori(
             paragraf = []
             baris_info = f"{row_count} baris data" if row_count > 0 else "data"
             paragraf.append(
-                f"Tabel di atas menampilkan {baris_info} dari modul **{modul_nama}**"
-                + (f" (tabel `{modul_tabel}`)" if modul_tabel else "")
-                + f", yang dihasilkan untuk menjawab pertanyaan: *\"{prev_q}\"*."
+                f"Tabel di atas menampilkan {baris_info} dari modul **{modul_nama}**, "
+                f"yang dihasilkan untuk menjawab pertanyaan: *\"{prev_q}\"*."
             )
 
             kolom_penjelas = []
@@ -1233,12 +1238,19 @@ async def tangani_kueri_eksplanatori(
     await simpan_pesan(core_pool, conv_id, "user", question)
     await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
 
+    ai_provider = ai_config.get("provider") if ai_config else None
+    ai_model = ai_config.get("model") if ai_config else None
     await tulis_audit(
         core_pool,
         user_id=user_id,
         branch_code=branch_code,
         prompt_text=question,
-        ai_json_filter={"mode": "conversational_explanation"},
+        ai_json_filter={
+            "provider": ai_provider,
+            "model": ai_model,
+            "category": "conversational_explanation",
+            "mode": "conversational_explanation",
+        },
         generated_sql="",
         execution_time_ms=durasi_ms,
         status="success",
@@ -1259,6 +1271,12 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
         tenant = await resolve_tenant(core_pool, branch_code)
         tenant_id = tenant.get("tenant_id") or tenant.get("id")
 
+        ai_config = None
+        try:
+            ai_config = await resolve_ai_config(core_pool, user.get("username", ""), branch_code)
+        except Exception as e_cfg:
+            logger.warning("Gagal resolve ai_config di awal jalankan_mode_vanna: %s", e_cfg)
+
         # Conversational Slot-Filling: Rekonsiliasi jawaban klarifikasi pengguna jika ada sesi aktif
         question, is_reconciled = await rekonsiliasi_slot_percakapan(core_pool, conversation_id, question)
         q_norm = normalisasi_pertanyaan(question)
@@ -1272,13 +1290,13 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
         # 0.0. Mode Percakapan Eksplanatori ("loh data apa ini?", "maksud tabel ini apa?")
         if _is_explanatory_question(question):
             return await tangani_kueri_eksplanatori(
-                core_pool, conversation_id, question, user_id, branch_code, t0
+                core_pool, conversation_id, question, user_id, branch_code, t0, ai_config=ai_config
             )
 
         # 0.0.1. Mode Panduan Orientasi Modul Dealer ("kasih aku dong data data", "ada data apa aja", "halo")
         if _is_general_guide_question(question):
             return await tangani_kueri_panduan_umum(
-                core_pool, conversation_id, question, user_id, branch_code, t0
+                core_pool, conversation_id, question, user_id, branch_code, t0, ai_config=ai_config
             )
 
         # 0.1. Cek Pertanyaan Eksplanatori Keterbatasan Data / Cut-off Tanggal (0 Panggilan LLM, 100% Akurat)
@@ -1360,7 +1378,13 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                     user_id=user_id,
                     branch_code=branch_code,
                     prompt_text=question,
-                    ai_json_filter={"mode": "clarification", "reason": "data_cutoff_no_year"},
+                    ai_json_filter={
+                        "provider": ai_config.get("provider") if ai_config else None,
+                        "model": ai_config.get("model") if ai_config else None,
+                        "category": "clarification",
+                        "mode": "clarification",
+                        "reason": "data_cutoff_no_year",
+                    },
                     generated_sql="",
                     execution_time_ms=durasi_ms,
                     status="success",
@@ -1403,7 +1427,13 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                 user_id=user_id,
                 branch_code=branch_code,
                 prompt_text=question,
-                ai_json_filter={"mode": "data_cutoff_audit", "target_year": cutoff_info["target_year"]},
+                ai_json_filter={
+                    "provider": ai_config.get("provider") if ai_config else None,
+                    "model": ai_config.get("model") if ai_config else None,
+                    "category": "data_query",
+                    "mode": "data_cutoff_audit",
+                    "target_year": cutoff_info["target_year"],
+                },
                 generated_sql=res_cutoff["sql"],
                 execution_time_ms=durasi_ms,
                 status="success",
@@ -1483,12 +1513,20 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                     await simpan_pesan(core_pool, conv_id, "user", question)
                     await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
 
+                    ai_provider = ai_config.get("provider") if ai_config else None
+                    ai_model = ai_config.get("model") if ai_config else None
                     await tulis_audit(
                         core_pool,
                         user_id=user_id,
                         branch_code=branch_code,
                         prompt_text=question,
-                        ai_json_filter={"mode": "vanna", "replay_memory": True},
+                        ai_json_filter={
+                            "provider": ai_provider,
+                            "model": ai_model,
+                            "category": "data_query",
+                            "mode": "vanna",
+                            "replay_memory": True,
+                        },
                         generated_sql=sql_mem,
                         execution_time_ms=durasi_ms,
                         status="success",
@@ -1650,12 +1688,20 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                 await simpan_pesan(core_pool, conv_id, "user", question)
                 await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
 
+                ai_provider = ai_config.get("provider") if ai_config else None
+                ai_model = ai_config.get("model") if ai_config else None
                 await tulis_audit(
                     core_pool,
                     user_id=user_id,
                     branch_code=branch_code,
                     prompt_text=question,
-                    ai_json_filter={"mode": "vanna_fanout", "category": fanout_info["category"]},
+                    ai_json_filter={
+                        "provider": ai_provider,
+                        "model": ai_model,
+                        "category": "data_query",
+                        "mode": "vanna_fanout",
+                        "fanout_category": fanout_info["category"],
+                    },
                     generated_sql=default_tab["sql"],
                     execution_time_ms=durasi_ms,
                     status="success",
@@ -1694,12 +1740,20 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
             await simpan_pesan(core_pool, conv_id, "user", question)
             await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
 
+            ai_provider = ai_config.get("provider") if ai_config else None
+            ai_model = ai_config.get("model") if ai_config else None
             await tulis_audit(
                 core_pool,
                 user_id=user_id,
                 branch_code=branch_code,
                 prompt_text=question,
-                ai_json_filter={"mode": "vanna", "clarification": ambiguitas["category"]},
+                ai_json_filter={
+                    "provider": ai_provider,
+                    "model": ai_model,
+                    "category": "clarification",
+                    "mode": "clarification",
+                    "clarification": ambiguitas["category"],
+                },
                 generated_sql=None,
                 execution_time_ms=durasi_ms,
                 status="clarification",
@@ -1772,12 +1826,20 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                 response["conversation_id"] = conv_id
                 await simpan_pesan(core_pool, conv_id, "user", question)
                 await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
+                ai_provider = ai_config.get("provider") if ai_config else None
+                ai_model = ai_config.get("model") if ai_config else None
                 await tulis_audit(
                     core_pool,
                     user_id=user_id,
                     branch_code=branch_code,
                     prompt_text=question,
-                    ai_json_filter={"mode": "conversational_intercepted", "raw_sql": sql},
+                    ai_json_filter={
+                        "provider": ai_provider,
+                        "model": ai_model,
+                        "category": "conversational_guide",
+                        "mode": "conversational_intercepted",
+                        "raw_sql": sql,
+                    },
                     generated_sql="",
                     execution_time_ms=durasi_ms,
                     status="success",
@@ -1905,12 +1967,19 @@ Berikan ringkasan naratif eksekutif singkat (2-3 kalimat) dalam bahasa Indonesia
         await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
 
         # Simpan audit log sukses
+        ai_provider = ai_config.get("provider") if ('ai_config' in locals() and ai_config) else None
+        ai_model = ai_config.get("model") if ('ai_config' in locals() and ai_config) else None
         await tulis_audit(
             core_pool,
             user_id=user_id,
             branch_code=branch_code,
             prompt_text=question,
-            ai_json_filter={"mode": "vanna", "model": ai_config.get("model")},
+            ai_json_filter={
+                "provider": ai_provider,
+                "model": ai_model,
+                "category": "data_query",
+                "mode": "vanna",
+            },
             generated_sql=sql,
             execution_time_ms=durasi_ms,
             status="success",
@@ -1922,16 +1991,36 @@ Berikan ringkasan naratif eksekutif singkat (2-3 kalimat) dalam bahasa Indonesia
     except Exception as e:
         durasi_ms = int((time.monotonic() - t0) * 1000)
         logger.error("Error Mode Vanna: %s", e)
+        err_msg = str(e)
+        err_lower = err_msg.lower()
+        if any(k in err_lower for k in ["429", "tpm", "503", "quota", "rate limit", "overloaded", "groq", "openai", "bad gateway", "ai belum dikonfigurasi", "service unavailable", "connection error"]):
+            cat = "provider_error"
+            err_type = "PROVIDER_API_ERROR"
+        elif any(k in err_lower for k in ["syntax error", "does not exist", "column", "relation", "canceling statement", "timeout"]):
+            cat = "sql_error"
+            err_type = "POSTGRES_SQL_ERROR"
+        else:
+            cat = "error"
+            err_type = "GENERAL_ERROR"
+
+        ai_provider = ai_config.get("provider") if ('ai_config' in locals() and ai_config) else None
+        ai_model = ai_config.get("model") if ('ai_config' in locals() and ai_config) else None
         await tulis_audit(
             core_pool,
             user_id=user_id,
             branch_code=branch_code,
             prompt_text=question,
-            ai_json_filter={"mode": "vanna"},
+            ai_json_filter={
+                "provider": ai_provider,
+                "model": ai_model,
+                "category": cat,
+                "error_type": err_type,
+                "mode": "vanna",
+            },
             generated_sql=sql if 'sql' in locals() else None,
             execution_time_ms=durasi_ms,
             status="error",
-            error_message=str(e)
+            error_message=err_msg[:500]
         )
         raise
 

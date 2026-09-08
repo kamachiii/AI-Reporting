@@ -1,6 +1,6 @@
 import { Component, useMemo, useState } from 'react';
 import {
-  AlertTriangle, Check, ChevronDown, ChevronRight, ChevronLeft, Database, Layers, X,
+  AlertTriangle, Check, ChevronRight, ChevronLeft, Database, Layers, X,
   Loader2, GraduationCap, TrendingUp, TrendingDown, Lightbulb, Compass, Award,
   Car, Wrench, Package, FileSpreadsheet, ArrowUpDown, ArrowUp, ArrowDown, Copy, Search,
   SplitSquareVertical, Calendar, ArrowRight, Table2,
@@ -541,7 +541,6 @@ export default function AssistantAnswerCard({
   onConfirm,
   onReject,
 }) {
-  const [tampilSql, setTampilSql] = useState(false);
   const [userTabPreference, setUserTabPreference] = useState(null); // 'table' | 'chart' | null
   const [chartType, setChartType] = useState('bar'); // 'bar' | 'line'
   const [penjelasan, setPenjelasan] = useState(null);
@@ -556,7 +555,6 @@ export default function AssistantAnswerCard({
   const [tablePage, setTablePage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [isCopied, setIsCopied] = useState(false);
-  const [isSqlCopied, setIsSqlCopied] = useState(false);
 
   // Filter hanya tab yang memiliki data nyata (>0 baris)
   const validTabs = useMemo(() => {
@@ -1466,55 +1464,6 @@ export default function AssistantAnswerCard({
           </p>
         )}
 
-        {/* SQL Window Card - Signature Claude Artifact Aesthetic */}
-        <div className="pt-1">
-          <button
-            type="button"
-            onClick={() => setTampilSql((v) => !v)}
-            className="inline-flex items-center gap-1.5 text-xs text-muted hover:text-ink transition-colors cursor-pointer"
-            aria-expanded={tampilSql}
-          >
-            {tampilSql ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-            <span className="font-mono text-[11px]">
-              {isMultiTab ? `SQL Query (${currentTab.title || 'Tab Aktif'})` : 'SQL Query'}
-            </span>
-          </button>
-          {tampilSql && (
-            <div className="mt-2 bg-surface-dark border border-hairline/20 rounded-lg overflow-hidden shadow-xs">
-              {/* Window Header */}
-              <div className="flex items-center justify-between px-3 py-2 bg-surface-dark-soft border-b border-hairline/15 text-xs">
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f57]/80 inline-block" />
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#febc2e]/80 inline-block" />
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#28c840]/80 inline-block" />
-                  </div>
-                  <span className="font-mono text-[11px] text-muted-soft pl-1.5 border-l border-hairline/20">
-                    query.sql
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(activeSql);
-                    setIsSqlCopied(true);
-                    toast.success('SQL disalin ke clipboard');
-                    setTimeout(() => setIsSqlCopied(false), 2000);
-                  }}
-                  className="inline-flex items-center gap-1 text-[11px] font-mono text-muted-soft hover:text-on-dark transition-colors cursor-pointer"
-                  title="Salin SQL"
-                >
-                  {isSqlCopied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
-                  <span>{isSqlCopied ? 'Tersalin' : 'Salin'}</span>
-                </button>
-              </div>
-              {/* Code Body */}
-              <pre className="p-3.5 text-[11px] leading-relaxed font-mono text-[#f5f4ef] overflow-x-auto whitespace-pre-wrap break-words bg-surface-dark">
-                {activeSql}
-              </pre>
-            </div>
-          )}
-        </div>
 
         {/* Meta info: baris + durasi + jam */}
         <p className="text-[11px] text-muted">

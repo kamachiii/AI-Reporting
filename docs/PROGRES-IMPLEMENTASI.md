@@ -1636,7 +1636,44 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Frontend lint: `npm run lint` lolos (**0 errors**).
   - Frontend build: `npm run build` lolos (exit code 0, 1.25s).
   - Live Alohaa Test (`test_live_alohaa.py`): Berhasil dalam **0,203 detik** (0 baris, 0 SQL, 0 emoji).
-  - Anti-Dummy SQL Interceptor Test (`test_anti_dummy_sql.py`): Berhasil mencegat kueri dummy fiktif 100% lulus.
+### 3av. Eliminasi Bocoran Teknis Database Sisi User & Audit Log Telemetri AI Terstruktur (Provider, Model, Kategori, Diagnosa Error) (2026-09-08)
+
+- **Latar Belakang & Masukan Pengguna**:
+  1. *Kebocoran Teknis Database Internal*: Asisten AI sebelumnya menyebutkan nama tabel operasional mentah (seperti `untt_penjualan`, `srvt_wo`, `glbm_customer`) pada pesan panduan dan eksplanatori data. Pengguna menegaskan bahwa nama tabel fisik internal adalah urusan dapur yang sama sekali tidak boleh diketahui pengguna umum.
+  2. *Tampilan Query SQL di Sisi Pengguna*: Antarmuka chat pengguna sebelumnya menampilkan accordion/window kode SQL (`> SQL Query` / `query.sql`). Pengguna meminta agar kueri SQL dihilangkan dari antarmuka obrolan pengguna biasa karena itu adalah komponen internal dapur.
+  3. *Audit Log Kurang Informatif & Tanpa Pelacakan Provider/Model*: Administrator kesulitan mengidentifikasi provider AI apa (Groq, OpenAI, B.AI, Ollama) dan model apa yang digunakan saat user melakukan interaksi atau ketika terjadi kegagalan. Kategori log juga belum dibedakan secara tegas, dan ketika terjadi error tidak ada penjelasan diagnostik visual yang ramah admin.
+
+- **Solusi & Rekayasa Arsitektur**:
+  1. **Eliminasi Total Nama Tabel Fisik dari Teks Asisten (`vanna_engine.py`)**:
+     - Menghapus penyebutan `(tabel untt_penjualan)`, `(tabel srvt_wo & srvt_wodetail)`, `(tabel glbm_customer)`, dan `(tabel \`{modul_tabel}\`)` dari seluruh template balasan asisten.
+     - Menggantikannya dengan sebutan modul bisnis yang alami dan profesional (*Modul Penjualan Unit Kendaraan*, *Modul Servis & Perawatan Bengkel*, *Modul Suku Cadang & Sparepart*, *Modul Master Data Pelanggan*).
+     - Menambahkan assertion unit test ketat di `test_vanna_engine.py` untuk memastikan string nama tabel fisik tidak pernah lolos ke teks respon asisten.
+  2. **Penghapusan Tampilan Query SQL di Sisi User (`AssistantAnswerCard.jsx`)**:
+     - Menghapus seluruh blok UI `SQL Window Card` (tombol toggle accordion SQL, tabs `query.sql`, dan preformatted code block) dari kartu respon pengguna.
+     - Antarmuka chat pengguna kini tampil bersih, berfokus murni pada jawaban analitis, ringkasan eksekutif, tabel data interaktif, dan grafik visual.
+  3. **Metadata Provider AI, Model, & Kategori Terstruktur pada Audit Log (`vanna_engine.py` & `chat_pipeline.py`)**:
+     - Melakukan resolusi dini konfigurasi AI (`ai_config`) di awal alur pipeline obrolan.
+     - Seluruh pencatatan audit log (`tulis_audit`) kini menyimpan metadata terstruktur ke dalam kolom JSONB `ai_json_filter`:
+       - `provider`: nama provider aktif (misal `groq`, `openai`, `b.ai`, `ollama`).
+       - `model`: model yang digunakan (misal `llama-3.3-70b-versatile`, `gpt-4o`).
+       - `category`: klasifikasi jenis interaksi (`data_query`, `conversational_guide`, `conversational_explanation`, `clarification`, `provider_error`, `sql_error`, `verifier_rejected`).
+       - `error_type`: klasifikasi teknis kegagalan.
+       - `error_diagnosa`: diagnosa berbahasa Indonesia yang jelas untuk admin (misal penjelasan mengenai TPM rate limit HTTP 429 atau 503 service unavailable).
+  4. **Pembaruan Endpoint API Audit Logs Admin (`audit_logs.py`)**:
+     - Ekstraksi `ai_provider`, `ai_model`, dan `log_category` menggunakan ekspresi JSONB PostgreSQL (`al.ai_json_filter->>'provider'`).
+     - Parameter filter kueri baru: `category` dan `provider` untuk menyaring log secara instan.
+     - Whitelist sorting baru untuk kolom `ai_provider` dan `log_category`.
+     - Parameter pencarian global `q` kini juga mencocokkan nama provider dan nama model AI.
+  5. **Peningkatan UI Audit Log Admin (`AuditLogTab.jsx`)**:
+     - Menambahkan filter dropdown interaktif untuk **Kategori Log** dan **Provider AI**.
+     - Kolom tabel baru: **AI Provider & Model** (dengan badge warna korporat: oranye Groq, emerald OpenAI, sky B.AI, ungu Ollama) dan **Kategori** (dengan badge penanda fungsionalitas).
+     - Panel Detail Baris (Expanded View): Menampilkan card **Telemetri AI & Kategori** terstruktur dan **Box Diagnosa Masalah / Error Detail** visual ber-ikon `AlertTriangle` yang langsung memandu administrator mengenai penyebab error dan solusinya.
+
+- **Hasil Verifikasi**:
+  - Backend compile: `compileall app` lolos 100% (exit code 0).
+  - Backend tests: `pytest tests/ -q` lolos 100% (**574 passed in 39.09s**, +2 tes baru di `test_audit_logs_sort.py` dan asersi anti-leak di `test_vanna_engine.py`).
+  - Frontend lint: `npm run lint` lolos (**0 errors**).
+  - Frontend build: `npm run build` lolos (exit code 0, 1.25s).
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
@@ -1709,6 +1746,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Isolasi Sesi Percakapan Riwayat Chat & Klarifikasi Konteks Pertanyaan Keterbatasan Data** — SELESAI (lihat §3ar).
 - [x] **Arsitektur Conversational Slot-Filling & Natural Clarification Flow** — SELESAI (lihat §3as).
 - [x] **Arsitektur Multi-Mode Percakapan: Mode Data, Penjelasan Eksplanatori, dan Panduan Orientasi Sistem** — SELESAI (lihat §3at).
+- [x] **Eliminasi Bocoran Teknis Database Sisi User & Audit Log Telemetri AI Terstruktur (Provider, Model, Kategori, Diagnosa Error)** — SELESAI (lihat §3av).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. *Dedicated Executive Dashboard Page*: Ditutup/dibatalkan atas arahan pengguna untuk mempertahankan identitas murni Conversational AI Assistant.
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.

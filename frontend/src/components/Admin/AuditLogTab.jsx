@@ -5,7 +5,7 @@ import { notify } from '../../utils/notification';
 import {
   RefreshCw, Search, CheckCircle, XCircle, Clock, X, ChevronDown,
   Activity, Zap, Gauge, BarChart3, FileText, Settings2, ShieldCheck,
-  Building2
+  Building2, Database, Compass, Lightbulb, AlertTriangle
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, Legend
@@ -50,6 +50,8 @@ export default function AuditLogTab() {
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [providerFilter, setProviderFilter] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [dateFrom, setDateFrom] = useState('');
@@ -81,6 +83,8 @@ export default function AuditLogTab() {
     try {
       const params = { page: p, per_page: PAGE_SIZE };
       if (statusFilter) params.status = statusFilter;
+      if (categoryFilter) params.category = categoryFilter;
+      if (providerFilter) params.provider = providerFilter;
       if (dateFrom) params.date_from = dateFrom;
       if (dateTo) params.date_to = dateTo;
       if (searchQuery) params.q = searchQuery;
@@ -95,7 +99,7 @@ export default function AuditLogTab() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [page, statusFilter, dateFrom, dateTo, searchQuery, sortConfig]);
+  }, [page, statusFilter, categoryFilter, providerFilter, dateFrom, dateTo, searchQuery, sortConfig]);
 
   useEffect(() => {
     let ignore = false;
@@ -126,6 +130,8 @@ export default function AuditLogTab() {
       try {
         const params = { page, per_page: PAGE_SIZE };
         if (statusFilter) params.status = statusFilter;
+        if (categoryFilter) params.category = categoryFilter;
+        if (providerFilter) params.provider = providerFilter;
         if (dateFrom) params.date_from = dateFrom;
         if (dateTo) params.date_to = dateTo;
         if (searchQuery) params.q = searchQuery;
@@ -146,7 +152,7 @@ export default function AuditLogTab() {
       }
     })();
     return () => { ignore = true; };
-  }, [page, statusFilter, dateFrom, dateTo, searchQuery, sortConfig]);
+  }, [page, statusFilter, categoryFilter, providerFilter, dateFrom, dateTo, searchQuery, sortConfig]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -201,15 +207,100 @@ export default function AuditLogTab() {
   };
 
   const statusBadge = (s) => {
-    const base = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium';
+    const base = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap';
     if (s === 'success') return <span className={`${base} bg-emerald-50 text-emerald-700 border border-emerald-200`}><CheckCircle size={12} /> Sukses</span>;
     if (s === 'rejected') return <span className={`${base} bg-amber-50 text-amber-700 border border-amber-200`}><ShieldCheck size={12} /> Ditolak Verifier</span>;
     if (s === 'error' || s === 'failed') return <span className={`${base} bg-rose-50 text-rose-700 border border-rose-200`}><XCircle size={12} /> Gagal</span>;
     return <span className={`${base} bg-surface-soft text-muted`}><Clock size={12} /> {s || 'Unknown'}</span>;
   };
 
+  const categoryBadge = (cat) => {
+    const base = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium whitespace-nowrap';
+    switch (cat) {
+      case 'data_query':
+        return <span className={`${base} bg-blue-50 text-blue-700 border border-blue-200`}><Database size={11} /> Kueri Data</span>;
+      case 'conversational_guide':
+        return <span className={`${base} bg-purple-50 text-purple-700 border border-purple-200`}><Compass size={11} /> Panduan Modul</span>;
+      case 'conversational_explanation':
+        return <span className={`${base} bg-indigo-50 text-indigo-700 border border-indigo-200`}><FileText size={11} /> Penjelasan Konteks</span>;
+      case 'clarification':
+        return <span className={`${base} bg-amber-50 text-amber-700 border border-amber-200`}><Lightbulb size={11} /> Klarifikasi</span>;
+      case 'provider_error':
+        return <span className={`${base} bg-rose-50 text-rose-700 border border-rose-200 font-semibold`}><Zap size={11} /> Error Provider AI</span>;
+      case 'sql_error':
+        return <span className={`${base} bg-rose-50 text-rose-700 border border-rose-200 font-semibold`}><XCircle size={11} /> Error SQL/DB</span>;
+      case 'verifier_rejected':
+        return <span className={`${base} bg-orange-50 text-orange-700 border border-orange-200`}><ShieldCheck size={11} /> Ditolak Verifier</span>;
+      default:
+        return <span className={`${base} bg-surface-soft text-muted`}><Activity size={11} /> {cat || 'Kueri Data'}</span>;
+    }
+  };
+
+  const providerBadge = (provider, model) => {
+    if (!provider && !model) {
+      return <span className="text-muted text-xs">-</span>;
+    }
+    return (
+      <div className="flex flex-col min-w-[100px]">
+        <span className="font-medium text-xs text-ink capitalize flex items-center gap-1">
+          <Zap size={11} className="text-primary shrink-0" />
+          {provider || 'AI Provider'}
+        </span>
+        {model && (
+          <span className="font-mono text-[10px] text-muted truncate max-w-[130px]" title={model}>
+            {model}
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  const diagnosaError = (errMsg) => {
+    if (!errMsg) return null;
+    const lower = errMsg.toLowerCase();
+    let tipe = 'Kendala Sistem Umum';
+    let rekomendasi = 'Periksa log trace internal untuk investigasi lebih lanjut.';
+    let severity = 'border-rose-200 bg-rose-50/70 text-rose-800';
+
+    if (lower.includes('429') || lower.includes('tpm') || lower.includes('rate limit') || lower.includes('quota')) {
+      tipe = 'Batas Kecepatan / Token Terlampaui (TPM Rate Limit 429)';
+      rekomendasi = 'Batas Token Per Menit (TPM) dari provider AI (seperti Groq / OpenAI) telah tercapai. Harap tunggu beberapa detik atau alihkan ke provider/model dengan batas kuota lebih besar.';
+      severity = 'border-amber-200 bg-amber-50/70 text-amber-800';
+    } else if (lower.includes('503') || lower.includes('service unavailable') || lower.includes('overloaded')) {
+      tipe = 'Server AI Tidak Tersedia (HTTP 503 Service Unavailable)';
+      rekomendasi = 'Server AI penyedia sedang down, sibuk, atau mengalami overload sementara. Coba lagi dalam beberapa saat.';
+      severity = 'border-rose-200 bg-rose-50/70 text-rose-800';
+    } else if (lower.includes('canceling statement') || lower.includes('timeout')) {
+      tipe = 'Query Timeout (>15 detik)';
+      rekomendasi = 'Kueri kalkulasi database membutuhkan waktu terlalu lama. Sarankan user untuk mempersempit rentang tanggal atau filter cabang.';
+      severity = 'border-amber-200 bg-amber-50/70 text-amber-800';
+    } else if (lower.includes('syntax error') || lower.includes('does not exist') || lower.includes('relation') || lower.includes('column')) {
+      tipe = 'Kesalahan Skema Database / SQL Error';
+      rekomendasi = 'Tabel atau kolom yang dituju tidak ditemukan pada database cabang operasional. Periksa definisi skema di Knowledge Base.';
+    } else if (lower.includes('verifier') || lower.includes('ditolak')) {
+      tipe = 'Diblokir oleh Verifier Keamanan';
+      rekomendasi = 'Kueri dicegah demi keamanan (misal: perintah non-SELECT, akses tabel dilarang, atau filter tidak sah).';
+      severity = 'border-orange-200 bg-orange-50/70 text-orange-800';
+    }
+
+    return (
+      <div className={`p-3 rounded-lg border text-xs space-y-1 ${severity}`}>
+        <div className="flex items-center gap-1.5 font-semibold">
+          <AlertTriangle size={13} className="shrink-0" />
+          <span>Diagnosa Masalah: {tipe}</span>
+        </div>
+        <p className="text-[11px] leading-relaxed opacity-90">{rekomendasi}</p>
+        <div className="pt-1 text-[11px] font-mono whitespace-pre-wrap break-all border-t border-current/20 mt-1.5 opacity-80">
+          Pesan Asli: {errMsg}
+        </div>
+      </div>
+    );
+  };
+
   const clearFilters = () => {
     setStatusFilter('');
+    setCategoryFilter('');
+    setProviderFilter('');
     setDateFrom('');
     setDateTo('');
     setSearchTerm('');
@@ -218,7 +309,7 @@ export default function AuditLogTab() {
     setLoading(true);
   };
 
-  const hasFilters = statusFilter || dateFrom || dateTo || searchTerm;
+  const hasFilters = statusFilter || categoryFilter || providerFilter || dateFrom || dateTo || searchTerm;
 
   return (
     <div className="space-y-6">
@@ -609,11 +700,41 @@ export default function AuditLogTab() {
               value={statusFilter}
               onChange={(e) => { setStatusFilter(e.target.value); setPage(1); setLoading(true); }}
               className="px-2.5 py-1.5 text-xs bg-canvas border border-hairline rounded-md focus:outline-none text-ink"
+              aria-label="Filter Status"
             >
               <option value="">Semua Status</option>
               <option value="success">Sukses</option>
               <option value="rejected">Ditolak Verifier</option>
               <option value="error">Gagal</option>
+            </select>
+
+            <select
+              value={categoryFilter}
+              onChange={(e) => { setCategoryFilter(e.target.value); setPage(1); setLoading(true); }}
+              className="px-2.5 py-1.5 text-xs bg-canvas border border-hairline rounded-md focus:outline-none text-ink"
+              aria-label="Filter Kategori Log"
+            >
+              <option value="">Semua Kategori</option>
+              <option value="data_query">Kueri Data</option>
+              <option value="conversational_guide">Panduan Modul</option>
+              <option value="conversational_explanation">Penjelasan Konteks</option>
+              <option value="clarification">Klarifikasi Parameter</option>
+              <option value="provider_error">Error Provider AI</option>
+              <option value="sql_error">Error Database/SQL</option>
+              <option value="verifier_rejected">Ditolak Verifier</option>
+            </select>
+
+            <select
+              value={providerFilter}
+              onChange={(e) => { setProviderFilter(e.target.value); setPage(1); setLoading(true); }}
+              className="px-2.5 py-1.5 text-xs bg-canvas border border-hairline rounded-md focus:outline-none text-ink"
+              aria-label="Filter Provider AI"
+            >
+              <option value="">Semua Provider</option>
+              <option value="groq">Groq</option>
+              <option value="openai">OpenAI</option>
+              <option value="bai">B.AI</option>
+              <option value="ollama">Ollama</option>
             </select>
 
             <div className="flex items-center gap-1.5">
@@ -649,7 +770,7 @@ export default function AuditLogTab() {
           {/* Tabel Log */}
           <div className="border border-hairline rounded-xl overflow-hidden bg-white shadow-xs">
             {loading ? (
-              <SkeletonTable rows={8} columns={5} />
+              <SkeletonTable rows={8} columns={9} />
             ) : logs.length === 0 ? (
               <EmptyState
                 title={hasFilters ? 'Tidak ada log yang cocok' : 'Belum ada aktivitas'}
@@ -671,6 +792,12 @@ export default function AuditLogTab() {
                         Cabang <SortIcon columnKey="branch_code" sortConfig={sortConfig} />
                       </th>
                       <th className="px-3 py-2.5">Pertanyaan</th>
+                      <th className="px-3 py-2.5 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('ai_provider')}>
+                        AI Provider <SortIcon columnKey="ai_provider" sortConfig={sortConfig} />
+                      </th>
+                      <th className="px-3 py-2.5 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('log_category')}>
+                        Kategori <SortIcon columnKey="log_category" sortConfig={sortConfig} />
+                      </th>
                       <th className="px-3 py-2.5 cursor-pointer select-none hover:text-ink" onClick={() => handleSort('execution_time_ms')}>
                         Durasi <SortIcon columnKey="execution_time_ms" sortConfig={sortConfig} />
                       </th>
@@ -700,10 +827,16 @@ export default function AuditLogTab() {
                           <td className="px-3 py-2.5 whitespace-nowrap text-muted text-xs">{formatDate(l.created_at)}</td>
                           <td className="px-3 py-2.5 text-xs font-medium">{l.user_name || `#${l.user_id}` || '-'}</td>
                           <td className="px-3 py-2.5 font-mono text-xs">{l.branch_code}</td>
-                          <td className="px-3 py-2.5 max-w-[280px]">
+                          <td className="px-3 py-2.5 max-w-[220px]">
                             <div className="truncate text-xs" title={l.prompt_text || ''}>
                               {l.prompt_text || '-'}
                             </div>
+                          </td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">
+                            {providerBadge(l.ai_provider, l.ai_model)}
+                          </td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">
+                            {categoryBadge(l.log_category)}
                           </td>
                           <td className="px-3 py-2.5 whitespace-nowrap text-muted text-xs">
                             {l.execution_time_ms != null ? `${l.execution_time_ms} ms` : '-'}
@@ -714,30 +847,56 @@ export default function AuditLogTab() {
                         {/* Expandable Detail */}
                         {expandedId === l.id && (
                           <tr className="bg-slate-50/80">
-                            <td colSpan={7} className="px-4 py-3">
+                            <td colSpan={9} className="px-4 py-3">
                               <div className="grid grid-cols-1 gap-2.5 text-xs">
+                                {/* Header Telemetri AI */}
+                                <div className="flex items-center gap-3 p-2.5 rounded-lg bg-white border border-hairline flex-wrap">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-muted text-[11px] font-medium">Provider:</span>
+                                    <span className="font-semibold text-ink uppercase text-[11px] px-1.5 py-0.5 rounded bg-surface-soft border border-hairline">
+                                      {l.ai_provider || 'Default / Belum Tercatat'}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-muted text-[11px] font-medium">Model:</span>
+                                    <span className="font-mono text-ink text-[11px] px-1.5 py-0.5 rounded bg-surface-soft border border-hairline">
+                                      {l.ai_model || '-'}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-muted text-[11px] font-medium">Kategori Log:</span>
+                                    {categoryBadge(l.log_category)}
+                                  </div>
+                                  <div className="flex items-center gap-1.5 ml-auto text-muted text-[11px]">
+                                    <span>Durasi Eksekusi: <strong className="text-ink">{l.execution_time_ms != null ? `${l.execution_time_ms} ms` : '-'}</strong></span>
+                                  </div>
+                                </div>
+
+                                {/* Box Diagnosa Masalah jika ada error */}
+                                {l.error_message && (
+                                  <div>
+                                    {diagnosaError(l.error_message)}
+                                  </div>
+                                )}
+
                                 <div>
                                   <span className="text-muted uppercase tracking-wide font-medium">Pertanyaan Pengguna</span>
-                                  <p className="text-body whitespace-pre-wrap mt-0.5">{l.prompt_text || '-'}</p>
+                                  <p className="text-body whitespace-pre-wrap mt-0.5 font-medium">{l.prompt_text || '-'}</p>
                                 </div>
-                                <div>
-                                  <span className="text-muted uppercase tracking-wide font-medium">SQL yang Dihasilkan</span>
-                                  <pre className="mt-0.5 bg-white border border-hairline rounded-md p-2.5 overflow-x-auto font-mono text-[11px] text-body whitespace-pre-wrap">
-                                    {l.generated_sql || '-'}
-                                  </pre>
-                                </div>
+                                {l.generated_sql && (
+                                  <div>
+                                    <span className="text-muted uppercase tracking-wide font-medium">SQL yang Dihasilkan</span>
+                                    <pre className="mt-0.5 bg-white border border-hairline rounded-md p-2.5 overflow-x-auto font-mono text-[11px] text-body whitespace-pre-wrap">
+                                      {l.generated_sql}
+                                    </pre>
+                                  </div>
+                                )}
                                 <div>
                                   <span className="text-muted uppercase tracking-wide font-medium">Rencana JSON & Jejak Trace</span>
                                   <pre className="mt-0.5 bg-white border border-hairline rounded-md p-2.5 overflow-x-auto font-mono text-[11px] text-body max-h-40 overflow-y-auto">
                                     {prettyJson(l.ai_json_filter)}
                                   </pre>
                                 </div>
-                                {l.error_message && (
-                                  <div>
-                                    <span className="text-muted uppercase tracking-wide font-medium">Pesan Error / Alasan Penolakan</span>
-                                    <p className="text-rose-600 mt-0.5 whitespace-pre-wrap font-medium">{l.error_message}</p>
-                                  </div>
-                                )}
                                 <p className="text-muted text-[11px] pt-1">
                                   Diajukan oleh {l.user_name || (l.user_id ? `#${l.user_id}` : 'Anonim')} · Cabang {l.branch_code} · {l.execution_time_ms != null ? `${l.execution_time_ms} ms` : 'durasi -'} · {formatDate(l.created_at)}
                                 </p>

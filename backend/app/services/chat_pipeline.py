@@ -941,6 +941,9 @@ async def proses_pertanyaan(core_pool, tenant_pool_manager, user: dict,
             "tables_effective": jumlah_tabel_efektif,
         }
         catatan_ai = {
+            "provider": ai_config.get("provider") if ('ai_config' in locals() and ai_config) else None,
+            "model": ai_config.get("model") if ('ai_config' in locals() and ai_config) else None,
+            "category": "data_query",
             "plan": plan_terpakai,
             "tables_effective": jumlah_tabel_efektif,
             "trace": decision_trace,
@@ -957,25 +960,50 @@ async def proses_pertanyaan(core_pool, tenant_pool_manager, user: dict,
     except VerifierDitolak as e:
         await _audit_gagal(core_pool, user, branch_code, question,
                            plan_terpakai, sql_final, durasi_ms,
-                           _STATUS_REJECTED, e.verdict.get("reason"))
+                           _STATUS_REJECTED, e.verdict.get("reason"),
+                           ai_config=ai_config if 'ai_config' in locals() else None)
         raise
     except Exception as e:
         pesan = f"{type(e).__name__}: {e}"[:500]
         await _audit_gagal(core_pool, user, branch_code, question,
                            plan_terpakai, sql_final, durasi_ms,
-                           _STATUS_ERROR, pesan)
+                           _STATUS_ERROR, pesan,
+                           ai_config=ai_config if 'ai_config' in locals() else None)
         raise
 
 
 async def _audit_gagal(core_pool, user, branch_code, question, plan, sql,
-                       durasi_ms, status, pesan) -> None:
+                       durasi_ms, status, pesan, ai_config=None) -> None:
     """Audit kegagalan — TIDAK PERNAH menelan exception asli (kegagalan
     audit hanya di-log; error domain tetap sampai ke router)."""
     try:
+        filter_dict = {}
+        if isinstance(plan, dict):
+            filter_dict = dict(plan)
+        elif plan is not None:
+            filter_dict = {"plan": plan}
+
+        filter_dict["provider"] = ai_config.get("provider") if ai_config else None
+        filter_dict["model"] = ai_config.get("model") if ai_config else None
+        if status == _STATUS_REJECTED:
+            filter_dict["category"] = "verifier_rejected"
+            filter_dict["error_type"] = "VERIFIER_REJECTED"
+        else:
+            pesan_lower = (pesan or "").lower()
+            if any(k in pesan_lower for k in ["429", "tpm", "503", "quota", "rate limit", "overloaded", "groq", "openai", "bad gateway", "ai belum dikonfigurasi", "service unavailable", "connection error"]):
+                filter_dict["category"] = "provider_error"
+                filter_dict["error_type"] = "PROVIDER_API_ERROR"
+            elif any(k in pesan_lower for k in ["syntax error", "does not exist", "column", "relation", "canceling statement", "timeout"]):
+                filter_dict["category"] = "sql_error"
+                filter_dict["error_type"] = "POSTGRES_SQL_ERROR"
+            else:
+                filter_dict["category"] = "error"
+                filter_dict["error_type"] = "GENERAL_ERROR"
+
         await tulis_audit(
             core_pool, user_id=(user or {}).get("user_id"),
             branch_code=branch_code, prompt_text=question,
-            ai_json_filter=plan, generated_sql=sql,
+            ai_json_filter=filter_dict, generated_sql=sql,
             execution_time_ms=durasi_ms, status=status,
             error_message=pesan[:500])
     except Exception as audit_err:

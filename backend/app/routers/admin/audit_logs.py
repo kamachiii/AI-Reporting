@@ -14,6 +14,8 @@ async def get_audit_logs(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=10, le=100),
     status: str | None = Query(None),
+    category: str | None = Query(None),
+    provider: str | None = Query(None),
     q: str | None = Query(None),
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
@@ -37,13 +39,23 @@ async def get_audit_logs(
         where.append(f"al.status = ${idx}")
         params.append(status)
         idx += 1
+    if category:
+        where.append(f"COALESCE(al.ai_json_filter->>'category', al.ai_json_filter->>'mode', 'data_query') = ${idx}")
+        params.append(category.strip())
+        idx += 1
+    if provider:
+        where.append(f"al.ai_json_filter->>'provider' ILIKE ${idx}")
+        params.append(f"%{provider.strip()}%")
+        idx += 1
     if q:
         # escape wildcard LIKE agar %/_ dari user tidak mengubah semantik pencarian
         escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         like = f"%{escaped}%"
         where.append(
             f"(u.username ILIKE ${idx} OR al.branch_code ILIKE ${idx} "
-            f"OR COALESCE(al.prompt_text, '') ILIKE ${idx})"
+            f"OR COALESCE(al.prompt_text, '') ILIKE ${idx} "
+            f"OR COALESCE(al.ai_json_filter->>'provider', '') ILIKE ${idx} "
+            f"OR COALESCE(al.ai_json_filter->>'model', '') ILIKE ${idx})"
         )
         params.append(like)
         idx += 1
@@ -71,6 +83,8 @@ async def get_audit_logs(
         "branch_code": "al.branch_code",
         "execution_time_ms": "al.execution_time_ms",
         "status": "al.status",
+        "ai_provider": "al.ai_json_filter->>'provider'",
+        "log_category": "COALESCE(al.ai_json_filter->>'category', al.ai_json_filter->>'mode', 'data_query')",
     }
     col_sql = allowed_sorts.get(sort_by)
     if not col_sql:
@@ -83,7 +97,10 @@ async def get_audit_logs(
         SELECT al.id, al.user_id, al.branch_code, al.prompt_text,
                al.ai_json_filter, al.generated_sql, al.execution_time_ms,
                al.status, al.error_message, al.created_at,
-               u.username AS user_name
+               u.username AS user_name,
+               COALESCE(al.ai_json_filter->>'provider', '') AS ai_provider,
+               COALESCE(al.ai_json_filter->>'model', '') AS ai_model,
+               COALESCE(al.ai_json_filter->>'category', al.ai_json_filter->>'mode', 'data_query') AS log_category
         FROM audit_logs al
         LEFT JOIN users u ON u.id = al.user_id
         {where_clause}
