@@ -399,10 +399,44 @@ def cek_apakah_perlu_komparasi(question: str) -> bool:
     return any(re.search(p, q_lower) for p in patterns)
 
 
+def _is_column_qty(col_name: str) -> bool:
+    """Deteksi apakah kolom merepresentasikan kuantitas / volume / banyaknya unit."""
+    c = str(col_name).lower().strip()
+    if c in ("tahun", "bulan", "periode", "tgl", "tanggal", "divisi", "norangka", "nomor", "nomor_wo", "nomor_pesanan"):
+        return False
+    # Jika mengandung kata-kata penanda harga/mata uang/omzet, BUKAN kolom kuantitas
+    if any(m in c for m in ("harga", "omzet", "omset", "nominal", "rupiah", "rp", "nilai", "biaya", "pendapatan", "dpp", "ppn", "hjunit", "hpunit", "hjakhir", "totalestimasibiaya")):
+        return False
+    if any(q in c for q in ("volume", "qty", "kuantiti", "kuantitas", "banyak", "count", "pkb", "transaksi", "item")):
+        return True
+    if "jumlah" in c:
+        return True
+    if "unit" in c and not any(m in c for m in ("hp", "hj", "harga", "omzet", "nilai", "rupiah", "rp", "biaya")):
+        return True
+    return False
+
+
+def _is_column_money(col_name: str) -> bool:
+    """Deteksi apakah kolom merepresentasikan nilai nominal uang / mata uang Rupiah."""
+    c = str(col_name).lower().strip()
+    if c in ("tahun", "bulan", "periode", "tgl", "tanggal", "divisi", "norangka", "nomor", "nomor_wo", "nomor_pesanan"):
+        return False
+    if _is_column_qty(col_name):
+        return False
+    return any(u in c for u in (
+        "omzet", "omset", "harga", "nilai", "biaya", "pendapatan", "jasa",
+        "nominal", "rupiah", "rp", "dpp", "ppn", "tarif",
+        "subtotal", "saldo", "diskon", "laba", "rugi", "profit", "margin", "piutang", "hutang",
+        "hpunit", "hpdpp", "hpppn", "hppbm", "hp_unit", "hjunit", "hjakhir", "totalakhir", "totalestimasibiaya",
+        "total_uang", "total_penjualan", "total_pembelian", "total_omzet", "pembelian", "penjualan"
+    ))
+
+
 def susun_tab_komparasi_divisi(domain_results: List[Dict[str, Any]], question: str) -> Optional[Dict[str, Any]]:
     """Menyusun tab tabel komparasi sejajar antar divisi (Sales, Service, Sparepart)."""
-    valid_items = [d for d in domain_results if (d.get("row_count", 0) > 0 or d.get("rows")) and not d.get("error")]
-    if not valid_items:
+    valid_items = [d for d in domain_results if (d.get("row_count", 0) > 0 or d.get("rows")) and not d.get("error") and d.get("id") != "komparasi"]
+    if len(valid_items) <= 1:
+        # Komparasi antar divisi hanya valid jika ada minimal 2 divisi berbeda
         return None
 
     # Hitung total volume dan total omzet per divisi
@@ -415,19 +449,12 @@ def susun_tab_komparasi_divisi(domain_results: List[Dict[str, Any]], question: s
         columns = [str(c).lower() for c in item.get("columns", [])]
         raw_records = item.get("raw_records", [])
 
-        # Cari index kolom omzet dan volume
-        UANG_KEYWORDS_ALL = (
-            "omzet", "omset", "harga", "nilai", "biaya", "pendapatan", "jasa", "part",
-            "nominal", "pembelian", "penjualan", "rupiah", "rp", "dpp", "ppn", "tarif",
-            "subtotal", "saldo", "diskon", "laba", "rugi", "profit", "margin", "piutang", "hutang",
-            "hpunit", "hpdpp", "hpppn", "hppbm", "hp_unit", "hjunit", "hjakhir", "totalakhir", "totalestimasibiaya"
-        )
         omzet_idx = -1
         volume_idx = -1
         for idx, col in enumerate(columns):
-            if any(u in col for u in UANG_KEYWORDS_ALL):
+            if _is_column_money(col) and omzet_idx == -1:
                 omzet_idx = idx
-            elif any(c in col for c in ["total", "count", "jumlah", "qty", "unit", "item", "pkb"]):
+            elif _is_column_qty(col) and volume_idx == -1:
                 volume_idx = idx
 
         div_omzet = 0.0
@@ -441,9 +468,9 @@ def susun_tab_komparasi_divisi(domain_results: List[Dict[str, Any]], question: s
                     k_l = str(k).lower()
                     try:
                         num = float(v or 0)
-                        if any(u in k_l for u in UANG_KEYWORDS_ALL):
+                        if _is_column_money(k_l):
                             div_omzet += num
-                        elif any(c in k_l for c in ["total", "count", "jumlah", "qty", "unit", "item", "pkb"]):
+                        elif _is_column_qty(k_l):
                             div_volume += int(num)
                     except (ValueError, TypeError):
                         pass
@@ -557,18 +584,22 @@ def susun_ringkasan_eksekutif_multi(domain_results: List[Dict[str, Any]], questi
                 continue
             try:
                 num_v = float(v)
-                is_money = any(u in k_lower for u in [
-                    "hpunit", "hpdpp", "hpppn", "hppbm", "hp_unit", "hjunit", "hjakhir",
-                    "total_uang", "total_penjualan", "total_pembelian", "total_omzet",
-                    "totalestimasibiaya", "totalakhir", "nominal", "pembelian", "penjualan",
-                    "omzet", "omset", "harga", "nilai", "rupiah", "rp", "biaya", "pendapatan", "jasa", "part"
-                ])
-                if is_money:
+                if _is_column_money(k_lower):
                     if num_v > 0 or not stat_items:
                         stat_items.append(f"{_format_rupiah_singkat(num_v)}")
-                elif any(c in k_lower for c in ["total", "count", "jumlah", "qty", "unit", "item", "pkb"]):
-                    clean_label = k_lower.replace('total_', '').replace('_', ' ')
-                    stat_items.append(f"{int(num_v):,} {clean_label}".replace(",", "."))
+                elif _is_column_qty(k_lower):
+                    clean_label = k_lower.replace('total_', '').replace('jumlah_', '').replace('_', ' ').strip()
+                    if clean_label in ('unit terjual', 'unit'):
+                        label_str = "unit terjual"
+                    elif 'part' in clean_label or 'suku cadang' in clean_label:
+                        label_str = "part terjual"
+                    elif 'pkb' in clean_label or 'wo' in clean_label or 'servis' in clean_label:
+                        label_str = "PKB servis"
+                    elif clean_label in ('transaksi', 'count'):
+                        label_str = "transaksi"
+                    else:
+                        label_str = clean_label
+                    stat_items.append(f"{int(num_v):,} {label_str}".replace(",", "."))
             except (ValueError, TypeError):
                 pass
                 

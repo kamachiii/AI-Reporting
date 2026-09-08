@@ -160,3 +160,70 @@ def test_smart_context_note_tahun_berjalan():
     assert "2026" in summary
     assert "2025 atau 2024" in summary
 
+
+def test_column_classification_rules():
+    from app.services.fanout_engine import _is_column_qty, _is_column_money
+    assert _is_column_qty("volume_unit_terjual") is True
+    assert _is_column_money("volume_unit_terjual") is False
+
+    assert _is_column_qty("omzet_penjualan_unit") is False
+    assert _is_column_money("omzet_penjualan_unit") is True
+
+    assert _is_column_qty("kuantiti_part_terjual") is True
+    assert _is_column_money("kuantiti_part_terjual") is False
+
+    assert _is_column_qty("total_penjualan_part") is False
+    assert _is_column_money("total_penjualan_part") is True
+
+    assert _is_column_qty("jumlah_wo_pkb") is True
+    assert _is_column_money("jumlah_wo_pkb") is False
+
+
+def test_multitab_spareparts_and_grammar_cleaning():
+    from app.services.fanout_engine import susun_ringkasan_eksekutif_multi
+    domain_results = [
+        {
+            "id": "unit",
+            "title": "Unit Kendaraan",
+            "columns": ["jumlah_unit_terjual", "total_omzet_penjualan"],
+            "rows": [[350, 69825000000]],
+            "raw_records": [{"jumlah_unit_terjual": 350, "total_omzet_penjualan": 69825000000}]
+        },
+        {
+            "id": "servis",
+            "title": "Jasa Servis Bengkel",
+            "columns": ["jumlah_wo_pkb", "total_pendapatan_servis"],
+            "rows": [[13313, 22500000000]],
+            "raw_records": [{"jumlah_wo_pkb": 13313, "total_pendapatan_servis": 22500000000}]
+        },
+        {
+            "id": "part",
+            "title": "Suku Cadang & Sparepart",
+            "columns": ["kuantiti_part_terjual", "total_penjualan_part"],
+            "rows": [[117790, 42180000000]],
+            "raw_records": [{"kuantiti_part_terjual": 117790, "total_penjualan_part": 42180000000}]
+        }
+    ]
+    summary = susun_ringkasan_eksekutif_multi(domain_results, "bagaimana performa transaksi tahun 2025")
+    assert "Rp 117.790" not in summary
+    assert "117.790 part terjual" in summary
+    assert "350 unit terjual" in summary
+    assert "13.313 PKB servis" in summary
+    assert "Rp 42,18 Miliar" in summary
+
+
+def test_susun_tab_komparasi_single_domain_rejected():
+    from app.services.fanout_engine import susun_tab_komparasi_divisi
+    domain_results = [
+        {
+            "id": "unit",
+            "title": "Unit Kendaraan",
+            "columns": ["tahun", "total_unit", "total_omzet"],
+            "rows": [[2024, 947, 225713358000]],
+            "raw_records": [{"tahun": 2024, "total_unit": 947, "total_omzet": 225713358000}]
+        }
+    ]
+    # Single division should NOT produce a "Komparasi Antar Divisi"
+    assert susun_tab_komparasi_divisi(domain_results, "Bandingkan pembelian tahun 2024 vs 2025") is None
+
+

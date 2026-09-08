@@ -185,3 +185,27 @@ async def test_jalankan_mode_vanna_fanout_3s():
         assert "Suku Cadang" in res["ringkasan"]
 
 
+def test_annual_comparison_anti_inversion():
+    from app.services.vanna_engine import _format_ringkasan_otomatis
+    cols = ['tahun', 'omzet_penjualan_unit', 'volume_unit_terjual', 'omzet_servis_bengkel', 'volume_unit_entry', 'omzet_sparepart_bengkel']
+    rows = [
+        [2026, 944900000, 3, 0, 13, 68498000],
+        [2025, 69825000000, 350, 0, 13313, 42180000000]
+    ]
+    summary = _format_ringkasan_otomatis(rows, cols, "bandingkan peforma tiap divisi dalam tiap tahunnya")
+    assert "total Rp 3)" not in summary
+    assert "total Rp 350)" not in summary
+    assert "Tahun 2026: 3 unit" in summary
+    assert "Tahun 2025: 350 unit" in summary
+
+
+def test_is_data_cutoff_question_detection():
+    from app.services.vanna_engine import _is_data_cutoff_question
+    assert _is_data_cutoff_question("kenapa data hanya sampai bulan 11?") == {"target_year": 2025, "is_transaksi_terakhir": False}
+    assert _is_data_cutoff_question("mengapa data cuma sampai november?") == {"target_year": 2025, "is_transaksi_terakhir": False}
+    assert _is_data_cutoff_question("kenapa data 2026 hanya sampai bulan 6?") == {"target_year": 2026, "is_transaksi_terakhir": False}
+    assert _is_data_cutoff_question("kapan transaksi terakhir tercatat?") == {"target_year": 2025, "is_transaksi_terakhir": True}
+    assert _is_data_cutoff_question("tampilkan 5 mobil terlaris") is None
+
+
+

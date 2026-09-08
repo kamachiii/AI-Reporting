@@ -1432,6 +1432,56 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
     - Suku Cadang: Kueri 5 suku cadang termahal sukses menampilkan data riil `srvm_parts` (`TRNS ASSY,BARE Rp 115,39 Juta`, dll.) dan kueri stok menipis sukses mengeksekusi JOIN stok fisik dengan formula `stockawal + masuk - keluar`.
     - Fitur Ekspor Excel, Salin Tabel, Konfirmasi Memory, dan Pelatihan AI pgvector terverifikasi 100% fungsional.
 
+### 3aq. Koreksi Inversi Nilai Komparasi Tahunan, Formatting Kuantitas Suku Cadang & Audit Eksplanatori Cut-Off Data (2026-09-08)
+
+- **Latar Belakang & Masalah (Audit Riwayat `tester02` & `tester01`)**:
+  1. **Inversi Nilai Kuantitas vs Rupiah pada Komparasi Tahunan**:
+     - Pada kueri komparasi lintas divisi per tahun (*"bandingkan peforma tiap divisi dalam tiap tahunnya"*), ringkasan otomatis menghasilkan nilai terbalik: `Tahun 2026: 944.900.000 transaksi (total Rp 3)` dan `Tahun 2025: 69.825.000.000 transaksi (total Rp 350)`.
+     - *Akar masalah*: Kolom `omzet_penjualan_unit` (Rp 944,9 Jt) cocok dengan substring `'unit'` pada deteksi kuantitas lama, sedangkan `volume_unit_terjual` (3 unit) cocok dengan substring `'jual'` pada deteksi nominal uang lama. Angka transaksi dan uang tertukar secara fatal.
+  2. **Kuantitas Suku Cadang Terformat Sebagai Rupiah**:
+     - Pada ringkasan multi-tab performa 2025 (*"bagaimana performa transaksi tahun 2025"*), kuantitas part terformat sebagai: `Suku Cadang & Sparepart: Rp 117.790, Rp 42,18 Miliar`.
+     - *Akar masalah*: Kata `"part"` dan `"penjualan"` berada di daftar deteksi uang `is_money` pada `fanout_engine.py` tanpa memeriksa apakah kolom merupakan kolom kuantitas (`kuantiti_part_terjual`).
+     - *Tata bahasa*: Label tata bahasa canggung seperti `350 jumlah unit terjual` dan `13.313 jumlah wo pkb` akibat penggunaan langsung alias kolom dengan kata "jumlah".
+  3. **Pertanyaan Eksplanatori Keterbatasan Data Dijawab Dump Kueri 24 Baris**:
+     - Pada kueri follow-up *"kenapa data hanya sampai bulan 11?"*, sistem sebelumnya memaksa LLM membuat SQL `SELECT ... LIMIT 24` dan menjawab `Berhasil menampilkan 24 baris data dari database.`, tanpa memberikan jawaban analitik faktual mengenai penyebab ketiadaan data bulan 12.
+     - *Fakta empiris database*: Transaksi tahun 2025 pada database cabang TST_01 di seluruh divisi (Unit, Bengkel, Part) memang berakhir pada **18 November 2025** (cut-off snapshot database demo).
+  4. **Proteksi Tab Komparasi Divisi Tunggal**:
+     - Tab "Komparasi Antar Divisi" sempat muncul ketika hasil kueri hanya memuat 1 domain, menghasilkan tabel 1 baris kontribusi 100%.
+
+- **Solusi & Implementasi Teknis**:
+  1. **Klasifikasi Kolom Ketat & Anti-Inversi (`fanout_engine.py` & `vanna_engine.py`)**:
+     - Menambahkan fungsi helper terpusat `_is_column_qty` dan `_is_column_money`:
+       - `_is_column_qty`: Mengidentifikasi volume, kuantiti, unit, pkb, count secara mutlak dan menolak kolom yang memuat penanda mata uang/biaya/harga.
+       - `_is_column_money`: Mengidentifikasi kolom nominal uang hanya jika BUKAN kolom kuantitas.
+     - Memperbarui `_format_ringkasan_otomatis` di `vanna_engine.py`:
+       - Menjumlahkan seluruh kolom omzet divisi secara agregat per tahun (`total_uang_row`), dan memadankan kuantitas utama (`primary_qty`) dengan label yang tepat (`unit`, `servis`, `part`, `transaksi`).
+       - Memperbarui replay SQL Memory: selalu memformat ringkasan secara segar dari data hasil kueri riil (`raw_ringkasan = _format_ringkasan_otomatis(db_rows[:500], columns, question)`) sehingga data tidak pernah basi atau membawa string cacat lama.
+  2. **Penyempurnaan Format Kuantitas Part & Tata Bahasa Indonesia (`fanout_engine.py`)**:
+     - Mengutamakan pemeriksaan `_is_column_money` dan `_is_column_qty` di `susun_ringkasan_eksekutif_multi`.
+     - Membersihkan label redundan: `jumlah_unit_terjual` -> `350 unit terjual`, `jumlah_wo_pkb` -> `13.313 PKB servis`, `kuantiti_part_terjual` -> `117.790 part terjual`.
+     - Memastikan angka uang diformat sebagai Rupiah singkat (`Rp 42,18 Miliar`) dan kuantitas sebagai integer bertitik ribuan.
+  3. **Penanganan Otomatis Audit Batas Waktu Data / Cut-Off (`vanna_engine.py`)**:
+     - Menambahkan fungsi `_is_data_cutoff_question` yang mendeteksi pola pertanyaan seputar ketiadaan data bulan tertentu / transaksi terakhir (`kenapa data hanya sampai bulan ...`, `mengapa cuma sampai ...`, `kapan transaksi terakhir`).
+     - Fungsi `tangani_pertanyaan_keterbatasan_data`: mengeksekusi kueri inspeksi faktual `MAX(tanggal)` ke database cabang secara instan (0 token LLM), menyajikan tabel 3 divisi beserta tanggal transaksi terakhir (`18 November 2025`), dan narasi analitik ramah bisnis yang menerangkan cut-off operasional.
+  4. **Proteksi Tab Komparasi Sejajar (`vanna_engine.py` & `fanout_engine.py`)**:
+     - Mensyaratkan `len(tabs_with_data) > 1` sebelum membentuk tab `komparasi` sehingga tidak ada komparasi divisi artifisial pada kueri domain tunggal.
+
+- **Verifikasi & Bukti Nyata**:
+  1. **Unit & Regresi Tests (`test_fanout_engine.py` & `test_vanna_engine.py`)**:
+     - `test_column_classification_rules`: Lulus.
+     - `test_multitab_spareparts_and_grammar_cleaning`: Lulus (`117.790 part terjual`, `Rp 42,18 Miliar`, bebas `Rp 117.790`).
+     - `test_susun_tab_komparasi_single_domain_rejected`: Lulus (return `None` untuk domain tunggal).
+     - `test_annual_comparison_anti_inversion`: Lulus (`3 unit (total Rp 1,01 Miliar)` dan `350 unit (total Rp 112 Miliar)`).
+     - `test_is_data_cutoff_question_detection`: Lulus (akurasi deteksi 100%).
+  2. **Pytest Backend**: **567 passed in 50.11s** (100% lulus tanpa kegagalan).
+  3. **Frontend Quality**:
+     - `npm run lint`: **0 errors** (100% lulus).
+     - `npm run build`: **exit 0** (built in 1.52s).
+  4. **Live API Integration Test untuk Akun `tester02`**:
+     - Kueri 1 (*"bandingkan peforma tiap divisi dalam tiap tahunnya"*): Menghasilkan `Tahun 2026: 3 unit (total Rp 1,01 Miliar), Tahun 2025: 350 unit (total Rp 112 Miliar), Tahun 2024: 952 unit (total Rp 233,18 Miliar)` — inversi tereliminasi total.
+     - Kueri 2 (*"bagaimana performa transaksi tahun 2025"*): Menghasilkan `Unit Kendaraan: 350 unit terjual, Rp 69,83 Miliar • Jasa Servis Bengkel: 13.313 PKB servis • Suku Cadang & Sparepart: 117.790 part terjual, Rp 42,18 Miliar` — kuantitas part dan label tata bahasa sempurna.
+     - Kueri 3 (*"kenapa data hanya sampai bulan 11?"*): Menyajikan tabel 3 baris berisi tanggal transaksi terakhir (18 November 2025) dengan narasi eksplanatori cut-off snapshot database yang akurat dan transparan.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -1499,6 +1549,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Standardisasi Satuan Finansial Eksekutif: Juta, Miliar, Triliun** — SELESAI (lihat §3an).
 - [x] **Pemisahan Komparasi Temporal (Gaya 1 vs Gaya 2), Humanisasi Header Kolom Tabel & Pelebaran Sumbu Y Grafik** — SELESAI (lihat §3ao).
 - [x] **Hardening Domain Suku Cadang/Inventori, Audit Form Accessibility & De-duplikasi Saran** — SELESAI (lihat §3ap).
+- [x] **Koreksi Inversi Nilai Komparasi Tahunan, Formatting Kuantitas Suku Cadang & Audit Eksplanatori Cut-Off Data** — SELESAI (lihat §3aq).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. *Dedicated Executive Dashboard Page*: Ditutup/dibatalkan atas arahan pengguna untuk mempertahankan identitas murni Conversational AI Assistant.
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.

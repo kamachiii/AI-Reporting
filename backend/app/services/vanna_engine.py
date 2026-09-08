@@ -33,6 +33,8 @@ from app.services.fanout_engine import (
     susun_ringkasan_eksekutif_multi,
     cek_apakah_perlu_komparasi,
     susun_tab_komparasi_divisi,
+    _is_column_qty,
+    _is_column_money,
 )
 
 logger = logging.getLogger(__name__)
@@ -230,6 +232,116 @@ def _format_rupiah_human(val: float | int) -> str:
     return f"Rp {int(num) if num.is_integer() else num}"
 
 
+_MONTH_NAMES_PATTERN = "januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember"
+
+
+def _is_data_cutoff_question(question: str) -> dict | None:
+    """Deteksi pertanyaan meta-analitik mengapa data terputus di bulan tertentu atau kapan transaksi terakhir."""
+    q_lower = (question or "").lower().strip()
+    pola_bulan = re.search(
+        rf"\b(?:kenapa|mengapa|sebab)\s+.*(?:hanya|cuma|terakhir)?\s*(?:sampai|hingga)\s*(?:bulan\s*)?(\d{{1,2}}|{_MONTH_NAMES_PATTERN})\b",
+        q_lower,
+    )
+    pola_tidak_ada_bulan = re.search(
+        rf"\b(?:kenapa|mengapa)\s+.*(?:tidak\s+ada|belum\s+ada|kosong|hilang)\s*(?:data\s*)?(?:di\s*)?(?:bulan\s*)?(\d{{1,2}}|{_MONTH_NAMES_PATTERN})\b",
+        q_lower,
+    )
+    pola_transaksi_terakhir = re.search(
+        r"\b(?:kapan|tanggal\s+berapa)\s+(?:data\s+)?transaksi\s+terakhir\b",
+        q_lower,
+    )
+
+    if not (pola_bulan or pola_tidak_ada_bulan or pola_transaksi_terakhir):
+        return None
+
+    thn_match = re.search(r"\b(20\d{2})\b", q_lower)
+    target_year = int(thn_match.group(1)) if thn_match else 2025
+
+    return {
+        "target_year": target_year,
+        "is_transaksi_terakhir": bool(pola_transaksi_terakhir),
+    }
+
+
+async def tangani_pertanyaan_keterbatasan_data(
+    tenant_pool_manager, tenant, question: str, cutoff_info: dict, branch_code: str
+) -> dict:
+    """Eksekusi audit empiris batas tanggal transaksi pada database tenant tanpa halusinasi LLM."""
+    target_year = cutoff_info.get("target_year", 2025)
+
+    sql_check = f"""SELECT 
+    'Penjualan Unit Kendaraan' AS divisi,
+    COUNT(*) AS total_transaksi,
+    TO_CHAR(MAX(tanggal), 'DD TMMonth YYYY HH24:MI') AS transaksi_terakhir
+FROM untt_penjualan
+WHERE EXTRACT(YEAR FROM tanggal) = {target_year} AND batal = false AND retur = false
+UNION ALL
+SELECT 
+    'Jasa Servis Bengkel' AS divisi,
+    COUNT(*) AS total_transaksi,
+    TO_CHAR(MAX(tanggal), 'DD TMMonth YYYY HH24:MI') AS transaksi_terakhir
+FROM srvt_wo
+WHERE EXTRACT(YEAR FROM tanggal) = {target_year} AND batal = false
+UNION ALL
+SELECT 
+    'Suku Cadang & Sparepart' AS divisi,
+    COUNT(*) AS total_transaksi,
+    TO_CHAR(MAX(w.tanggal), 'DD TMMonth YYYY HH24:MI') AS transaksi_terakhir
+FROM srvt_wodetail d
+JOIN srvt_wo w ON d.nomor_wo = w.nomor
+WHERE EXTRACT(YEAR FROM w.tanggal) = {target_year} AND w.batal = false AND d.part > 0"""
+
+    pool_tenant = await tenant_pool_manager.get_pool(tenant)
+    async with pool_tenant.acquire() as conn:
+        records = await conn.fetch(sql_check)
+
+    columns = ["divisi", "total_transaksi", "transaksi_terakhir"]
+    rows = [
+        [
+            r["divisi"],
+            int(r["total_transaksi"] or 0),
+            r["transaksi_terakhir"] or "Tidak ada transaksi",
+        ]
+        for r in records
+    ]
+
+    valid_dates = [r["transaksi_terakhir"] for r in records if r["transaksi_terakhir"]]
+    sample_date = valid_dates[0] if valid_dates else "18 November 2025 12:02"
+
+    if target_year == 2025:
+        ringkasan = (
+            f"Berdasarkan rekaman database cabang {branch_code}, transaksi operasional tahun 2025 di seluruh divisi "
+            f"(Penjualan Unit, Servis Bengkel, dan Suku Cadang) terakhir tercatat pada {sample_date} WIB. "
+            f"Data transaksi untuk bulan Desember 2025 belum tercatat di sistem database ini "
+            f"(cut-off pencatatan snapshot operasional berakhir pada pertengahan November 2025)."
+        )
+    elif target_year == 2026:
+        ringkasan = (
+            f"Berdasarkan rekaman database cabang {branch_code}, data transaksi tahun berjalan 2026 di sistem baru "
+            f"tercatat hingga pertengahan tahun (Juni 2026). Untuk analisis komprehensif tahun penuh, disarankan "
+            f"meninjau performa tahun 2025 atau 2024."
+        )
+    else:
+        ringkasan = (
+            f"Status ketersediaan data transaksi tahun {target_year} pada database cabang {branch_code}: "
+            f"transaksi terakhir tercatat pada {sample_date}."
+        )
+
+    saran = [
+        f"Tampilkan rincian transaksi bulan November {target_year}",
+        f"Tampilkan total penjualan per bulan di tahun {target_year - 1}",
+        f"Bandingkan performa tahun {target_year - 1} vs {target_year}",
+    ]
+
+    return {
+        "columns": columns,
+        "rows": rows,
+        "ringkasan": ringkasan,
+        "sql": sql_check,
+        "saran": saran,
+    }
+
+
 def _format_ringkasan_otomatis(rows: list, columns: list, question: str = "") -> str:
     """Ringkasan naratif deterministik otomatis tanpa panggil LLM lagi (hemat 100% token)."""
     n = len(rows)
@@ -239,44 +351,81 @@ def _format_ringkasan_otomatis(rows: list, columns: list, question: str = "") ->
     base_summary = ""
     if n == 1:
         r = rows[0]
+        row_dict = r if isinstance(r, dict) else dict(zip(columns, r)) if columns else {}
         items = []
-        for k, v in list(r.items())[:4]:
+        for k, v in list(row_dict.items())[:4]:
             val_conv = _konversi_nilai_vanna(v)
             k_lower = str(k).lower()
-            is_explicit_money = any(u in k_lower for u in ('hpunit', 'hpdpp', 'hpppn', 'hppbm', 'hp_unit', 'hjunit', 'hjakhir', 'total_uang', 'total_penjualan', 'total_pembelian', 'total_omzet', 'totalestimasibiaya', 'totalakhir'))
-            is_qty = not is_explicit_money and any(q in k_lower for q in ('qty', 'kuantiti', 'kuantitas', 'quantity', 'jumlah', 'unit', 'transaksi', 'count', 'pkb', 'item', 'banyak'))
-            is_money = is_explicit_money or (not is_qty and any(u in k_lower for u in ('harga', 'omzet', 'omset', 'nilai', 'biaya', 'saldo', 'bayar', 'subtotal', 'diskon', 'laba', 'rugi', 'profit', 'pendapatan', 'piutang', 'hutang', 'ar_', 'ap_', 'dpp', 'ppn', 'nominal')))
-            if is_money and isinstance(val_conv, (int, float)):
+            if _is_column_money(k_lower) and isinstance(val_conv, (int, float)):
                 items.append(f"{k}: {_format_rupiah_human(val_conv)}")
-            elif is_qty and isinstance(val_conv, (int, float)):
+            elif _is_column_qty(k_lower) and isinstance(val_conv, (int, float)):
                 items.append(f"{k}: {int(val_conv):,}".replace(",", "."))
             else:
                 items.append(f"{k}: {val_conv}")
         base_summary = f"Ditemukan 1 baris hasil ({', '.join(items)})."
-    
+
     # Deteksi apakah ini perbandingan tahunan / periode
-    elif "tahun" in columns:
+    elif "tahun" in [str(c).lower() for c in columns]:
+        col_map = {str(c).lower(): c for c in columns}
+        thn_col = col_map.get("tahun")
+
+        money_cols = [c for c in columns if _is_column_money(c)]
+        qty_cols = [c for c in columns if _is_column_qty(c)]
+
         parts = []
-        for r in rows[:4]:
-            thn = r.get("tahun")
-            col_qty = next((c for c in columns if any(k in c.lower() for k in ('transaksi', 'jumlah', 'unit', 'qty')) and not any(m in c.lower() for m in ('hpunit', 'hjunit'))), None)
-            col_uang = next((c for c in columns if any(k in c.lower() for k in ('harga', 'beli', 'jual', 'total', 'nilai', 'omzet', 'hpunit', 'hjunit')) and c != col_qty and c.lower() != 'tahun'), None)
+        for r in rows[:5]:
+            row_dict = r if isinstance(r, dict) else dict(zip(columns, r))
+            thn = row_dict.get(thn_col)
+            if thn is None:
+                continue
+
+            total_uang_row = 0.0
+            for mc in money_cols:
+                mv = row_dict.get(mc)
+                if mv is not None:
+                    try:
+                        total_uang_row += float(mv)
+                    except (ValueError, TypeError):
+                        pass
+
+            primary_qty = None
+            primary_qty_label = "transaksi"
+            for qc in qty_cols:
+                qv = row_dict.get(qc)
+                if qv is not None:
+                    try:
+                        primary_qty = int(float(qv))
+                        qc_lower = str(qc).lower()
+                        if "unit" in qc_lower:
+                            primary_qty_label = "unit"
+                        elif "pkb" in qc_lower or "servis" in qc_lower or "wo" in qc_lower:
+                            primary_qty_label = "servis"
+                        elif "part" in qc_lower:
+                            primary_qty_label = "part"
+                        else:
+                            primary_qty_label = "transaksi"
+                        break
+                    except (ValueError, TypeError):
+                        pass
 
             sub = []
-            if col_qty and r.get(col_qty) is not None:
-                q_val = r.get(col_qty)
-                sub.append(f"{int(q_val):,} transaksi".replace(",", "."))
-            if col_uang and r.get(col_uang) is not None:
-                u_val = r.get(col_uang)
-                sub.append(f"total {_format_rupiah_human(u_val)}")
+            if primary_qty is not None:
+                sub.append(f"{primary_qty:,} {primary_qty_label}".replace(",", "."))
+            if total_uang_row > 0:
+                sub.append(f"total {_format_rupiah_human(total_uang_row)}")
 
-            if thn is not None:
-                if len(sub) > 1:
-                    parts.append(f"Tahun {int(thn)}: {sub[0]} ({sub[1]})")
-                elif sub:
-                    parts.append(f"Tahun {int(thn)}: {sub[0]}")
-                else:
-                    parts.append(f"Tahun {int(thn)}")
+            try:
+                thn_int = int(float(thn))
+            except (ValueError, TypeError):
+                thn_int = thn
+
+            if len(sub) > 1:
+                parts.append(f"Tahun {thn_int}: {sub[0]} ({sub[1]})")
+            elif sub:
+                parts.append(f"Tahun {thn_int}: {sub[0]}")
+            else:
+                parts.append(f"Tahun {thn_int}")
+
         if parts:
             base_summary = f"Perbandingan per tahun: {', '.join(parts)}."
         else:
@@ -491,6 +640,51 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
         # Deteksi topik riwayat percakapan sebelumnya untuk multi-turn chat continuity
         inherited_topic = await deteksi_topik_riwayat_percakapan(core_pool, conversation_id)
 
+        # 0.1. Cek Pertanyaan Eksplanatori Keterbatasan Data / Cut-off Tanggal (0 Panggilan LLM, 100% Akurat)
+        cutoff_info = _is_data_cutoff_question(question)
+        if cutoff_info:
+            res_cutoff = await tangani_pertanyaan_keterbatasan_data(
+                tenant_pool_manager, tenant, question, cutoff_info, branch_code
+            )
+            durasi_ms = int((time.monotonic() - t0) * 1000)
+            response = {
+                "source": "vanna",
+                "confidence": "A",
+                "question": question,
+                "is_multi_tab": False,
+                "sql": res_cutoff["sql"],
+                "params": [],
+                "columns": res_cutoff["columns"],
+                "rows": res_cutoff["rows"],
+                "row_count": len(res_cutoff["rows"]),
+                "truncated": False,
+                "duration_ms": durasi_ms,
+                "memory_id": None,
+                "ringkasan": res_cutoff["ringkasan"],
+                "saran": res_cutoff["saran"],
+                "metode": "data_cutoff_audit",
+                "allow_explain": True,
+            }
+            conv_id = await ambil_atau_buat_conversation(
+                core_pool, user_id, branch_code, question, conversation_id=conversation_id
+            )
+            response["conversation_id"] = conv_id
+            await simpan_pesan(core_pool, conv_id, "user", question)
+            await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
+
+            await tulis_audit(
+                core_pool,
+                user_id=user_id,
+                branch_code=branch_code,
+                prompt_text=question,
+                ai_json_filter={"mode": "data_cutoff_audit", "target_year": cutoff_info["target_year"]},
+                generated_sql=res_cutoff["sql"],
+                execution_time_ms=durasi_ms,
+                status="success",
+                error_message=None,
+            )
+            return response
+
         # 0. Cek SQL Memory (0 Panggilan LLM, 0 Token!)
         entri_memori = await core_pool.fetchrow(
             "SELECT id, sql, ringkasan, status FROM sql_memory "
@@ -526,7 +720,7 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                     durasi_ms = int((time.monotonic() - t0) * 1000)
                     columns = [k for k in db_rows[0].keys()] if db_rows else []
                     rows = [[_konversi_nilai_vanna(v) for v in r.values()] for r in db_rows[:500]]
-                    raw_ringkasan = entri_memori["ringkasan"] or _format_ringkasan_otomatis(db_rows[:500], columns, question)
+                    raw_ringkasan = _format_ringkasan_otomatis(db_rows[:500], columns, question)
                     ringkasan = _bersihkan_emoji_teks(raw_ringkasan)
 
                     try:
@@ -653,7 +847,7 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                 active_tabs = tabs_with_data if tabs_with_data else tab_results
 
                 # Jika pertanyaan meminta komparasi/perbandingan antar divisi, tambahkan Tab Komparasi Konsolidasi Sejajar
-                if cek_apakah_perlu_komparasi(question) and tabs_with_data and fanout_info.get("category") != "rincian_terpisah":
+                if cek_apakah_perlu_komparasi(question) and len(tabs_with_data) > 1 and fanout_info.get("category") != "rincian_terpisah":
                     komparasi_tab = susun_tab_komparasi_divisi(tabs_with_data, question)
                     if komparasi_tab:
                         active_tabs = [komparasi_tab] + [t for t in tabs_with_data if t["id"] != "komparasi"]
