@@ -316,21 +316,21 @@ async def tangani_pertanyaan_keterbatasan_data(
 
     if topic == "penjualan":
         sql_check = f"""SELECT 
-    'Penjualan Unit Kendaraan' AS divisi,
+    'Penjualan Unit Kendaraan' AS jenis_transaksi,
     COUNT(*) AS total_transaksi,
     TO_CHAR(MAX(tanggal), 'DD TMMonth YYYY HH24:MI') AS transaksi_terakhir
 FROM untt_penjualan
 WHERE EXTRACT(YEAR FROM tanggal) = {target_year} AND batal = false AND retur = false"""
     elif topic == "servis":
         sql_check = f"""SELECT 
-    'Jasa Servis Bengkel' AS divisi,
+    'Jasa Servis Bengkel' AS jenis_transaksi,
     COUNT(*) AS total_transaksi,
     TO_CHAR(MAX(tanggal), 'DD TMMonth YYYY HH24:MI') AS transaksi_terakhir
 FROM srvt_wo
 WHERE EXTRACT(YEAR FROM tanggal) = {target_year} AND batal = false"""
     elif topic == "sparepart":
         sql_check = f"""SELECT 
-    'Suku Cadang & Sparepart' AS divisi,
+    'Suku Cadang & Sparepart' AS jenis_transaksi,
     COUNT(*) AS total_transaksi,
     TO_CHAR(MAX(w.tanggal), 'DD TMMonth YYYY HH24:MI') AS transaksi_terakhir
 FROM srvt_wodetail d
@@ -338,28 +338,28 @@ JOIN srvt_wo w ON d.nomor_wo = w.nomor
 WHERE EXTRACT(YEAR FROM w.tanggal) = {target_year} AND w.batal = false AND d.part > 0"""
     elif topic == "pembelian":
         sql_check = f"""SELECT 
-    'Pembelian Unit Kendaraan' AS divisi,
+    'Pembelian Unit Kendaraan' AS jenis_transaksi,
     COUNT(*) AS total_transaksi,
     TO_CHAR(MAX(tglinvoice), 'DD TMMonth YYYY HH24:MI') AS transaksi_terakhir
 FROM untt_pembelian
 WHERE EXTRACT(YEAR FROM tglinvoice) = {target_year}"""
     else:
         sql_check = f"""SELECT 
-    'Penjualan Unit Kendaraan' AS divisi,
+    'Penjualan Unit Kendaraan' AS jenis_transaksi,
     COUNT(*) AS total_transaksi,
     TO_CHAR(MAX(tanggal), 'DD TMMonth YYYY HH24:MI') AS transaksi_terakhir
 FROM untt_penjualan
 WHERE EXTRACT(YEAR FROM tanggal) = {target_year} AND batal = false AND retur = false
 UNION ALL
 SELECT 
-    'Jasa Servis Bengkel' AS divisi,
+    'Jasa Servis Bengkel' AS jenis_transaksi,
     COUNT(*) AS total_transaksi,
     TO_CHAR(MAX(tanggal), 'DD TMMonth YYYY HH24:MI') AS transaksi_terakhir
 FROM srvt_wo
 WHERE EXTRACT(YEAR FROM tanggal) = {target_year} AND batal = false
 UNION ALL
 SELECT 
-    'Suku Cadang & Sparepart' AS divisi,
+    'Suku Cadang & Sparepart' AS jenis_transaksi,
     COUNT(*) AS total_transaksi,
     TO_CHAR(MAX(w.tanggal), 'DD TMMonth YYYY HH24:MI') AS transaksi_terakhir
 FROM srvt_wodetail d
@@ -370,10 +370,10 @@ WHERE EXTRACT(YEAR FROM w.tanggal) = {target_year} AND w.batal = false AND d.par
     async with pool_tenant.acquire() as conn:
         records = await conn.fetch(sql_check)
 
-    columns = ["divisi", "total_transaksi", "transaksi_terakhir"]
+    columns = ["jenis_transaksi", "total_transaksi", "transaksi_terakhir"]
     rows = [
         [
-            r["divisi"],
+            r["jenis_transaksi"],
             int(r["total_transaksi"] or 0),
             r["transaksi_terakhir"] or "Tidak ada transaksi",
         ]
@@ -383,32 +383,32 @@ WHERE EXTRACT(YEAR FROM w.tanggal) = {target_year} AND w.batal = false AND d.par
     valid_dates = [r["transaksi_terakhir"] for r in records if r["transaksi_terakhir"] and r["transaksi_terakhir"] != "Tidak ada transaksi"]
     sample_date = valid_dates[0] if valid_dates else f"18 November {target_year} 12:02"
 
-    divisi_text = "di seluruh divisi (Penjualan Unit, Servis Bengkel, dan Suku Cadang)"
+    transaksi_text = "di seluruh transaksi operasional (Penjualan Unit, Servis Bengkel, dan Suku Cadang)"
     if topic == "penjualan":
-        divisi_text = "pada divisi Penjualan Unit Kendaraan"
+        transaksi_text = "pada transaksi Penjualan Unit Kendaraan"
     elif topic == "servis":
-        divisi_text = "pada divisi Jasa Servis Bengkel"
+        transaksi_text = "pada transaksi Jasa Servis Bengkel"
     elif topic == "sparepart":
-        divisi_text = "pada divisi Suku Cadang & Sparepart"
+        transaksi_text = "pada transaksi Suku Cadang & Sparepart"
     elif topic == "pembelian":
-        divisi_text = "pada divisi Pembelian Unit"
+        transaksi_text = "pada transaksi Pembelian Unit Kendaraan"
 
     if target_year == 2025:
         ringkasan = (
-            f"Berdasarkan rekaman database cabang {branch_code}, transaksi operasional tahun 2025 {divisi_text} "
+            f"Berdasarkan rekaman database cabang {branch_code}, transaksi operasional tahun 2025 {transaksi_text} "
             f"terakhir tercatat pada {sample_date} WIB. "
             f"Data transaksi untuk bulan Desember 2025 belum tercatat di sistem database ini "
             f"(cut-off pencatatan snapshot operasional berakhir pada pertengahan November 2025)."
         )
     elif target_year == 2026:
         ringkasan = (
-            f"Berdasarkan rekaman database cabang {branch_code}, data transaksi tahun berjalan 2026 {divisi_text} "
+            f"Berdasarkan rekaman database cabang {branch_code}, data transaksi tahun berjalan 2026 {transaksi_text} "
             f"tercatat hingga pertengahan tahun (Juni 2026). Untuk analisis komprehensif tahun penuh, disarankan "
             f"meninjau performa tahun 2025 atau 2024."
         )
     else:
         ringkasan = (
-            f"Status ketersediaan data transaksi tahun {target_year} {divisi_text} pada database cabang {branch_code}: "
+            f"Status ketersediaan data transaksi tahun {target_year} {transaksi_text} pada database cabang {branch_code}: "
             f"transaksi terakhir tercatat pada {sample_date}."
         )
 
@@ -690,7 +690,7 @@ async def rekonsiliasi_slot_percakapan(core_pool, conversation_id: int | None, q
             extracted_domain = "sparepart"
         elif any(w in q_lower for w in ["jual", "penjualan", "omzet", "unit"]):
             extracted_domain = "penjualan"
-        elif any(w in q_lower for w in ["semua", "seluruh", "konsolidasi", "semua divisi", "seluruh divisi"]):
+        elif any(w in q_lower for w in ["semua", "seluruh", "konsolidasi", "semua transaksi", "seluruh transaksi", "semua data"]):
             extracted_domain = "all"
 
         # Jika pengguna tidak memberikan slot tahun maupun domain, bukan balasan slot
@@ -893,8 +893,8 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
             if cutoff_info.get("needs_clarification"):
                 durasi_ms = int((time.monotonic() - t0) * 1000)
                 clarification_msg = (
-                    "Pertanyaan Anda mengenai batas data transaksi memerlukan informasi divisi data dan tahun yang ingin diperiksa. "
-                    "Data transaksi apa (misalnya Penjualan Unit, Servis Bengkel, atau Suku Cadang) dan tahun berapa yang ingin Anda analisis?"
+                    "Pertanyaan Anda mengenai batas data transaksi memerlukan informasi jenis transaksi dan tahun yang ingin diperiksa. "
+                    "Data transaksi apa (misalnya Penjualan Unit, Servis Bengkel, atau Suku Cadang) dan untuk tahun berapa yang ingin Anda analisis?"
                 )
                 response = {
                     "source": "clarification",
@@ -934,9 +934,9 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                         {
                             "id": "all",
                             "icon": "Layers",
-                            "label": "Seluruh Divisi",
-                            "deskripsi": "Total data seluruh divisi operasional",
-                            "prompt": "Data seluruh divisi",
+                            "label": "Semua Transaksi",
+                            "deskripsi": "Total data seluruh transaksi operasional",
+                            "prompt": "Data semua transaksi",
                         },
                     ],
                     "sql": "",
