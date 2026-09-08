@@ -290,23 +290,23 @@ def cek_apakah_minta_rincian_terpisah(question: str) -> Optional[Dict[str, Any]]
 
     topic = "penjualan"
     table_hint = "untt_penjualan"
-    date_col = "tgl_penjualan"
+    date_col = "tanggal"
     if any(w in q_lower for w in ["beli", "pembelian", "kulakan", "pengadaan"]):
         topic = "pembelian"
         table_hint = "untt_pembelian"
-        date_col = "tgl_pembelian"
-    elif any(w in q_lower for w in ["servis", "service", "bengkel", "pkb"]):
+        date_col = "tglinvoice"
+    elif any(w in q_lower for w in ["servis", "service", "bengkel", "pkb", "wo"]):
         topic = "servis"
-        table_hint = "srvt_pkb"
-        date_col = "tgl_pkb"
+        table_hint = "srvt_wo"
+        date_col = "tanggal"
     elif any(w in q_lower for w in ["part", "sparepart", "suku cadang"]):
         topic = "sparepart"
         table_hint = "prtt_penjualan"
-        date_col = "tgl_transaksi"
+        date_col = "tanggal"
     elif any(w in q_lower for w in ["unit", "mobil", "motor", "kendaraan"]):
-        topic = "unit kendaraan"
+        topic = "penjualan"
         table_hint = "untt_penjualan"
-        date_col = "tgl_penjualan"
+        date_col = "tanggal"
 
     return {
         "category": "rincian_terpisah",

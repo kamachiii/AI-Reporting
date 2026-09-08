@@ -58,14 +58,19 @@ STOPWORDS = {
 }
 
 
-async def ambil_konteks_vanna(core_pool, question: str, branch_code: str = "GLOBAL") -> tuple[str, list[str]]:
+async def ambil_konteks_vanna(core_pool, question: str, branch_code: str = "GLOBAL",
+                              inherited_topic: str | None = None) -> tuple[str, list[str]]:
     """Cari tabel dan DDL relevan menggunakan pgvector semantic search (fallback ke ILIKE jika error)."""
+    search_q = question
+    if inherited_topic and not any(w in question.lower() for w in ["jual", "penjualan", "beli", "pembelian", "servis", "service", "bengkel", "part", "sparepart"]):
+        search_q = f"{question} {inherited_topic}"
+
     try:
-        return await cari_konteks_pgvector(core_pool, branch_code, question, limit=8)
+        return await cari_konteks_pgvector(core_pool, branch_code, search_q, limit=8)
     except Exception as e:
         logger.warning("Pencarian pgvector gagal (%s), fallback ke pencarian teks ILIKE...", e)
 
-    raw_words = re.findall(r'[a-zA-Z0-9_]+', question.lower())
+    raw_words = re.findall(r'[a-zA-Z0-9_]+', search_q.lower())
     words = [w for w in raw_words if len(w) >= 3 and w not in STOPWORDS]
 
     contexts = []
@@ -119,7 +124,7 @@ async def ambil_konteks_vanna(core_pool, question: str, branch_code: str = "GLOB
         contexts.append(f"Example question: {ex['question']}\nExample SQL: {ex['sql_example']}")
 
     # Susun konteks fallback dengan aturan domain otomotif
-    matched_rules = deteksi_konteks_domain(question)
+    matched_rules = deteksi_konteks_domain(search_q)
     domain_instructions = susun_instruksi_domain(matched_rules)
     for r in matched_rules:
         for t in r.get("primary_tables", []):
@@ -134,10 +139,14 @@ async def ambil_konteks_vanna(core_pool, question: str, branch_code: str = "GLOB
     return "\n\n".join(all_contexts), tables_found
 
 
-def susun_prompt_vanna(question: str, context: str) -> str:
+def susun_prompt_vanna(question: str, context: str, inherited_topic: str | None = None) -> str:
     """Susun prompt persis dengan template resmi Vanna AI."""
-    return f"""You are a Postgres expert. Please help to generate a SQL query to answer the question. Your response should ONLY be based on the given context and follow the response guidelines and format instructions.
+    topic_context_note = ""
+    if inherited_topic and not any(w in question.lower() for w in ["jual", "penjualan", "beli", "pembelian", "servis", "service", "bengkel", "part", "sparepart"]):
+        topic_context_note = f"\n=== Active Multi-turn Conversation Context:\nThe user is currently discussing '{inherited_topic}' in this session. Maintain this context (e.g., if topic is 'pembelian', generate SQL querying untt_pembelian).\n"
 
+    return f"""You are a Postgres expert. Please help to generate a SQL query to answer the question. Your response should ONLY be based on the given context and follow the response guidelines and format instructions.
+{topic_context_note}
 === Context:
 {context}
 
@@ -264,13 +273,54 @@ def _format_ringkasan_otomatis(rows: list, columns: list, question: str = "") ->
     return base_summary
 
 
-def _deteksi_kueri_komparasi_periode(question: str) -> dict | None:
+async def deteksi_topik_riwayat_percakapan(core_pool, conversation_id: int | None) -> str | None:
+    """Ambil topik domain dari percakapan sebelumnya (berdasarkan pesan user terdahulu atau title percakapan)."""
+    if not conversation_id:
+        return None
+    try:
+        # 1. Cek dari pesan-pesan USER terdahulu (urutan dari yang paling baru ke lama)
+        rows = await core_pool.fetch(
+            "SELECT content FROM messages WHERE conversation_id = $1 AND role = 'user' ORDER BY id DESC LIMIT 10",
+            conversation_id
+        )
+        for r in rows:
+            content = (r["content"] or "").lower()
+            if any(w in content for w in ["beli", "pembelian", "kulakan", "pengadaan"]):
+                return "pembelian"
+            if any(w in content for w in ["servis", "service", "bengkel", "pkb", "wo"]):
+                return "servis"
+            if any(w in content for w in ["sparepart", "suku cadang", "part"]):
+                return "sparepart"
+            if any(w in content for w in ["jual", "penjualan", "omzet", "unit terjual"]):
+                return "penjualan"
+
+        # 2. Cek dari judul percakapan (pertanyaan pertama user saat sesi dibuat)
+        title = await core_pool.fetchval(
+            "SELECT title FROM conversations WHERE id = $1",
+            conversation_id
+        )
+        if title:
+            t_lower = title.lower()
+            if any(w in t_lower for w in ["beli", "pembelian", "kulakan", "pengadaan"]):
+                return "pembelian"
+            if any(w in t_lower for w in ["servis", "service", "bengkel", "pkb", "wo"]):
+                return "servis"
+            if any(w in t_lower for w in ["sparepart", "suku cadang", "part"]):
+                return "sparepart"
+            if any(w in t_lower for w in ["jual", "penjualan", "omzet", "unit terjual"]):
+                return "penjualan"
+    except Exception as e:
+        logger.warning("Gagal deteksi topik percakapan %s: %s", conversation_id, e)
+    return None
+
+
+def _deteksi_kueri_komparasi_periode(question: str, inherited_topic: str | None = None) -> dict | None:
     """Deteksi kueri perbandingan antar periode (misal: 2024 vs 2025)."""
     q_lower = (question or "").lower()
     years = re.findall(r'\b(20[12]\d)\b', q_lower)
-    is_vs = any(w in q_lower for w in [" vs ", " versus ", "bandingkan", "perbandingan", "komparasi", " beda ", "selisih"])
+    is_vs = any(w in q_lower for w in [" vs ", " versus ", "bandingkan", "perbandingan", "komparasi", " beda ", "selisih", "dibandingkan", "dibanding"])
 
-    subject = "transaksi"
+    subject = inherited_topic or "transaksi"
     if any(w in q_lower for w in ["jual", "penjualan", "omzet", "unit terjual"]):
         subject = "penjualan"
     elif any(w in q_lower for w in ["beli", "pembelian", "pengadaan"]):
@@ -280,6 +330,8 @@ def _deteksi_kueri_komparasi_periode(question: str) -> dict | None:
     elif any(w in q_lower for w in ["part", "sparepart", "suku cadang"]):
         subject = "suku cadang"
 
+    frasa_subject = f"transaksi {subject}" if subject != "transaksi" else "data transaksi"
+
     if len(years) >= 2:
         p1, p2 = sorted(years[:2])
         return {
@@ -287,9 +339,9 @@ def _deteksi_kueri_komparasi_periode(question: str) -> dict | None:
             "periods": [p1, p2],
             "subject": subject,
             "suggestions": [
-                f"Tampilkan rincian transaksi {subject} tahun {p1} dan {p2} secara terpisah",
-                f"Lihat detail transaksi {subject} tahun {p1}",
-                f"Lihat detail transaksi {subject} tahun {p2}",
+                f"Tampilkan rincian {frasa_subject} tahun {p1} dan {p2} secara terpisah",
+                f"Lihat detail {frasa_subject} tahun {p1}",
+                f"Lihat detail {frasa_subject} tahun {p2}",
             ]
         }
     elif is_vs and len(years) == 1:
@@ -300,43 +352,60 @@ def _deteksi_kueri_komparasi_periode(question: str) -> dict | None:
             "periods": [p_prev, p1],
             "subject": subject,
             "suggestions": [
-                f"Tampilkan rincian transaksi {subject} tahun {p_prev} dan {p1} secara terpisah",
-                f"Lihat detail transaksi {subject} tahun {p1}",
-                f"Lihat detail transaksi {subject} tahun {p_prev}",
+                f"Tampilkan rincian {frasa_subject} tahun {p_prev} dan {p1} secara terpisah",
+                f"Lihat detail {frasa_subject} tahun {p1}",
+                f"Lihat detail {frasa_subject} tahun {p_prev}",
             ]
         }
     return None
 
 
-def cek_apakah_minta_rincian_terpisah(question: str) -> dict | None:
+def cek_apakah_minta_rincian_terpisah(question: str, inherited_topic: str | None = None) -> dict | None:
     """Deteksi jika user meminta rincian periode terpisah (Gaya 2)."""
     q_lower = (question or "").lower()
-    is_terpisah = any(w in q_lower for w in ["terpisah", "sendiri-sendiri", "masing-masing", "pisah"])
+    is_terpisah = any(w in q_lower for w in ["terpisah", "sendiri-sendiri", "masing-masing", "pisah", "pecah", "tiap tabel", "per tabel"])
     is_rincian = any(w in q_lower for w in ["rincian", "detail", "faktur", "transaksi", "tabel terpisah"])
     years = re.findall(r'\b(20[12]\d)\b', q_lower)
 
     if (is_terpisah or is_rincian) and len(years) >= 2:
         p1, p2 = sorted(years[:2])
 
+        # Tentukan topik dari kueri eksplisit atau inherited_topic dari percakapan
+        topic = inherited_topic or "penjualan"
+        if any(w in q_lower for w in ["beli", "pembelian", "kulakan", "pengadaan"]):
+            topic = "pembelian"
+        elif any(w in q_lower for w in ["servis", "service", "bengkel", "wo", "pkb"]):
+            topic = "servis"
+        elif any(w in q_lower for w in ["part", "sparepart", "suku cadang"]):
+            topic = "sparepart"
+        elif any(w in q_lower for w in ["jual", "penjualan", "omzet", "unit terjual"]):
+            topic = "penjualan"
+
         # Tentukan tabel target berdasarkan konteks kueri
         table = "untt_penjualan"
         date_col = "tanggal"
         order_col = "tanggal"
         filter_clause = "NOT COALESCE(batal, FALSE) AND NOT COALESCE(retur, FALSE)"
-        columns_to_select = "nomor, tanggal, nomor_pesanan, hargajual, diskon, hjakhir"
+        columns_to_select = "nomor, tanggal, nomor_pesanan, norangka, hjunit, diskon, hjakhir"
 
-        if any(w in q_lower for w in ["beli", "pembelian"]):
+        if topic == "pembelian":
             table = "untt_pembelian"
             date_col = "tglinvoice"
             order_col = "tglinvoice"
             filter_clause = "1=1"
             columns_to_select = "nomor, tglinvoice, norangka, hpunit, hpdpp, hpppn"
-        elif any(w in q_lower for w in ["servis", "service", "bengkel"]):
+        elif topic == "servis":
             table = "srvt_wo"
             date_col = "tanggal"
             order_col = "tanggal"
             filter_clause = "NOT COALESCE(batal, FALSE)"
             columns_to_select = "nomor, tanggal, nomor_customer, nopolisi, totalestimasibiaya"
+        elif topic == "sparepart":
+            table = "srvt_wodetail"
+            date_col = "tanggal"
+            order_col = "nomor"
+            filter_clause = "part > 0"
+            columns_to_select = "nomor_wo, part, jenis"
 
         sql_1 = f"SELECT {columns_to_select} FROM {table} WHERE EXTRACT(YEAR FROM {date_col}) = {p1} AND {filter_clause} ORDER BY {order_col} DESC LIMIT 50;"
         sql_2 = f"SELECT {columns_to_select} FROM {table} WHERE EXTRACT(YEAR FROM {date_col}) = {p2} AND {filter_clause} ORDER BY {order_col} DESC LIMIT 50;"
@@ -344,6 +413,9 @@ def cek_apakah_minta_rincian_terpisah(question: str) -> dict | None:
         return {
             "category": "rincian_terpisah",
             "mode": "separated_years",
+            "p1": p1,
+            "p2": p2,
+            "topic": topic,
             "domains": [
                 {
                     "id": f"thn_{p1}",
@@ -392,6 +464,9 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
         tenant_id = tenant.get("tenant_id") or tenant.get("id")
         q_norm = normalisasi_pertanyaan(question)
 
+        # Deteksi topik riwayat percakapan sebelumnya untuk multi-turn chat continuity
+        inherited_topic = await deteksi_topik_riwayat_percakapan(core_pool, conversation_id)
+
         # 0. Cek SQL Memory (0 Panggilan LLM, 0 Token!)
         entri_memori = await core_pool.fetchrow(
             "SELECT id, sql, ringkasan, status FROM sql_memory "
@@ -404,76 +479,90 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
 
         if entri_memori:
             sql_mem = entri_memori["sql"]
-            try:
-                pool_tenant = await tenant_pool_manager.get_pool(tenant)
-                async with pool_tenant.acquire() as conn:
-                    await conn.execute("SET statement_timeout = '30000'")
-                    db_rows = await conn.fetch(sql_mem)
+            # Periksa apakah entri memori ini cocok dengan konteks percakapan multi-turn
+            topic_mismatch = False
+            if inherited_topic:
+                sql_lower = sql_mem.lower()
+                if inherited_topic == "pembelian" and "untt_pembelian" not in sql_lower:
+                    topic_mismatch = True
+                elif inherited_topic == "servis" and "srvt_" not in sql_lower:
+                    topic_mismatch = True
+                elif inherited_topic == "sparepart" and "prtt_" not in sql_lower and "part" not in sql_lower:
+                    topic_mismatch = True
+                elif inherited_topic == "penjualan" and "untt_penjualan" not in sql_lower:
+                    topic_mismatch = True
 
-                durasi_ms = int((time.monotonic() - t0) * 1000)
-                columns = [k for k in db_rows[0].keys()] if db_rows else []
-                rows = [[_konversi_nilai_vanna(v) for v in r.values()] for r in db_rows[:500]]
-                raw_ringkasan = entri_memori["ringkasan"] or _format_ringkasan_otomatis(db_rows[:500], columns, question)
-                ringkasan = _bersihkan_emoji_teks(raw_ringkasan)
-
+            if not topic_mismatch:
                 try:
-                    await tandai_memory_dipakai(core_pool, entri_memori["id"])
-                except Exception:
-                    pass
+                    pool_tenant = await tenant_pool_manager.get_pool(tenant)
+                    async with pool_tenant.acquire() as conn:
+                        await conn.execute("SET statement_timeout = '30000'")
+                        db_rows = await conn.fetch(sql_mem)
 
-                comp_info = _deteksi_kueri_komparasi_periode(question)
-                saran_list = comp_info.get("suggestions", []) if comp_info else []
-                is_comp = bool(comp_info)
+                    durasi_ms = int((time.monotonic() - t0) * 1000)
+                    columns = [k for k in db_rows[0].keys()] if db_rows else []
+                    rows = [[_konversi_nilai_vanna(v) for v in r.values()] for r in db_rows[:500]]
+                    raw_ringkasan = entri_memori["ringkasan"] or _format_ringkasan_otomatis(db_rows[:500], columns, question)
+                    ringkasan = _bersihkan_emoji_teks(raw_ringkasan)
 
-                response = {
-                    "source": "memory",
-                    "confidence": "A",
-                    "sql": sql_mem,
-                    "params": [],
-                    "columns": columns,
-                    "rows": rows,
-                    "row_count": len(rows),
-                    "truncated": len(db_rows) > 500,
-                    "duration_ms": durasi_ms,
-                    "memory_id": entri_memori["id"],
-                    "question": question,
-                    "ringkasan": ringkasan,
-                    "saran": saran_list,
-                    "metode": "memory",
-                    "allow_explain": True,
-                    "is_comparison": is_comp,
-                    "comparison_meta": comp_info
-                }
+                    try:
+                        await tandai_memory_dipakai(core_pool, entri_memori["id"])
+                    except Exception:
+                        pass
 
-                conv_id = await ambil_atau_buat_conversation(core_pool, user_id, branch_code, question, conversation_id=conversation_id)
-                response["conversation_id"] = conv_id
-                await simpan_pesan(core_pool, conv_id, "user", question)
-                await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
+                    comp_info = _deteksi_kueri_komparasi_periode(question, inherited_topic=inherited_topic)
+                    saran_list = comp_info.get("suggestions", []) if comp_info else []
+                    is_comp = bool(comp_info)
 
-                await tulis_audit(
-                    core_pool,
-                    user_id=user_id,
-                    branch_code=branch_code,
-                    prompt_text=question,
-                    ai_json_filter={"mode": "vanna", "replay_memory": True},
-                    generated_sql=sql_mem,
-                    execution_time_ms=durasi_ms,
-                    status="success",
-                    error_message=None
-                )
-                return response
-            except Exception as e_mem:
-                logger.warning("Replay SQL memory gagal (%s), lanjut ke LLM...", e_mem)
+                    response = {
+                        "source": "memory",
+                        "confidence": "A",
+                        "sql": sql_mem,
+                        "params": [],
+                        "columns": columns,
+                        "rows": rows,
+                        "row_count": len(rows),
+                        "truncated": len(db_rows) > 500,
+                        "duration_ms": durasi_ms,
+                        "memory_id": entri_memori["id"],
+                        "question": question,
+                        "ringkasan": ringkasan,
+                        "saran": saran_list,
+                        "metode": "memory",
+                        "allow_explain": True,
+                        "is_comparison": is_comp,
+                        "comparison_meta": comp_info
+                    }
+
+                    conv_id = await ambil_atau_buat_conversation(core_pool, user_id, branch_code, question, conversation_id=conversation_id)
+                    response["conversation_id"] = conv_id
+                    await simpan_pesan(core_pool, conv_id, "user", question)
+                    await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
+
+                    await tulis_audit(
+                        core_pool,
+                        user_id=user_id,
+                        branch_code=branch_code,
+                        prompt_text=question,
+                        ai_json_filter={"mode": "vanna", "replay_memory": True},
+                        generated_sql=sql_mem,
+                        execution_time_ms=durasi_ms,
+                        status="success",
+                        error_message=None
+                    )
+                    return response
+                except Exception as e_mem:
+                    logger.warning("Replay SQL memory gagal (%s), lanjut ke LLM...", e_mem)
 
         # 0.4. Cek Kueri Rincian Terpisah (Gaya 2) atau Kueri Makro Dealer Multi-Tab
-        fanout_info = cek_apakah_minta_rincian_terpisah(question) or cek_apakah_perlu_fanout(question)
+        fanout_info = cek_apakah_minta_rincian_terpisah(question, inherited_topic=inherited_topic) or cek_apakah_perlu_fanout(question)
         if fanout_info:
             ai_config = await resolve_ai_config(core_pool, user.get("username", ""), branch_code)
             async with VANNA_SEMAPHORE:
                 if all("sql" in d and d["sql"] for d in fanout_info["domains"]):
                     sql_dict = {d["id"]: d["sql"] for d in fanout_info["domains"]}
                 else:
-                    context_text, _ = await ambil_konteks_vanna(core_pool, question, branch_code)
+                    context_text, _ = await ambil_konteks_vanna(core_pool, question, branch_code, inherited_topic=inherited_topic)
                     multi_prompt = susun_multi_sql_prompt(question, fanout_info, context_text)
                     panggil_fn = llm_call_fn or panggil_llm_default
                     system_msg = "You are a PostgreSQL expert for automotive DMS. Respond only with JSON containing SQL for each domain."
@@ -664,10 +753,10 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
         
         async with VANNA_SEMAPHORE:
             # 1. Ambil Konteks Semantik Murni dari pgvector (dengan fallback aman)
-            context_text, _ = await ambil_konteks_vanna(core_pool, question, branch_code)
+            context_text, _ = await ambil_konteks_vanna(core_pool, question, branch_code, inherited_topic=inherited_topic)
             
             # 2. Susun Prompt Vanna
-            vanna_prompt = susun_prompt_vanna(question, context_text)
+            vanna_prompt = susun_prompt_vanna(question, context_text, inherited_topic=inherited_topic)
             
             # 3. Panggil LLM (Hanya 1 Panggilan Tunggal!)
             panggil_fn = llm_call_fn or panggil_llm_default
@@ -742,7 +831,7 @@ Berikan ringkasan naratif eksekutif singkat (2-3 kalimat) dalam bahasa Indonesia
                 allow_explain = True
 
             ringkasan = _bersihkan_emoji_teks(ringkasan)
-            comp_info = _deteksi_kueri_komparasi_periode(question)
+            comp_info = _deteksi_kueri_komparasi_periode(question, inherited_topic=inherited_topic)
             saran_list = comp_info.get("suggestions", []) if comp_info else []
             is_comp = bool(comp_info)
 
