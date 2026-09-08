@@ -201,11 +201,43 @@ def test_annual_comparison_anti_inversion():
 
 def test_is_data_cutoff_question_detection():
     from app.services.vanna_engine import _is_data_cutoff_question
-    assert _is_data_cutoff_question("kenapa data hanya sampai bulan 11?") == {"target_year": 2025, "is_transaksi_terakhir": False}
-    assert _is_data_cutoff_question("mengapa data cuma sampai november?") == {"target_year": 2025, "is_transaksi_terakhir": False}
-    assert _is_data_cutoff_question("kenapa data 2026 hanya sampai bulan 6?") == {"target_year": 2026, "is_transaksi_terakhir": False}
-    assert _is_data_cutoff_question("kapan transaksi terakhir tercatat?") == {"target_year": 2025, "is_transaksi_terakhir": True}
+    # Sesi baru tanpa konteks -> WAJIB minta klarifikasi (tidak boleh menebak 2025)
+    res_no_ctx = _is_data_cutoff_question("kenapa data hanya sampai bulan 11?")
+    assert res_no_ctx["needs_clarification"] is True
+    assert res_no_ctx["target_year"] is None
+    assert res_no_ctx["is_transaksi_terakhir"] is False
+
+    # Multi-turn dalam sesi aktif yang memiliki konteks tahun & topik
+    res_with_ctx = _is_data_cutoff_question("mengapa data cuma sampai november?", active_context={"year": 2025, "topic": "servis"})
+    assert res_with_ctx["needs_clarification"] is False
+    assert res_with_ctx["target_year"] == 2025
+    assert res_with_ctx["topic"] == "servis"
+    assert res_with_ctx["is_transaksi_terakhir"] is False
+
+    # Pertanyaan eksplisit menyebutkan tahun
+    res_explicit_year = _is_data_cutoff_question("kenapa data 2026 hanya sampai bulan 6?")
+    assert res_explicit_year["needs_clarification"] is False
+    assert res_explicit_year["target_year"] == 2026
+    assert res_explicit_year["is_transaksi_terakhir"] is False
+
+    # Pertanyaan transaksi terakhir eksplisit tahun
+    res_last_tx = _is_data_cutoff_question("kapan transaksi terakhir tercatat tahun 2025?")
+    assert res_last_tx["needs_clarification"] is False
+    assert res_last_tx["target_year"] == 2025
+    assert res_last_tx["is_transaksi_terakhir"] is True
+
+    # Bukan pertanyaan cutoff
     assert _is_data_cutoff_question("tampilkan 5 mobil terlaris") is None
+
+
+def test_ambil_konteks_percakapan_aktif_empty():
+    import asyncio
+    from app.services.vanna_engine import ambil_konteks_percakapan_aktif
+    # conversation_id None -> netral tanpa bocor
+    ctx = asyncio.run(ambil_konteks_percakapan_aktif(None, None))
+    assert ctx == {"year": None, "topic": None, "has_prior_chat": False}
+
+
 
 
 

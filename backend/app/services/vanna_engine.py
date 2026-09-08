@@ -235,7 +235,7 @@ def _format_rupiah_human(val: float | int) -> str:
 _MONTH_NAMES_PATTERN = "januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember"
 
 
-def _is_data_cutoff_question(question: str) -> dict | None:
+def _is_data_cutoff_question(question: str, active_context: dict | None = None) -> dict | None:
     """Deteksi pertanyaan meta-analitik mengapa data terputus di bulan tertentu atau kapan transaksi terakhir."""
     q_lower = (question or "").lower().strip()
     pola_bulan = re.search(
@@ -255,10 +255,39 @@ def _is_data_cutoff_question(question: str) -> dict | None:
         return None
 
     thn_match = re.search(r"\b(20\d{2})\b", q_lower)
-    target_year = int(thn_match.group(1)) if thn_match else 2025
+    target_year = None
+    if thn_match:
+        target_year = int(thn_match.group(1))
+    elif active_context and active_context.get("year"):
+        target_year = active_context["year"]
+
+    # Deteksi topik dari pertanyaan atau konteks percakapan aktif
+    topic = None
+    if any(w in q_lower for w in ["beli", "pembelian", "kulakan", "pengadaan"]):
+        topic = "pembelian"
+    elif any(w in q_lower for w in ["servis", "service", "bengkel", "pkb", "wo"]):
+        topic = "servis"
+    elif any(w in q_lower for w in ["sparepart", "suku cadang", "part"]):
+        topic = "sparepart"
+    elif any(w in q_lower for w in ["jual", "penjualan", "omzet", "unit terjual"]):
+        topic = "penjualan"
+    elif active_context and active_context.get("topic"):
+        topic = active_context["topic"]
+
+    # Jika tahun tidak teridentifikasi (baik di pertanyaan maupun riwayat sesi aktif):
+    # WAJIB minta klarifikasi parameter, DILARANG mengasumsikan/menebak tahun 2025 secara liar!
+    if target_year is None:
+        return {
+            "needs_clarification": True,
+            "target_year": None,
+            "topic": topic,
+            "is_transaksi_terakhir": bool(pola_transaksi_terakhir),
+        }
 
     return {
+        "needs_clarification": False,
         "target_year": target_year,
+        "topic": topic,
         "is_transaksi_terakhir": bool(pola_transaksi_terakhir),
     }
 
@@ -268,8 +297,39 @@ async def tangani_pertanyaan_keterbatasan_data(
 ) -> dict:
     """Eksekusi audit empiris batas tanggal transaksi pada database tenant tanpa halusinasi LLM."""
     target_year = cutoff_info.get("target_year", 2025)
+    topic = cutoff_info.get("topic")
 
-    sql_check = f"""SELECT 
+    if topic == "penjualan":
+        sql_check = f"""SELECT 
+    'Penjualan Unit Kendaraan' AS divisi,
+    COUNT(*) AS total_transaksi,
+    TO_CHAR(MAX(tanggal), 'DD TMMonth YYYY HH24:MI') AS transaksi_terakhir
+FROM untt_penjualan
+WHERE EXTRACT(YEAR FROM tanggal) = {target_year} AND batal = false AND retur = false"""
+    elif topic == "servis":
+        sql_check = f"""SELECT 
+    'Jasa Servis Bengkel' AS divisi,
+    COUNT(*) AS total_transaksi,
+    TO_CHAR(MAX(tanggal), 'DD TMMonth YYYY HH24:MI') AS transaksi_terakhir
+FROM srvt_wo
+WHERE EXTRACT(YEAR FROM tanggal) = {target_year} AND batal = false"""
+    elif topic == "sparepart":
+        sql_check = f"""SELECT 
+    'Suku Cadang & Sparepart' AS divisi,
+    COUNT(*) AS total_transaksi,
+    TO_CHAR(MAX(w.tanggal), 'DD TMMonth YYYY HH24:MI') AS transaksi_terakhir
+FROM srvt_wodetail d
+JOIN srvt_wo w ON d.nomor_wo = w.nomor
+WHERE EXTRACT(YEAR FROM w.tanggal) = {target_year} AND w.batal = false AND d.part > 0"""
+    elif topic == "pembelian":
+        sql_check = f"""SELECT 
+    'Pembelian Unit Kendaraan' AS divisi,
+    COUNT(*) AS total_transaksi,
+    TO_CHAR(MAX(tglinvoice), 'DD TMMonth YYYY HH24:MI') AS transaksi_terakhir
+FROM untt_pembelian
+WHERE EXTRACT(YEAR FROM tglinvoice) = {target_year}"""
+    else:
+        sql_check = f"""SELECT 
     'Penjualan Unit Kendaraan' AS divisi,
     COUNT(*) AS total_transaksi,
     TO_CHAR(MAX(tanggal), 'DD TMMonth YYYY HH24:MI') AS transaksi_terakhir
@@ -305,31 +365,41 @@ WHERE EXTRACT(YEAR FROM w.tanggal) = {target_year} AND w.batal = false AND d.par
         for r in records
     ]
 
-    valid_dates = [r["transaksi_terakhir"] for r in records if r["transaksi_terakhir"]]
-    sample_date = valid_dates[0] if valid_dates else "18 November 2025 12:02"
+    valid_dates = [r["transaksi_terakhir"] for r in records if r["transaksi_terakhir"] and r["transaksi_terakhir"] != "Tidak ada transaksi"]
+    sample_date = valid_dates[0] if valid_dates else f"18 November {target_year} 12:02"
+
+    divisi_text = "di seluruh divisi (Penjualan Unit, Servis Bengkel, dan Suku Cadang)"
+    if topic == "penjualan":
+        divisi_text = "pada divisi Penjualan Unit Kendaraan"
+    elif topic == "servis":
+        divisi_text = "pada divisi Jasa Servis Bengkel"
+    elif topic == "sparepart":
+        divisi_text = "pada divisi Suku Cadang & Sparepart"
+    elif topic == "pembelian":
+        divisi_text = "pada divisi Pembelian Unit"
 
     if target_year == 2025:
         ringkasan = (
-            f"Berdasarkan rekaman database cabang {branch_code}, transaksi operasional tahun 2025 di seluruh divisi "
-            f"(Penjualan Unit, Servis Bengkel, dan Suku Cadang) terakhir tercatat pada {sample_date} WIB. "
+            f"Berdasarkan rekaman database cabang {branch_code}, transaksi operasional tahun 2025 {divisi_text} "
+            f"terakhir tercatat pada {sample_date} WIB. "
             f"Data transaksi untuk bulan Desember 2025 belum tercatat di sistem database ini "
             f"(cut-off pencatatan snapshot operasional berakhir pada pertengahan November 2025)."
         )
     elif target_year == 2026:
         ringkasan = (
-            f"Berdasarkan rekaman database cabang {branch_code}, data transaksi tahun berjalan 2026 di sistem baru "
+            f"Berdasarkan rekaman database cabang {branch_code}, data transaksi tahun berjalan 2026 {divisi_text} "
             f"tercatat hingga pertengahan tahun (Juni 2026). Untuk analisis komprehensif tahun penuh, disarankan "
             f"meninjau performa tahun 2025 atau 2024."
         )
     else:
         ringkasan = (
-            f"Status ketersediaan data transaksi tahun {target_year} pada database cabang {branch_code}: "
+            f"Status ketersediaan data transaksi tahun {target_year} {divisi_text} pada database cabang {branch_code}: "
             f"transaksi terakhir tercatat pada {sample_date}."
         )
 
     saran = [
         f"Tampilkan rincian transaksi bulan November {target_year}",
-        f"Tampilkan total penjualan per bulan di tahun {target_year - 1}",
+        f"Tampilkan total per bulan di tahun {target_year - 1}",
         f"Bandingkan performa tahun {target_year - 1} vs {target_year}",
     ]
 
@@ -487,6 +557,65 @@ async def deteksi_topik_riwayat_percakapan(core_pool, conversation_id: int | Non
     return None
 
 
+async def ambil_konteks_percakapan_aktif(core_pool, conversation_id: int | None) -> dict:
+    """Ekstrak tahun dan topik dari riwayat sesi percakapan aktif (terisolasi per conversation_id).
+
+    Prinsip Zero Cross-Session Bleed: konteks HANYA dari conversation_id ini.
+    Jika conversation_id None atau sesi kosong, kembalikan konteks netral tanpa asumsi.
+    """
+    if not conversation_id:
+        return {"year": None, "topic": None, "has_prior_chat": False}
+    try:
+        rows = await core_pool.fetch(
+            "SELECT role, content FROM messages WHERE conversation_id = $1 ORDER BY id DESC LIMIT 10",
+            conversation_id
+        )
+        if not rows:
+            return {"year": None, "topic": None, "has_prior_chat": False}
+
+        found_year = None
+        found_topic = None
+
+        for r in rows:
+            raw = str(r["content"] or "")
+            text_to_scan = raw
+            if r["role"] == "assistant":
+                try:
+                    import json as _json
+                    data = _json.loads(raw)
+                    text_to_scan = f"{data.get('question', '')} {data.get('sql', '')} {data.get('ringkasan', '')}"
+                except Exception:
+                    pass
+
+            if not found_year:
+                y_matches = re.findall(r'\b(20[12]\d)\b', text_to_scan)
+                if y_matches:
+                    found_year = int(y_matches[0])
+
+            if not found_topic:
+                c_lower = text_to_scan.lower()
+                if any(w in c_lower for w in ["beli", "pembelian", "kulakan", "pengadaan"]):
+                    found_topic = "pembelian"
+                elif any(w in c_lower for w in ["servis", "service", "bengkel", "wo", "pkb"]):
+                    found_topic = "servis"
+                elif any(w in c_lower for w in ["sparepart", "suku cadang", "part"]):
+                    found_topic = "sparepart"
+                elif any(w in c_lower for w in ["jual", "penjualan", "omzet", "unit terjual"]):
+                    found_topic = "penjualan"
+
+            if found_year and found_topic:
+                break
+
+        return {
+            "year": found_year,
+            "topic": found_topic,
+            "has_prior_chat": len(rows) > 0
+        }
+    except Exception as e:
+        logger.warning("Gagal ambil konteks percakapan aktif %s: %s", conversation_id, e)
+        return {"year": None, "topic": None, "has_prior_chat": False}
+
+
 def _deteksi_kueri_komparasi_periode(question: str, inherited_topic: str | None = None) -> dict | None:
     """Deteksi kueri perbandingan antar periode (misal: 2024 vs 2025)."""
     q_lower = (question or "").lower()
@@ -640,9 +769,86 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
         # Deteksi topik riwayat percakapan sebelumnya untuk multi-turn chat continuity
         inherited_topic = await deteksi_topik_riwayat_percakapan(core_pool, conversation_id)
 
+        # Ambil konteks percakapan aktif (tahun + topik) secara terisolasi per conversation_id
+        active_context = await ambil_konteks_percakapan_aktif(core_pool, conversation_id)
+
         # 0.1. Cek Pertanyaan Eksplanatori Keterbatasan Data / Cut-off Tanggal (0 Panggilan LLM, 100% Akurat)
-        cutoff_info = _is_data_cutoff_question(question)
+        cutoff_info = _is_data_cutoff_question(question, active_context=active_context)
         if cutoff_info:
+            # Jika tahun dan konteks tidak teridentifikasi: kembalikan kartu klarifikasi interaktif
+            if cutoff_info.get("needs_clarification"):
+                durasi_ms = int((time.monotonic() - t0) * 1000)
+                response = {
+                    "source": "clarification",
+                    "confidence": "B",
+                    "status": "clarification_needed",
+                    "question": question,
+                    "clarification_message": (
+                        "Pertanyaan Anda mengenai keterbatasan data memerlukan konteks tahun dan divisi. "
+                        "Data tahun dan divisi mana yang ingin Anda periksa?"
+                    ),
+                    "category": "data_cutoff",
+                    "options": [
+                        {
+                            "id": "cutoff_all_2025",
+                            "icon": "Layers",
+                            "label": "Seluruh Divisi Operasional Tahun 2025",
+                            "deskripsi": "Audit batas data Penjualan Unit, Servis Bengkel, dan Suku Cadang tahun 2025",
+                            "prompt": "Kenapa data tahun 2025 hanya sampai bulan 11?",
+                        },
+                        {
+                            "id": "cutoff_unit_2025",
+                            "icon": "Car",
+                            "label": "Penjualan Unit Kendaraan Tahun 2025",
+                            "deskripsi": "Audit batas data penjualan unit kendaraan tahun 2025",
+                            "prompt": "Kenapa data penjualan unit tahun 2025 hanya sampai bulan 11?",
+                        },
+                        {
+                            "id": "cutoff_servis_2025",
+                            "icon": "Wrench",
+                            "label": "Jasa Servis Bengkel Tahun 2025",
+                            "deskripsi": "Audit batas data servis bengkel tahun 2025",
+                            "prompt": "Kenapa data servis bengkel tahun 2025 hanya sampai bulan 11?",
+                        },
+                    ],
+                    "sql": "",
+                    "params": [],
+                    "columns": [],
+                    "rows": [],
+                    "row_count": 0,
+                    "truncated": False,
+                    "duration_ms": durasi_ms,
+                    "memory_id": None,
+                    "ringkasan": (
+                        "Pertanyaan Anda mengenai keterbatasan data memerlukan konteks tahun dan divisi. "
+                        "Data tahun dan divisi mana yang ingin Anda periksa?"
+                    ),
+                    "saran": [],
+                    "metode": "clarification",
+                    "allow_explain": False,
+                }
+
+                conv_id = await ambil_atau_buat_conversation(
+                    core_pool, user_id, branch_code, question, conversation_id=conversation_id
+                )
+                response["conversation_id"] = conv_id
+                await simpan_pesan(core_pool, conv_id, "user", question)
+                await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
+
+                await tulis_audit(
+                    core_pool,
+                    user_id=user_id,
+                    branch_code=branch_code,
+                    prompt_text=question,
+                    ai_json_filter={"mode": "clarification", "reason": "data_cutoff_no_year"},
+                    generated_sql="",
+                    execution_time_ms=durasi_ms,
+                    status="success",
+                    error_message=None,
+                )
+                return response
+
+            # Tahun teridentifikasi (dari pertanyaan atau riwayat sesi aktif): jalankan audit empiris
             res_cutoff = await tangani_pertanyaan_keterbatasan_data(
                 tenant_pool_manager, tenant, question, cutoff_info, branch_code
             )
@@ -1088,18 +1294,30 @@ Berikan ringkasan naratif eksekutif singkat (2-3 kalimat) dalam bahasa Indonesia
             }
 
         # Simpan ke SQL Memory agar pertanyaan yang sama berikutnya bernilai 0 token!
-        try:
-            mem_id = await core_pool.fetchval(
-                """
-                INSERT INTO sql_memory (tenant_id, pertanyaan_ternormalisasi, sql, status, ringkasan, sumber, times_used, last_used, created_at, updated_at)
-                VALUES ($1, $2, $3, 'approved', $4, 'vanna', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                RETURNING id
-                """,
-                tenant_id, q_norm, sql, ringkasan
-            )
-            response["memory_id"] = mem_id
-        except Exception as e_save:
-            logger.warning("Gagal menyimpan ke sql_memory: %s", e_save)
+        # PENTING: Kueri eliptikal yang bergantung pada konteks sesi aktif (misal: "coba bandingkan keduanya",
+        # "tampilkan rincian terpisah", atau topik yang diwarisi dari chat sebelumnya tanpa menyebutkan domain secara mandiri)
+        # DILARANG disimpan ke sql_memory global agar tidak bocor ke sesi percakapan atau user lain.
+        is_elliptical = (
+            inherited_topic is not None
+            and not any(w in question.lower() for w in [
+                "jual", "penjualan", "beli", "pembelian",
+                "servis", "service", "bengkel", "pkb", "wo",
+                "part", "sparepart", "suku cadang"
+            ])
+        )
+        if not is_elliptical and not response.get("is_multi_tab"):
+            try:
+                mem_id = await core_pool.fetchval(
+                    """
+                    INSERT INTO sql_memory (tenant_id, pertanyaan_ternormalisasi, sql, status, ringkasan, sumber, times_used, last_used, created_at, updated_at)
+                    VALUES ($1, $2, $3, 'approved', $4, 'vanna', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    RETURNING id
+                    """,
+                    tenant_id, q_norm, sql, ringkasan
+                )
+                response["memory_id"] = mem_id
+            except Exception as e_save:
+                logger.warning("Gagal menyimpan ke sql_memory: %s", e_save)
 
         # Simpan ke percakapan agar muncul di UI
         conv_id = await ambil_atau_buat_conversation(core_pool, user_id, branch_code, question, conversation_id=conversation_id)

@@ -1482,6 +1482,48 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
      - Kueri 2 (*"bagaimana performa transaksi tahun 2025"*): Menghasilkan `Unit Kendaraan: 350 unit terjual, Rp 69,83 Miliar • Jasa Servis Bengkel: 13.313 PKB servis • Suku Cadang & Sparepart: 117.790 part terjual, Rp 42,18 Miliar` — kuantitas part dan label tata bahasa sempurna.
      - Kueri 3 (*"kenapa data hanya sampai bulan 11?"*): Menyajikan tabel 3 baris berisi tanggal transaksi terakhir (18 November 2025) dengan narasi eksplanatori cut-off snapshot database yang akurat dan transparan.
 
+### 3ar. Isolasi Sesi Percakapan Riwayat Chat & Klarifikasi Konteks Pertanyaan Keterbatasan Data (2026-09-08)
+
+- **Latar Belakang & Keluhan Pengguna**:
+  Pengguna menemukan bahwa pada sesi baru ("+ Percakapan Baru", `conversation_id: null`), ketika mengetik kueri tanpa tahun atau divisi spesifik (*"kenapa data hanya sampai bulan 11?"*), AI langsung menjawab fakta data tahun 2025 di seluruh divisi operasional (Penjualan Unit, Servis Bengkel, Suku Cadang). Pengguna mengeluhkan:
+  > *"bro ini gaada chat sebelumnya kok tiba tiba bisa jawab kesana? harusnya baca dari chat chat sebelumnya dong dan gabisa lintas history.."*
+
+- **Akar Penyebab Masalah**:
+  1. **Fallback Hardcode Tahun 2025**:
+     Pada `vanna_engine.py`, fungsi `_is_data_cutoff_question` memiliki baris fallback:
+     `target_year = int(thn_match.group(1)) if thn_match else 2025`
+     Ketika pertanyaan tidak memuat tahun, sistem langsung menetapkan tahun 2025 secara asumtif tanpa memeriksa riwayat sesi yang bersangkutan.
+  2. **Ketiadaan Pembacaan Konteks Sesi Aktif**:
+     Sistem belum membaca tahun transaksi dan topik dari percakapan aktif di sesi tersebut secara terstruktur.
+  3. **Kebocoran Kueri Eliptikal via SQL Memory**:
+     Kueri eliptikal sebelumnya sempat tersimpan ke `sql_memory` global (misal: *"coba bandingkan keduanya"* atau *"kenapa data hanya sampai bulan 11"*), sehingga dapat memicu SQL Memory Replay (Confidence A) lintas sesi/user lain.
+
+- **Solusi & Rekayasa Arsitektur**:
+  1. **Ekstraksi Konteks Percakapan Aktif Terisolasi (`ambil_konteks_percakapan_aktif`)**:
+     - Membaca riwayat pesan **HANYA** untuk `conversation_id` aktif (`WHERE conversation_id = $1 ORDER BY id DESC LIMIT 10`).
+     - Jika `conversation_id` adalah `None` atau belum ada riwayat: mengembalikan `{"year": None, "topic": None, "has_prior_chat": False}` secara netral (Zero Cross-Session Bleed).
+  2. **Pencegahan Tebakan Liar & Interactive Clarification Loop**:
+     - Pada `_is_data_cutoff_question(question, active_context=active_context)`:
+       - Cek tahun eksplisit di pertanyaan. Jika tidak ada, cek dari `active_context["year"]`.
+       - Jika tetap tidak ada: tandai `needs_clarification = True` dan `target_year = None`.
+     - Pada `jalankan_mode_vanna`:
+       - Jika `needs_clarification`: mengembalikan kartu klarifikasi interaktif (`source: "clarification"`, `status: "clarification_needed"`) dengan pilihan divisi: Penjualan Unit (2025), Servis Bengkel (2025), dan Seluruh Divisi (2025). 0 panggilan LLM, 0 token, <10 ms response time.
+  3. **Multi-Turn Continuity & Audit Spesifik Divisi**:
+     - Jika percakapan aktif memang sedang membahas suatu topik (misal servis) dan tahun (misal 2025), pertanyaan lanjutan *"kenapa data hanya sampai bulan 11?"* otomatis mewarisi konteks tersebut dan mengaudit tabel spesifik (`srvt_wo` untuk servis, `untt_penjualan` untuk unit, dst.).
+  4. **Proteksi Anti-Polusi SQL Memory**:
+     - Guard `is_elliptical`: Kueri yang bergantung pada `inherited_topic` dari sesi aktif dilarang disimpan ke tabel `sql_memory` global agar tidak terjadi replay salah tafsir ke sesi pengguna lain.
+     - Pembersihan entri eliptikal ambigu dari DB: Menghapus ID #15, #35, #71, #72 dari `sql_memory`.
+
+- **Hasil Verifikasi**:
+  - Backend compile: `compileall app` lolos 100% (exit code 0).
+  - Backend tests: `pytest tests/ -q` lolos 100% (**568 passed in 52.69s**, +1 unit test baru).
+  - Frontend lint: `npm run lint` lolos (**0 errors**).
+  - Frontend build: `npm run build` lolos (exit code 0, 1.29s).
+  - Live API Integration Test (`test_live_scenarios.py`):
+    - Skenario 1 (Sesi Baru): Kueri *"kenapa data hanya sampai bulan 11?"* -> menghasilkan `clarification_needed` dengan kartu klarifikasi interaktif (0 tebakan 2025, 0 kebocoran).
+    - Skenario 2 (Multi-Turn): Dalam sesi yang membahas servis 2025, kueri lanjutan langsung menghasilkan audit eksplanatori cut-off data servis 2025.
+    - Skenario 3 (Eksplisit): Kueri *"kenapa data 2026 hanya sampai bulan 6?"* langsung terjawab akurat tanpa ambiguitas.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -1550,6 +1592,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Pemisahan Komparasi Temporal (Gaya 1 vs Gaya 2), Humanisasi Header Kolom Tabel & Pelebaran Sumbu Y Grafik** — SELESAI (lihat §3ao).
 - [x] **Hardening Domain Suku Cadang/Inventori, Audit Form Accessibility & De-duplikasi Saran** — SELESAI (lihat §3ap).
 - [x] **Koreksi Inversi Nilai Komparasi Tahunan, Formatting Kuantitas Suku Cadang & Audit Eksplanatori Cut-Off Data** — SELESAI (lihat §3aq).
+- [x] **Isolasi Sesi Percakapan Riwayat Chat & Klarifikasi Konteks Pertanyaan Keterbatasan Data** — SELESAI (lihat §3ar).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. *Dedicated Executive Dashboard Page*: Ditutup/dibatalkan atas arahan pengguna untuk mempertahankan identitas murni Conversational AI Assistant.
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.
