@@ -35,6 +35,7 @@ def test_deteksi_konteks_sparepart():
     res = deteksi_konteks_domain("apakah stok sparepart oli masih tersedia di gudang?")
     categories = [r["category"] for r in res]
     assert "suku_cadang_inventori" in categories
+    assert any("srvm_parts" in r["primary_tables"] for r in res)
     assert any("invt_item" in r["primary_tables"] for r in res)
 
 

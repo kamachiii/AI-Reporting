@@ -653,6 +653,8 @@ export default function UserWorkspace({ user, onLogout }) {
                 className="relative flex items-center bg-canvas border border-hairline rounded-md shadow-2xs focus-within:border-primary focus-within:ring-3 focus-within:ring-primary/15 transition-all"
               >
                 <input
+                  id="chat-query"
+                  name="chat-query"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   disabled={isProcessing || !branchCode}

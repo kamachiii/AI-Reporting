@@ -28,8 +28,15 @@ const COLUMN_LABEL_DICT = {
   hpppn: 'PPN Pembelian',
   hppbm: 'PPnBM Pembelian',
   hjunit: 'Harga Jual Unit',
+  hargajual: 'Harga Jual',
+  hargabeli: 'Harga Beli',
+  cogs: 'COGS / HPP',
   hjakhir: 'Total Penjualan Akhir',
   totalestimasibiaya: 'Total Estimasi Biaya',
+  nomor_customer: 'No. Customer',
+  nopolisi: 'No. Polisi',
+  penerima: 'Penerima / SA',
+  nama_foreman: 'Nama Foreman',
   batal: 'Batal',
   retur: 'Retur',
   tahun: 'Tahun',
@@ -598,13 +605,19 @@ export default function AssistantAnswerCard({
           activeSql
         );
     const curQ = (question || answer.question || '').toLowerCase().trim();
-    return (rawSaran || [])
-      .filter((s) => {
-        if (!s || typeof s !== 'string') return false;
-        const sLower = s.toLowerCase().trim();
-        return sLower !== curQ && !sLower.includes(curQ) && !curQ.includes(sLower);
-      })
-      .slice(0, 3);
+    const seen = new Set();
+    const result = [];
+    for (const s of rawSaran || []) {
+      if (!s || typeof s !== 'string') continue;
+      const sClean = s.trim();
+      const sLower = sClean.toLowerCase();
+      if (!sLower || sLower === curQ || sLower.includes(curQ) || curQ.includes(sLower)) continue;
+      if (seen.has(sLower)) continue;
+      seen.add(sLower);
+      result.push(sClean);
+      if (result.length >= 3) break;
+    }
+    return result;
   }, [ditolak, onAsk, answer.saran, question, answer.question, activeColumns, activeRows, activeSql]);
 
   const breakdownSaran = useMemo(() => {
@@ -635,7 +648,11 @@ export default function AssistantAnswerCard({
     if (loadingExplain || !branchCode) return;
     setLoadingExplain(true);
     try {
-      const qText = (question || answer.question || 'Analisis data transaksi').trim() || 'Analisis data transaksi';
+      const baseQ = (question || answer.question || 'Analisis data transaksi').trim() || 'Analisis data transaksi';
+      const tabLabel = isMultiTab && currentTab ? (currentTab.label || currentTab.tab || '') : '';
+      const qText = tabLabel && !baseQ.toLowerCase().includes(tabLabel.toLowerCase())
+        ? `${baseQ} (${tabLabel})`
+        : baseQ;
       const res = await api.explainChat({
         branchCode,
         question: qText,
@@ -1155,6 +1172,9 @@ export default function AssistantAnswerCard({
                   <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
                   <input
                     type="text"
+                    id="table-filter"
+                    name="table-filter"
+                    aria-label="Saring baris tabel"
                     placeholder="Saring baris tabel..."
                     value={tableSearch}
                     onChange={(e) => {
@@ -1176,6 +1196,9 @@ export default function AssistantAnswerCard({
                 <div className="flex items-center gap-1.5 text-muted ml-auto">
                   <span>Baris per halaman:</span>
                   <select
+                    id="table-pagesize"
+                    name="table-pagesize"
+                    aria-label="Jumlah baris per halaman"
                     value={pageSize}
                     onChange={(e) => {
                       setPageSize(e.target.value === 'all' ? 'all' : Number(e.target.value));
@@ -1428,9 +1451,9 @@ export default function AssistantAnswerCard({
             <span>Ingin melihat data transaksi masing-masing periode secara terpisah?</span>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            {breakdownSaran.map((s) => (
+            {breakdownSaran.map((s, idx) => (
               <button
-                key={s}
+                key={`${s}-${idx}`}
                 type="button"
                 onClick={() => onAsk(s)}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-primary/30 rounded-md bg-canvas text-ink hover:bg-primary/10 hover:border-primary text-left transition-all cursor-pointer shadow-2xs group"
@@ -1455,9 +1478,9 @@ export default function AssistantAnswerCard({
             <span>Rekomendasi eksplorasi data selanjutnya:</span>
           </p>
           <div className="flex items-center gap-1.5 flex-wrap">
-            {regularSaran.map((s) => (
+            {regularSaran.map((s, idx) => (
               <button
-                key={s}
+                key={`${s}-${idx}`}
                 type="button"
                 onClick={() => onAsk(s)}
                 className="px-2.5 py-1 text-xs border border-hairline rounded-md bg-canvas text-body hover:bg-surface-soft hover:border-primary/40 hover:text-ink transition-colors cursor-pointer text-left shadow-2xs"

@@ -1398,6 +1398,40 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
       - Header tabel humanized: *No. Transaksi*, *Tgl Invoice* (`30 Des 2024`), *No. Rangka (VIN)*, *Harga Pokok Unit*, *DPP Pembelian* (`Rp 279.800.000`), *PPN Pembelian* (`Rp 30.778.000`).
       - Chip follow-up presisi terisi parameter: `Bandingkan performa pembelian tahun 2024 vs 2025 dalam satu tabel`, `Tampilkan tren bulanan pembelian tahun 2024`, `Tampilkan tren bulanan pembelian tahun 2025`.
 
+### 3ap. Hardening Domain Suku Cadang/Inventori, Audit Form Accessibility & De-duplikasi Saran (2026-09-08)
+
+- **Latar Belakang & Masalah yang Ditemukan**:
+  1. **Kesalahan Kolom Domain Sparepart**: Kueri seputar suku cadang/stok (seperti "Tampilkan 5 suku cadang termahal") sebelumnya gagal dengan error `column "namapart" does not exist`, karena panduan domain sebelumnya salah menyebut kolom nama part sebagai `namapart` pada tabel stok.
+  2. **Skema Riil Katalog Sparepart (`srvm_parts`)**: Tabel master suku cadang sebenarnya adalah `srvm_parts` (64.528 baris) dengan kolom `kode`, `nama`, `hargajual`, `hargabeli`, `cogs`, `lokasi`, `minstock`, `maxstock`, dan stok fisik di `srvt_stockparts` dihubungkan via `srvt_stockparts.kode_parts = srvm_parts.kode`.
+  3. **Duplicate Key Warning di Konsol Browser**: Tombol chip saran pertanyaan lanjutan sempat memicu error React `Encountered two children with the same key` ketika riwayat sesi lama memuat rekomendasi yang berulang.
+  4. **Form Field Accessibility Issue**: Elemen input percakapan, pencarian riwayat, serta filter dan limit pagination tabel belum memiliki atribut `id` dan `name`.
+  5. **Label Kolom Finansial & Master Part**: Belum adanya pemetaan `hargajual`, `hargabeli`, `cogs`, `nomor_customer`, `nopolisi`, `penerima`, dan `nama_foreman` pada kamus humanisasi kolom tabel.
+
+- **Solusi & Implementasi Teknis**:
+  1. **Koreksi Aturan Domain Suku Cadang (`automotive_thesaurus.py`)**:
+     - Memperbarui panduan domain otomotif agar secara eksplisit mereferensikan `srvm_parts` sebagai master katalog sparepart (`kode`, `nama`, `hargajual`, `hargabeli`), dan menjelaskan bahwa kolom nama sparepart adalah `nama` (bukan `namapart`).
+     - Menyertakan formula stok fisik gudang yang tepat (`stockawal + masuk - keluar`) dengan relasi `JOIN srvm_parts ON srvt_stockparts.kode_parts = srvm_parts.kode`.
+  2. **De-duplikasi Cerdas Chip Saran Pertanyaan (`AssistantAnswerCard.jsx`)**:
+     - Mengimplementasikan `Set()` deduplikasi pada `smartSaran` dan menggunakan key berformat `${s}-${idx}` pada pemetaan tombol.
+  3. **Penyempurnaan Penjelasan Tab Aktif pada Explain Naratif (`AssistantAnswerCard.jsx`)**:
+     - Menambahkan judul tab aktif (misal `Rincian Tahun 2024`) ke parameter pertanyaan `handleExplain` agar narasi analitik fokus pada slice data yang sedang dibuka user.
+  4. **Form Accessibility & Atribut ID/Name (`UserWorkspace.jsx`, `ChatHistorySidebar.jsx`, `AssistantAnswerCard.jsx`)**:
+     - Menambahkan atribut `id`, `name`, dan `aria-label` pada semua form input (`chat-query`, `search-chat-history`, `table-filter`, `table-pagesize`).
+  5. **Perluasan Kamus Header Kolom (`AssistantAnswerCard.jsx`)**:
+     - Menambahkan `hargajual: 'Harga Jual'`, `hargabeli: 'Harga Beli'`, `cogs: 'COGS / HPP'`, `nomor_customer: 'No. Customer'`, `nopolisi: 'No. Polisi'`, `penerima: 'Penerima / SA'`, `nama_foreman: 'Nama Foreman'`.
+
+- **Verifikasi & Bukti Nyata**:
+  - Backend compileall: **exit 0**.
+  - Backend pytest: **562 passed in 61.64s** (100% lulus).
+  - Frontend lint: **0 errors**.
+  - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 2.18s).
+  - Browser Console: **0 error, 0 warning** (bersih total).
+  - Live Testing Multi-Domain:
+    - Penjualan Unit: Komparasi 2024 vs 2025 (Gaya 1) & Tab Rincian Terpisah (Gaya 2) berjalan mulus.
+    - Servis Bengkel: Kueri work order terbaru sukses menyajikan 5 baris dengan format tanggal+waktu Indonesia dan status boolean.
+    - Suku Cadang: Kueri 5 suku cadang termahal sukses menampilkan data riil `srvm_parts` (`TRNS ASSY,BARE Rp 115,39 Juta`, dll.) dan kueri stok menipis sukses mengeksekusi JOIN stok fisik dengan formula `stockawal + masuk - keluar`.
+    - Fitur Ekspor Excel, Salin Tabel, Konfirmasi Memory, dan Pelatihan AI pgvector terverifikasi 100% fungsional.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -1464,6 +1498,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Penyelarasan Konteks Percakapan Multi-Turn & Koreksi Kolom Skema Riil Tabel Rincian** — SELESAI (lihat §3am).
 - [x] **Standardisasi Satuan Finansial Eksekutif: Juta, Miliar, Triliun** — SELESAI (lihat §3an).
 - [x] **Pemisahan Komparasi Temporal (Gaya 1 vs Gaya 2), Humanisasi Header Kolom Tabel & Pelebaran Sumbu Y Grafik** — SELESAI (lihat §3ao).
+- [x] **Hardening Domain Suku Cadang/Inventori, Audit Form Accessibility & De-duplikasi Saran** — SELESAI (lihat §3ap).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. *Dedicated Executive Dashboard Page*: Ditutup/dibatalkan atas arahan pengguna untuk mempertahankan identitas murni Conversational AI Assistant.
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.

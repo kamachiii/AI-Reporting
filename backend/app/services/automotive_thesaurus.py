@@ -73,13 +73,13 @@ AUTOMOTIVE_DOMAIN_RULES = [
             "pelumas", "item", "stok", "stock", "inventori", "gudang", "pembelian",
             "invt", "prtt", "partcounter", "pembebananpart"
         ],
-        "primary_tables": ["srvt_partcounterfakturdetail", "srvt_stockparts", "srvt_wodetail", "invt_item"],
+        "primary_tables": ["srvm_parts", "srvt_stockparts", "srvt_partcounterfakturdetail", "srvt_wodetail", "invt_item"],
         "guidelines": [
+            "Tabel master katalog suku cadang / sparepart adalah 'srvm_parts' (kolom: kode, nama, hargajual, hargabeli, cogs, lokasi, minstock, maxstock, status). Kolom nama suku cadang adalah 'nama' (BUKAN namapart atau nama_part).",
             "Tabel transaksi penjualan sparepart counter adalah 'srvt_partcounterfakturdetail' (kolom: nomor_faktur, kode_parts, qty, harga, subtotal).",
             "Tabel pemakaian suku cadang pada pekerjaan bengkel (Work Order) adalah 'srvt_wodetail' (kolom: part untuk nilai nominal uang sparepart, filter part > 0).",
-            "Tabel stok fisik suku cadang gudang bengkel adalah 'srvt_stockparts' (kolom: kode_parts, namapart, stockawal, masuk, keluar, hargabeliterakhir).",
-            "Rumus menghitung sisa stok fisik sparepart di gudang adalah: stockawal + masuk - keluar (BUKAN kolom saldoakhir).",
-            "Tabel master katalog barang adalah 'invt_item' (atau 'srvt_stockparts')."
+            "Tabel stok fisik suku cadang gudang bengkel adalah 'srvt_stockparts' (kolom: kode_parts, stockawal, masuk, keluar, booking, cogs). Rumus menghitung sisa stok fisik sparepart di gudang adalah: stockawal + masuk - keluar (BUKAN kolom saldoakhir).",
+            "Untuk menyajikan nama sparepart saat menganalisis stok fisik gudang, hubungkan tabel: srvt_stockparts.kode_parts = srvm_parts.kode."
         ]
     },
     {

@@ -135,6 +135,9 @@ export default function ChatHistorySidebar({
             <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-soft" />
             <input
               type="text"
+              id="search-chat-history"
+              name="search-chat-history"
+              aria-label="Cari topik percakapan"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Cari topik percakapan…"
