@@ -10,7 +10,7 @@
 
 const IDENTIFIER_KEYWORDS = [
   'nomor', 'kode', 'id', 'tahun', 'thn', 'year', 'bulan', 'bln',
-  'month', 'tgl', 'tanggal', 'date', 'telepon', 'phone', 'telp', 'hp', 'nik', 'ktp',
+  'month', 'tgl', 'tanggal', 'date', 'telepon', 'phone', 'telp', 'nik', 'ktp',
 ];
 
 const UANG_KEYWORDS = [
@@ -33,12 +33,13 @@ const KUANTITAS_KEYWORDS = [
 const EKSPLISIT_UANG = [
   'jumlah_nominal', 'jumlah_uang', 'jumlah_biaya', 'jumlah_rupiah', 'jumlah_rp',
   'total_nominal', 'total_biaya', 'total_rupiah', 'total_rp', 'total_nilai',
-  'nilai_transaksi',
+  'nilai_transaksi', 'hpunit', 'hpdpp', 'hpppn', 'hppbm', 'hp_unit', 'harga_unit', 'harga_per_unit',
 ];
 
 function isIdentifierColumn(colName) {
   if (!colName) return false;
   const col = String(colName).toLowerCase();
+  if (/(?:^|_)(?:no)?hp(?:_|$)|telepon|phone|telp/i.test(col)) return true;
   return IDENTIFIER_KEYWORDS.some((k) => col.includes(k));
 }
 
@@ -88,19 +89,14 @@ export function hitungSmartInsights(columns, rows) {
     return { hasInsights: false };
   }
 
-  // Cari kolom metrik (numerik, bukan kolom identitas/tahun)
-  let metricColIdx = -1;
-  let metricColName = '';
-
   // Cari kolom kategori/label (nama, teks, tanggal, bulan, tahun, dsb)
   let categoryColIdx = -1;
   let categoryColName = '';
 
-  const CATEGORY_PRIORITY = ['nama', 'customer', 'pelanggan', 'bulan', 'bln', 'month', 'tahun', 'thn', 'year', 'periode', 'kategori', 'divisi', 'cabang', 'tipe'];
+  const CATEGORY_PRIORITY = ['nama', 'customer', 'pelanggan', 'bulan', 'bln', 'month', 'tahun', 'thn', 'year', 'periode', 'kategori', 'divisi', 'cabang', 'tipe', 'nomor', 'no'];
 
   // Prioritas 1: kolom yang cocok dengan kata kunci kategori
   columns.forEach((col, idx) => {
-    if (idx === metricColIdx) return;
     const colLower = String(col).toLowerCase();
     if (categoryColIdx === -1 && CATEGORY_PRIORITY.some((k) => colLower.includes(k))) {
       categoryColIdx = idx;
@@ -111,9 +107,8 @@ export function hitungSmartInsights(columns, rows) {
   // Prioritas 2: kolom non-numerik pertama
   if (categoryColIdx === -1) {
     columns.forEach((col, idx) => {
-      if (idx === metricColIdx) return;
       const sampleVal = Array.isArray(rows[0]) ? rows[0][idx] : rows[0]?.[col];
-      const isNumeric = typeof sampleVal === 'number' || (!Number.isNaN(Number(sampleVal)) && sampleVal !== '');
+      const isNumeric = typeof sampleVal === 'number' || (!Number.isNaN(Number(sampleVal)) && sampleVal !== '' && sampleVal !== null);
       if (!isNumeric && categoryColIdx === -1) {
         categoryColIdx = idx;
         categoryColName = col;
@@ -121,14 +116,60 @@ export function hitungSmartInsights(columns, rows) {
     });
   }
 
-  // Prioritas 3: kolom lain apa pun yang bukan kolom metrik (misal bulan angka 1..12)
-  if (categoryColIdx === -1) {
+  // Fungsi utilitas: periksa apakah suatu kolom memiliki nilai numerik valid
+  const hasNumericValues = (colIdx, cName) => rows.some((r) => {
+    const v = Array.isArray(r) ? r[colIdx] : r?.[cName];
+    return v !== null && v !== undefined && v !== '' && !Number.isNaN(Number(v));
+  });
+
+  // Cari kolom metrik (numerik, bukan kolom kategori)
+  let metricColIdx = -1;
+  let metricColName = '';
+
+  // Prioritas metrik 1: Kolom Uang eksplisit yang memiliki nilai
+  columns.forEach((col, idx) => {
+    if (idx === categoryColIdx) return;
+    if (metricColIdx === -1 && isKolomUang(col) && hasNumericValues(idx, col)) {
+      metricColIdx = idx;
+      metricColName = col;
+    }
+  });
+
+  // Prioritas metrik 2: Kolom Kuantitas eksplisit yang memiliki nilai
+  if (metricColIdx === -1) {
     columns.forEach((col, idx) => {
-      if (idx !== metricColIdx && categoryColIdx === -1) {
-        categoryColIdx = idx;
-        categoryColName = col;
+      if (idx === categoryColIdx) return;
+      if (metricColIdx === -1 && isKolomKuantitas(col) && hasNumericValues(idx, col)) {
+        metricColIdx = idx;
+        metricColName = col;
       }
     });
+  }
+
+  // Prioritas metrik 3: Kolom numerik pertama yang bukan identifier
+  if (metricColIdx === -1) {
+    columns.forEach((col, idx) => {
+      if (idx === categoryColIdx) return;
+      if (metricColIdx === -1 && !isIdentifierColumn(col) && hasNumericValues(idx, col)) {
+        metricColIdx = idx;
+        metricColName = col;
+      }
+    });
+  }
+
+  // Prioritas metrik 4: Kolom numerik apa pun yang tersisa
+  if (metricColIdx === -1) {
+    columns.forEach((col, idx) => {
+      if (idx === categoryColIdx) return;
+      if (metricColIdx === -1 && hasNumericValues(idx, col)) {
+        metricColIdx = idx;
+        metricColName = col;
+      }
+    });
+  }
+
+  if (metricColIdx === -1) {
+    return { hasInsights: false };
   }
 
   // Ekstrak data
@@ -149,7 +190,15 @@ export function hitungSmartInsights(columns, rows) {
       rawCat = `Baris ${i + 1}`;
     }
 
-    const num = Number(rawVal);
+    let num = Number(rawVal);
+    if (Number.isNaN(num) && typeof rawVal === 'string') {
+      const clean = rawVal.replace(/Rp\.?\s*/i, '').replace(/\./g, '').replace(/,/g, '.').trim();
+      const parsedClean = Number(clean);
+      if (!Number.isNaN(parsedClean)) {
+        num = parsedClean;
+      }
+    }
+
     return {
       label: String(rawCat),
       value: Number.isNaN(num) ? 0 : num,
@@ -165,11 +214,13 @@ export function hitungSmartInsights(columns, rows) {
   const total = parsedData.reduce((acc, curr) => acc + curr.value, 0);
   const rataRata = total / parsedData.length;
 
-  // Cek apakah ada perubahan tren (Δ%) jika berurutan (misal perbandingan 2 periode)
+  // Cek apakah ada perubahan tren (Δ%) jika data berupa deret waktu (misal tahun, bulan, periode)
   let deltaPersen = null;
   let arahTren = 'sama'; // 'naik' | 'turun' | 'sama'
 
-  if (parsedData.length >= 2) {
+  const isTimeSeriesCategory = /tahun|thn|year|bulan|bln|month|periode|semester|kuartal|triwulan|q[1-4]|tgl|tanggal|date/i.test(String(categoryColName || ''));
+
+  if (isTimeSeriesCategory && parsedData.length >= 2) {
     const valAwal = parsedData[0].value;
     const valAkhir = parsedData[parsedData.length - 1].value;
 

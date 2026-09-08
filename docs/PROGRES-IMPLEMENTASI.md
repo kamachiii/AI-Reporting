@@ -1255,6 +1255,40 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Frontend build: **exit code 0**.
   - Browser DevTools MCP Live: tabel `tglinvoice` terverifikasi merender `11 Nov 2025`, `05 Nov 2025`, `10 Jul 2026`, `29 Jun 2026` secara rapi dan konsisten.
 
+## 3al. Perbaikan Indikator Statistik Utama, Pelatihan AI Sisi User & Verifikasi Menyeluruh
+
+- **Latar Belakang & Masalah**:
+  1. Kartu jawaban menampilkan "Indikator Statistik Utama" bernilai 0: `Tertinggi: ... (0)`, `Total: 0`, `Rata-rata: 0`.
+  2. Tombol "Latih Jawaban Ini" memanggil endpoint admin (`/admin/vanna/train`) yang menyebabkan error 403 Forbidden bagi pengguna biasa (`tester01`).
+  3. Keraguan pengguna terkait fungsionalitas "Analisis Naratif Eksekutif", "Jawaban benar / salah", konsep 1 vs banyak tabel, serta cara kerja memori AI saat sesi percakapan berlangsung.
+
+- **Akar Masalah & Solusi Teknis**:
+  1. **Deteksi Kolom Metrik Statistik Pintar (`frontend/src/utils/smartInsights.js`)**:
+     - Variabel `metricColIdx` sebelumnya terdefinisi `-1` dan tidak memiliki alur penugasan (assign) nilai kolom numerik, menyebabkan ekstraksi nilai bernilai `NaN` -> `0`.
+     - Ditambahkan algoritma pemindaian kolom metrik berjenjang:
+       - Prioritas 1: Kolom berstatus uang eksplisit (`isKolomUang`) yang memiliki data numerik.
+       - Prioritas 2: Kolom kuantitas eksplisit (`isKolomKuantitas`) yang memiliki data numerik.
+       - Prioritas 3: Kolom numerik pertama yang bukan identifier (`isIdentifierColumn`).
+       - Prioritas 4: Kolom numerik apa pun yang tersisa.
+     - Memperbaiki regex `IDENTIFIER_KEYWORDS`: sebelumnya `'hp'` mencocokkan substring pada `'hpunit'`, `'hpdpp'`, `'hpppn'`. Diperbaiki dengan regex batas kata `/(?:^|_)(?:no)?hp(?:_|$)|telepon|phone|telp/i` sehingga kolom biaya otomotif tidak keliru dianggap nomor telepon/ID.
+     - Menambahkan `'hpunit'`, `'hpdpp'`, `'hpppn'`, `'hppbm'`, `'hp_unit'`, `'harga_unit'`, `'harga_per_unit'` ke dalam daftar `EKSPLISIT_UANG` pada `smartInsights.js` dan `AssistantAnswerCard.jsx` agar tidak tertimpa oleh aturan kuantitas `'unit'`.
+     - Membatasi kalkulasi tren persentase (`deltaPersen`) khusus pada data yang berorientasi deret waktu (`isTimeSeriesCategory`: tahun, bulan, periode, tanggal).
+  2. **Endpoint Pelatihan AI untuk User (`POST /chat/train`)**:
+     - Menambahkan endpoint `POST /chat/train` di `backend/app/routers/chat.py` dengan dependency otorisasi pengguna (`require_user_role`) dan verifikasi `allowed_branches`.
+     - Mengubah pemanggilan `api.trainVanna` pada `frontend/src/services/api.js` ke `/chat/train`.
+     - Vektor embedding pertanyaan dan SQL disimpan langsung ke tabel `vanna_training_data` dengan status `success` via pgvector FastEmbed BGE-small.
+  3. **Verifikasi Fitur "Analisis Naratif Eksekutif"**:
+     - Mengalihkan provider AI global ke koneksi stabil dan responsif (`XKiro` / `qwen/qwen3.8-max:free`).
+     - Diuji langsung pada browser via DevTools: klik tombol "Analisis Naratif Eksekutif" menghasilkan analisis komprehensif dua bagian (`ANALISIS EKSEKUTIF DATA` & `REKOMENDASI TINDAKAN STRATEGIS`).
+
+- **Verifikasi & Bukti Nyata**:
+  - Kartu Komparasi 2025 vs 2026: `Tren -98.4% | Tertinggi: Tahun 2025 (Rp 75.58 Miliar) | Total: Rp 76.79 Miliar | Rata-rata: Rp 38.39 Miliar`.
+  - Tab 2025 (50 baris): `Tertinggi: UI-210-25100001 (Rp 527.73 Juta) | Total: Rp 9.72 Miliar | Rata-rata: Rp 194.38 Juta`.
+  - Tab 2026 (6 baris): `Tertinggi: UI-210-26060003 (Rp 392.67 Juta) | Total: Rp 1.20 Miliar | Rata-rata: Rp 200.15 Juta`.
+  - Backend pytest: **562 passed** (100% lulus dalam 37.47s).
+  - Frontend lint: **0 error** (100% lulus).
+  - Frontend build: **exit code 0** (1.21s).
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -1317,6 +1351,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Penerapan Claude Editorial Design System & Eliminasi AI-Slop (DESIGN-claude.md)** — SELESAI (lihat §3aa).
 - [x] **Strukturisasi Knowledge Base 3S: Global KB vs Tenant Database KB & Sinkronisasi Pgvector** — SELESAI (lihat §3ai).
 - [x] **Format Otomatis Cerdas Tanggal dan Waktu pada Tabel dan Ekspor Excel** — SELESAI (lihat §3ak).
+- [x] **Perbaikan Indikator Statistik Utama, Pelatihan AI Sisi User & Verifikasi Menyeluruh** — SELESAI (lihat §3al).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. *Dedicated Executive Dashboard Page*: Ditutup/dibatalkan atas arahan pengguna untuk mempertahankan identitas murni Conversational AI Assistant.
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.

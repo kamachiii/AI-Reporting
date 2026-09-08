@@ -308,7 +308,7 @@ export const api = {
     return response.data;
   },
   trainVanna: async ({ branchCode, question, sql }) => {
-    const response = await apiClient.post('/admin/vanna/train', {
+    const response = await apiClient.post('/chat/train', {
       branch_code: branchCode,
       question,
       sql,

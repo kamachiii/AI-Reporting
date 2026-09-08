@@ -426,3 +426,35 @@ async def chat_export_excel(payload: ChatExportExcelRequest,
         logger.error("chat_export_excel error: %s", e)
         raise HTTPException(status_code=500, detail=f"Gagal mengekspor laporan Excel: {e}")
 
+
+class ChatTrainRequest(BaseModel):
+    branch_code: str = Field(min_length=1, max_length=50)
+    question: str = Field(min_length=1, max_length=2000)
+    sql: str = Field(min_length=1)
+
+
+@router.post("/train")
+async def chat_train(payload: ChatTrainRequest,
+                     user: dict = Depends(require_user_role)):
+    """Latih AI seketika: simpan pasangan pertanyaan -> SQL ke pgvector untuk cabang pengguna."""
+    cek_rate_limit(user["user_id"])
+    allowed = user.get("allowed_branches") or []
+    if payload.branch_code not in allowed:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Cabang '{payload.branch_code}' bukan penugasan Anda.")
+
+    core_pool = await get_core_pool()
+    try:
+        from app.services.vanna_pgvector import latih_pertanyaan_sql
+        result = await latih_pertanyaan_sql(
+            core_pool,
+            branch_code=payload.branch_code,
+            question=payload.question,
+            sql=payload.sql,
+        )
+        return result
+    except Exception as e:
+        logger.error("chat_train error: %s", e)
+        raise HTTPException(status_code=500, detail=f"Gagal melatih AI: {e}")
+

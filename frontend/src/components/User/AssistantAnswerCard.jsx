@@ -41,7 +41,7 @@ const KUANTITAS_KEYWORDS = [
 const EKSPLISIT_UANG = [
   'jumlah_nominal', 'jumlah_uang', 'jumlah_biaya', 'jumlah_rupiah', 'jumlah_rp',
   'total_nominal', 'total_biaya', 'total_rupiah', 'total_rp', 'total_nilai',
-  'nilai_transaksi',
+  'nilai_transaksi', 'hpunit', 'hpdpp', 'hpppn', 'hppbm', 'hp_unit', 'harga_unit', 'harga_per_unit',
 ];
 
 function isKolomUang(colName) {
