@@ -666,14 +666,28 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
 
                 # Rekomendasi saran pertanyaan kontekstual (Anti Self-Referencing / De-duplikasi kueri user)
                 if fanout_info.get("category") == "rincian_terpisah":
-                    p1 = fanout_info.get("p1", "")
-                    p2 = fanout_info.get("p2", "")
-                    topic = fanout_info.get("topic", "penjualan")
-                    saran_list = [
-                        f"Bandingkan performa {topic} tahun {p1} vs {p2} dalam satu tabel",
-                        f"Tampilkan tren bulanan {topic} tahun {p1}",
-                        f"Tampilkan tren bulanan {topic} tahun {p2}"
-                    ]
+                    p1 = str(fanout_info.get("p1") or "").strip()
+                    p2 = str(fanout_info.get("p2") or "").strip()
+                    topic = fanout_info.get("topic") or inherited_topic or "transaksi"
+                    frasa_topik = f"transaksi {topic}" if topic != "transaksi" else "data transaksi"
+                    if p1 and p2:
+                        saran_list = [
+                            f"Bandingkan performa {topic} tahun {p1} vs {p2} dalam satu tabel",
+                            f"Tampilkan tren bulanan {topic} tahun {p1}",
+                            f"Tampilkan tren bulanan {topic} tahun {p2}"
+                        ]
+                    elif p1:
+                        saran_list = [
+                            f"Tampilkan tren bulanan {topic} tahun {p1}",
+                            f"Bandingkan performa {topic} dengan tahun sebelumnya",
+                            f"Tampilkan 5 {frasa_topik} terbesar tahun {p1}"
+                        ]
+                    else:
+                        saran_list = [
+                            f"Bandingkan performa {topic} antar tahun dalam satu tabel",
+                            f"Tampilkan 5 {frasa_topik} terbesar di database",
+                            f"Tampilkan tren bulanan {topic} tahun ini"
+                        ]
                 else:
                     saran_list = []
                     q_clean = question.lower().strip()

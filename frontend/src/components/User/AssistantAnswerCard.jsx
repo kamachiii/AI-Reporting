@@ -19,6 +19,50 @@ function formatDurasi(ms) {
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} dtk`;
 }
 
+const COLUMN_LABEL_DICT = {
+  tglinvoice: 'Tgl Invoice',
+  tgl_invoice: 'Tgl Invoice',
+  nomor: 'No. Transaksi',
+  hpunit: 'Harga Pokok Unit',
+  hpdpp: 'DPP Pembelian',
+  hpppn: 'PPN Pembelian',
+  hppbm: 'PPnBM Pembelian',
+  hjunit: 'Harga Jual Unit',
+  hjakhir: 'Total Penjualan Akhir',
+  totalestimasibiaya: 'Total Estimasi Biaya',
+  batal: 'Batal',
+  retur: 'Retur',
+  tahun: 'Tahun',
+  bulan: 'Bulan',
+  divisi: 'Divisi Operasional',
+  total_transaksi: 'Total Transaksi',
+  total_omzet: 'Total Omzet',
+  total_pembelian: 'Total Pembelian',
+  total_penjualan: 'Total Penjualan',
+  total_unit: 'Total Unit',
+  total_unit_terjual: 'Unit Terjual',
+  total_unit_dibeli: 'Unit Dibeli',
+  kontribusi_omzet: 'Kontribusi Omzet',
+  kode_parts: 'Kode Part',
+  nama_parts: 'Nama Part',
+  stockawal: 'Stok Awal',
+  masuk: 'Stok Masuk',
+  keluar: 'Stok Keluar',
+  norangka: 'No. Rangka (VIN)',
+  nochassis: 'No. Chassis',
+  tipe: 'Tipe Kendaraan',
+  warna: 'Warna',
+};
+
+function formatHeaderKolom(colName) {
+  if (!colName) return '';
+  const clean = String(colName).trim().toLowerCase();
+  if (COLUMN_LABEL_DICT[clean]) return COLUMN_LABEL_DICT[clean];
+  return clean
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 const UANG_KEYWORDS = [
   'harga', 'omzet', 'omset', 'beli', 'jual', 'biaya', 'uang', 'dpp', 'ppn',
   'nominal', 'saldo', 'total_pembelian', 'total_penjualan', 'total_nilai',
@@ -1042,7 +1086,7 @@ export default function AssistantAnswerCard({
               <div className="h-64 w-full pt-1">
                 <ResponsiveContainer width="100%" height="100%">
                   {chartType === 'line' ? (
-                    <LineChart data={grafikConfig.chartData} margin={{ top: 10, right: 15, left: 5, bottom: 5 }}>
+                    <LineChart data={grafikConfig.chartData} margin={{ top: 10, right: 15, left: 10, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e6dfd8" />
                       <XAxis
                         dataKey={grafikConfig.categoryCol}
@@ -1050,6 +1094,8 @@ export default function AssistantAnswerCard({
                         tickLine={{ stroke: '#e6dfd8' }}
                       />
                       <YAxis
+                        width={85}
+                        tickMargin={6}
                         tick={{ fontSize: 11, fill: '#6c6a64' }}
                         tickLine={{ stroke: '#e6dfd8' }}
                         tickFormatter={(val) => formatCompactAxis(val, grafikConfig.hasCurrencyCol)}
@@ -1069,7 +1115,7 @@ export default function AssistantAnswerCard({
                       ))}
                     </LineChart>
                   ) : (
-                    <BarChart data={grafikConfig.chartData} margin={{ top: 10, right: 15, left: 5, bottom: 5 }}>
+                    <BarChart data={grafikConfig.chartData} margin={{ top: 10, right: 15, left: 10, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e6dfd8" />
                       <XAxis
                         dataKey={grafikConfig.categoryCol}
@@ -1077,6 +1123,8 @@ export default function AssistantAnswerCard({
                         tickLine={{ stroke: '#e6dfd8' }}
                       />
                       <YAxis
+                        width={85}
+                        tickMargin={6}
                         tick={{ fontSize: 11, fill: '#6c6a64' }}
                         tickLine={{ stroke: '#e6dfd8' }}
                         tickFormatter={(val) => formatCompactAxis(val, grafikConfig.hasCurrencyCol)}
@@ -1162,7 +1210,7 @@ export default function AssistantAnswerCard({
                           title={`Klik untuk mengurutkan data berdasarkan ${col}`}
                         >
                           <div className={`inline-flex items-center gap-1 ${isNum ? 'justify-end w-full' : ''}`}>
-                            <span>{col}</span>
+                            <span>{formatHeaderKolom(col)}</span>
                             {isSorted ? (
                               sortDir === 'asc' ? (
                                 <ArrowUp size={12} className="text-primary" />

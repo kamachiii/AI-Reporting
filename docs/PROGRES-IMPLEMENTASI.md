@@ -1361,6 +1361,43 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
       - Ringkasan Tab Rincian: `Rincian Tahun 2024: Rp 310,58 Juta • Rincian Tahun 2025: Rp 137,31 Juta.`
       - Indikator Statistik Utama: `Tertinggi: Tahun 2024 (Rp 189,92 Miliar)`, `Total: Rp 259,75 Miliar`, `Rata-rata: Rp 129,87 Miliar`.
 
+### 3ao. Pemisahan Komparasi Temporal (Gaya 1 vs Gaya 2), Humanisasi Header Kolom Tabel & Pelebaran Sumbu Y Grafik (2026-09-08)
+
+- **Latar Belakang & Masalah yang Diatasi**:
+  1. **Anomali Intersepsi Fanout Divisi**: Pertanyaan komparasi tahunan (misal `"Bandingkan pembelian tahun 2024 vs 2025"`) sebelumnya sempat tertangkap oleh aturan umum `pembelian` pada `fanout_engine.py` dan disajikan sebagai multi-tab "Komparasi Antar Divisi", padahal pengguna menanyakan komparasi temporal antar tahun.
+  2. **Placeholder Kosong pada Chip Rekomendasi Pertanyaan**: Rekomendasi eksplorasi data selanjutnya sempat menampilkan teks dengan variabel kosong (seperti `"tahun  vs "` atau `"penjualan tahun "`) jika parameter periode pada metadata fanout tidak lengkap.
+  3. **Header Kolom Raw Database**: Header tabel data masih menampilkan nama kolom teknis database mentah (`tglinvoice`, `hpunit`, `hpdpp`, `hpppn`, dll.).
+  4. **Wrap Vertikal Label Sumbu Y Grafik**: Label nominal angka di sumbu Y chart (seperti `Rp 20 M`) mengalami pemotongan atau wrap vertikal akibat margin kiri dan lebar sumbu Y yang terlalu sempit.
+
+- **Solusi & Implementasi Teknis**:
+  1. **Pemisahan Komparasi Temporal dari Fanout Divisi (`fanout_engine.py`)**:
+     - Menambahkan guard dini di `cek_apakah_perlu_fanout(question)`: jika `_ekstrak_dua_periode(question)` terdeteksi (seperti perbandingan dua tahun), langsung return `None` sehingga kueri diproses murni sebagai **Gaya 1 (Tabel Tunggal Terkonsolidasi)**.
+     - Memperketat `cek_apakah_perlu_komparasi(question)` agar hanya aktif jika terdapat kata kunci divisi operasional yang spesifik (`antar divisi`, `kontribusi divisi`, `unit vs servis/bengkel/part`), bukan sembarang kata `"vs"`.
+  2. **Sanitasi Placeholder Chip Saran Pertanyaan (`vanna_engine.py`)**:
+     - Memvalidasi bahwa `p1` dan `p2` bernilai non-empty string sebelum merender template chip saran pertanyaan. Menambahkan fallback format jika hanya 1 periode atau tanpa periode.
+  3. **Humanisasi Header Kolom Tabel Data (`AssistantAnswerCard.jsx`)**:
+     - Membuat kamus label kolom otomotif `COLUMN_LABEL_DICT` (`tglinvoice` -> `Tgl Invoice`, `norangka` -> `No. Rangka (VIN)`, `hpunit` -> `Harga Pokok Unit`, `hpdpp` -> `DPP Pembelian`, `hpppn` -> `PPN Pembelian`, dll.) dengan fallback Title Case kapitalisasi otomatis.
+     - Menerapkannya di baris header `<th>` tabel data.
+  4. **Pelebaran Sumbu Y & Margin Grafik Visual (`AssistantAnswerCard.jsx`)**:
+     - Menambahkan `width={85}` dan `tickMargin={6}` pada `<YAxis>` komponen `BarChart` dan `LineChart`, serta menyesuaikan `margin.left: 10` untuk mencegah teks nominal terpotong atau wrap vertikal.
+
+- **Verifikasi & Bukti Nyata**:
+  - Backend compileall: **exit 0**.
+  - Backend pytest: **562 passed in 45.19s** (100% lulus tanpa kegagalan).
+  - Frontend lint: `npm run lint` **0 errors** (100% lulus).
+  - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 1.24s).
+  - Live Browser Viewport Test via Chrome DevTools MCP:
+    - Kueri `"Bandingkan pembelian tahun 2024 vs 2025"` memicu klarifikasi domain cerdas: *Pembelian Unit Kendaraan vs Sparepart*.
+    - Seleksi "Pembelian Unit Kendaraan" menghasilkan:
+      - **Gaya 1 (Tabel Tunggal)**: Baris 2024 (963 unit, Rp 230,28 Miliar) dan 2025 (349 unit, Rp 75,58 Miliar).
+      - Header tabel bersih: *Tahun Invoice*, *Unit Dibeli*, *Total Nilai Pembelian*.
+      - Sumbu Y grafik horizontal rapi: `Rp 0`, `Rp 60 M`, `Rp 120 M`, `Rp 180 M`, `Rp 240 M`.
+      - Chip rekomendasi: `Tampilkan rincian transaksi pembelian tahun 2024 dan 2025 secara terpisah`.
+    - Klik chip beralih ke **Gaya 2 (Tab Rincian Terpisah)**:
+      - 2 Tab aktif: `Rincian Tahun 2024 (50)` dan `Rincian Tahun 2025 (50)`.
+      - Header tabel humanized: *No. Transaksi*, *Tgl Invoice* (`30 Des 2024`), *No. Rangka (VIN)*, *Harga Pokok Unit*, *DPP Pembelian* (`Rp 279.800.000`), *PPN Pembelian* (`Rp 30.778.000`).
+      - Chip follow-up presisi terisi parameter: `Bandingkan performa pembelian tahun 2024 vs 2025 dalam satu tabel`, `Tampilkan tren bulanan pembelian tahun 2024`, `Tampilkan tren bulanan pembelian tahun 2025`.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -1426,6 +1463,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Perbaikan Indikator Statistik Utama, Pelatihan AI Sisi User & Verifikasi Menyeluruh** — SELESAI (lihat §3al).
 - [x] **Penyelarasan Konteks Percakapan Multi-Turn & Koreksi Kolom Skema Riil Tabel Rincian** — SELESAI (lihat §3am).
 - [x] **Standardisasi Satuan Finansial Eksekutif: Juta, Miliar, Triliun** — SELESAI (lihat §3an).
+- [x] **Pemisahan Komparasi Temporal (Gaya 1 vs Gaya 2), Humanisasi Header Kolom Tabel & Pelebaran Sumbu Y Grafik** — SELESAI (lihat §3ao).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. *Dedicated Executive Dashboard Page*: Ditutup/dibatalkan atas arahan pengguna untuk mempertahankan identitas murni Conversational AI Assistant.
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.

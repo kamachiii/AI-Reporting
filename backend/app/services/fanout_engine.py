@@ -120,6 +120,12 @@ def cek_apakah_perlu_fanout(question: str) -> Optional[Dict[str, Any]]:
     if not q_lower or len(q_lower) < 4:
         return None
 
+    # Jika kueri adalah perbandingan antar periode / tahun (mis. 2024 vs 2025),
+    # kueri ini adalah komparasi temporal Gaya 1 (tabel tunggal perbandingan),
+    # BUKAN kueri makro dealer multi-tab 3S divisi operasional!
+    if _ekstrak_dua_periode(question) is not None:
+        return None
+
     for rule in FANOUT_RULES:
         # 1. Apakah memicu pola kueri umum?
         is_triggered = any(re.search(p, q_lower) for p in rule["trigger_patterns"])
@@ -384,9 +390,11 @@ def cek_apakah_perlu_komparasi(question: str) -> bool:
     """Deteksi apakah pertanyaan menuntut komparasi/perbandingan antar divisi."""
     q_lower = (question or "").lower()
     patterns = [
-        r"\b(?:bandingkan|komparasi|perbandingan|kontribusi|versus|vs)\b",
         r"\b(?:antar|lintas|tiap|per|semua)\s+divisi\b",
-        r"\b(?:performa|peforma)\s+(?:antar|tiap|per|semua)?\s*divisi\b",
+        r"\bkontribusi\s+(?:masing-masing|tiap|semua)?\s*divisi\b",
+        r"\b(?:unit\s+vs\s+(?:servis|bengkel|part)|servis\s+vs\s+part|bengkel\s+vs\s+part)\b",
+        r"\bkomparasi\s+(?:antar\s+)?divisi\b",
+        r"\bperforma\s+(?:antar|lintas|tiap|per|semua)\s+divisi\b",
     ]
     return any(re.search(p, q_lower) for p in patterns)
 
