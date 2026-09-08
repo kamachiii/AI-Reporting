@@ -108,7 +108,7 @@ export default function ChatHistorySidebar({
             type="button"
             onClick={onToggleOpen}
             title="Ciutkan Sidebar (Ctrl+B)"
-            className="p-1.5 rounded-md text-muted hover:text-ink hover:bg-surface-cream-strong transition-colors cursor-pointer"
+            className="p-1.5 rounded-md text-primary hover:text-primary-active hover:bg-surface-cream-strong transition-colors cursor-pointer"
           >
             <PanelLeftClose size={15} />
           </button>

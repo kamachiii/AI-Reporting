@@ -282,6 +282,112 @@ def test_rekonsiliasi_slot_percakapan():
     assert res_q4 == "siapa 5 customer terbesar?"
 
 
+def test_is_general_guide_question():
+    from app.services.vanna_engine import _is_general_guide_question
+
+    # Sapaan & kueri panduan umum
+    assert _is_general_guide_question("kasih aku dong data data") is True
+    assert _is_general_guide_question("minta data dong") is True
+    assert _is_general_guide_question("tampilkan data") is True
+    assert _is_general_guide_question("ada data apa aja di sini?") is True
+    assert _is_general_guide_question("kamu bisa apa saja?") is True
+    assert _is_general_guide_question("halo") is True
+    assert _is_general_guide_question("hai min") is True
+    assert _is_general_guide_question("selamat pagi") is True
+
+    # Kueri data spesifik tidak boleh tertangkap
+    assert _is_general_guide_question("tampilkan 5 mobil terlaris") is False
+    assert _is_general_guide_question("tampilkan data penjualan 2025") is False
+    assert _is_general_guide_question("berapa total pendapatan servis bengkel?") is False
+    assert _is_general_guide_question("siapa customer terbesar") is False
+
+
+def test_is_explanatory_question():
+    from app.services.vanna_engine import _is_explanatory_question
+
+    # Pertanyaan eksplanatori tabel / data sebelumnya
+    assert _is_explanatory_question("loh data apa ini?") is True
+    assert _is_explanatory_question("ini data apa?") is True
+    assert _is_explanatory_question("data apa ini?") is True
+    assert _is_explanatory_question("maksud tabel ini apa?") is True
+    assert _is_explanatory_question("jelaskan data di atas") is True
+    assert _is_explanatory_question("jelaskan tabel ini") is True
+    assert _is_explanatory_question("apa maksud kolom hjakhir?") is True
+    assert _is_explanatory_question("kenapa datanya seperti ini?") is True
+
+    # Kueri data baru tidak boleh tertangkap
+    assert _is_explanatory_question("tampilkan 5 mobil terlaris") is False
+    assert _is_explanatory_question("berapa omzet penjualan tahun 2025?") is False
+    assert _is_explanatory_question("daftar suku cadang fast moving") is False
+
+
+def test_tangani_kueri_panduan_umum_dan_eksplanatori():
+    import asyncio
+    import json
+    from app.services.vanna_engine import tangani_kueri_panduan_umum, tangani_kueri_eksplanatori
+
+    class _StubCorePool:
+        def __init__(self, assistant_content=None):
+            self.content = assistant_content
+        async def fetchrow(self, query, *args):
+            if "FROM messages" in query:
+                if self.content is not None:
+                    return {"content": self.content}
+                return None
+            if "FROM conversations" in query:
+                return {"id": 99}
+            return None
+        async def fetchval(self, query, *args):
+            return 99
+        async def execute(self, query, *args):
+            return "INSERT 0 1"
+
+    pool = _StubCorePool()
+
+    # 1. Test Mode Panduan Umum
+    res_guide = asyncio.run(
+        tangani_kueri_panduan_umum(pool, 99, "kasih aku dong data data", 1, "TST_01", 0.0)
+    )
+    assert res_guide["is_conversational_text"] is True
+    assert res_guide["metode"] == "conversational_guide"
+    assert res_guide["sql"] == ""
+    assert res_guide["rows"] == []
+    assert "Penjualan Unit" in res_guide["ringkasan"]
+    assert "Jasa Servis Bengkel" in res_guide["ringkasan"]
+    assert len(res_guide["saran"]) >= 3
+
+    # 2. Test Mode Eksplanatori ketika ada tabel untt_penjualan sebelumnya
+    prev_asst_content = json.dumps({
+        "question": "5 mobil terlaris",
+        "sql": "SELECT nama_model, total_unit, hjakhir FROM untt_penjualan LIMIT 5",
+        "columns": ["nama_model", "total_unit", "hjakhir"],
+        "rows": [["Avanza", 10, 250000000]],
+        "row_count": 1,
+        "ringkasan": "Menampilkan 5 mobil terlaris"
+    })
+    pool_with_prev = _StubCorePool(prev_asst_content)
+
+    res_explan = asyncio.run(
+        tangani_kueri_eksplanatori(pool_with_prev, 99, "loh data apa ini?", 1, "TST_01", 0.0)
+    )
+    assert res_explan["is_conversational_text"] is True
+    assert res_explan["metode"] == "conversational_explanation"
+    assert res_explan["sql"] == ""
+    assert res_explan["rows"] == []
+    assert "Penjualan Unit Kendaraan" in res_explan["ringkasan"]
+    assert "nama_model" in res_explan["ringkasan"]
+    assert len(res_explan["saran"]) >= 3
+
+    # 3. Test Mode Eksplanatori ketika tidak ada pesan sebelumnya (sesi baru)
+    pool_empty = _StubCorePool(None)
+    res_explan_empty = asyncio.run(
+        tangani_kueri_eksplanatori(pool_empty, 99, "ini data apa?", 1, "TST_01", 0.0)
+    )
+    assert res_explan_empty["is_conversational_text"] is True
+    assert "Tidak ada data atau tabel sebelumnya" in res_explan_empty["ringkasan"]
+
+
+
 
 
 

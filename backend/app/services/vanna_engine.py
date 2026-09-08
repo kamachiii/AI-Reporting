@@ -598,8 +598,13 @@ async def ambil_konteks_percakapan_aktif(core_pool, conversation_id: int | None)
                 try:
                     import json as _json
                     data = _json.loads(raw)
-                    # Abaikan pesan klarifikasi agar contoh divisi tidak mencemari topik riwayat sesi
-                    if data.get("status") == "clarification_needed" or data.get("source") == "clarification":
+                    # Abaikan pesan klarifikasi dan conversational agar tidak mencemari topik riwayat sesi
+                    if (
+                        data.get("status") == "clarification_needed"
+                        or data.get("source") == "clarification"
+                        or data.get("is_conversational_text")
+                        or data.get("metode") in ("conversational_guide", "conversational_explanation")
+                    ):
                         continue
                     text_to_scan = f"{data.get('question', '')} {data.get('sql', '')} {data.get('ringkasan', '')}"
                 except Exception:
@@ -864,6 +869,348 @@ async def resolve_ai_config_for_tenant(core_pool, user_id: int, tenant_id: int) 
     raise AIConfigError("AI belum dikonfigurasi. Hubungi administrator.")
 
 
+def _is_general_guide_question(question: str) -> bool:
+    """Deteksi apakah pertanyaan pengguna merupakan sapaan atau permintaan panduan umum/vague data."""
+    if not question:
+        return False
+    q = question.strip().lower()
+    q_clean = re.sub(r'[?!.,;:\'"]+', ' ', q).strip()
+    q_clean = re.sub(r'\s+', ' ', q_clean)
+
+    # 1. Salam / Sapaan langsung
+    greetings = {
+        "halo", "hai", "hello", "hi", "hey", "hei", "p", "ping", "tes", "test", "testing",
+        "selamat pagi", "selamat siang", "selamat sore", "selamat malam",
+        "assalamualaikum", "assalamu'alaikum"
+    }
+    if q_clean in greetings or (len(q_clean.split()) <= 2 and q_clean.split()[0] in greetings):
+        return True
+
+    # 2. Pertanyaan kapabilitas / menu / bantuan
+    guide_phrases = [
+        "ada data apa aja", "ada data apa saja", "ada data apa", "data apa aja yang ada",
+        "data apa saja yang ada", "data apa yang tersedia", "data apa saja yang tersedia",
+        "bisa bantu apa", "bisa bantu apa saja", "bisa apa saja", "kamu bisa apa",
+        "apa yang bisa kamu lakukan", "bagaimana cara pakai", "cara pakainya gimana",
+        "panduan penggunaan", "bantu saya", "menu apa saja", "fitur apa saja"
+    ]
+    if any(q_clean.startswith(gp) or q_clean == gp for gp in guide_phrases):
+        return True
+
+    # 3. Permintaan data yang sangat samar (vague data request tanpa spesifikasi entitas)
+    fillers = {
+        "kasih", "minta", "berikan", "tampilkan", "bagi", "kirim", "lihat", "cek",
+        "coba", "tolong", "dong", "aku", "saya", "kami", "ya", "kan", "lah", "sih",
+        "min", "bot", "ai", "apa", "aja", "saja", "deh", "nih", "tuh", "ke", "buat", "untuk"
+    }
+    words = [w for w in q_clean.split() if w not in fillers]
+    if words in [["data"], ["data", "data"], ["database"], ["semua", "data"], ["seluruh", "data"], []]:
+        return True
+
+    return False
+
+
+def _is_explanatory_question(question: str) -> bool:
+    """Deteksi apakah pertanyaan pengguna merujuk pada penjelasan tabel/data yang baru saja ditampilkan."""
+    if not question:
+        return False
+    q = question.strip().lower()
+    q_clean = re.sub(r'[?!.,;:\'"]+', ' ', q).strip()
+    q_clean = re.sub(r'\s+', ' ', q_clean)
+
+    patterns = [
+        r"^(?:loh\s+)?(?:ini|itu)\s+(?:data|tabel|laporan|grafik|hasil)(?:\s+(?:apa|sih|maksudnya))*$",
+        r"^(?:loh\s+)?(?:data|tabel|laporan|grafik|hasil)\s+apa(?:\s+(?:ini|itu|sih|tuh))*$",
+        r"^(?:loh\s+)?(?:data|tabel)\s+apa$",
+        r"^(?:loh\s+)?maksud(?:nya)?\s+(?:dari\s+)?(?:data|tabel|laporan|grafik|angka|ini|itu)+(?:\s+apa)?$",
+        r"^maksudnya(?:\s+apa)?$",
+        r"^artinya(?:\s+apa)?$",
+        r"^(?:coba\s+)?jelaskan\s+(?:data|tabel|laporan|hasil|kolom)(?:\s+(?:di\s+atas|ini|tersebut|barusan))?$",
+        r"^(?:apa\s+maksud|apa\s+arti|artinya)\s+(?:kolom|tabel|data|angka)",
+        r"^kenapa\s+(?:datanya|angkanya|tabelnya)\s+(?:seperti\s+ini|begini|begitu)$",
+        r"^tabel\s+apa\s+(?:yang\s+)?(?:barusan|tadi)$",
+    ]
+    for pat in patterns:
+        if re.search(pat, q_clean):
+            return True
+
+    keywords = [
+        "data apa ini", "data apa itu", "tabel apa ini", "tabel apa itu",
+        "maksud tabel ini", "maksud data ini", "jelaskan data di atas",
+        "jelaskan tabel di atas", "jelaskan tabel ini", "maksud dari tabel",
+        "ini maksudnya apa", "maksud tabel di atas"
+    ]
+    if any(kw in q_clean for kw in keywords):
+        return True
+
+    return False
+
+
+async def tangani_kueri_panduan_umum(
+    core_pool,
+    conversation_id: int | None,
+    question: str,
+    user_id: int,
+    branch_code: str,
+    t0: float,
+) -> dict:
+    """Mode Panduan Orientasi: memberikan ringkasan modul data operasional dealer yang tersedia."""
+    ringkasan = (
+        "Selamat datang di Asisten AI Database Dealer. Platform ini terhubung langsung ke database operasional cabang Anda.\n\n"
+        "Berikut adalah modul data utama yang siap Anda analisis:\n\n"
+        "1. Penjualan Unit Kendaraan (tabel untt_penjualan): Volume penjualan, tren omzet bulanan dan tahunan, ranking model mobil terlaris, rincian faktur penjualan, dan performa salesman.\n"
+        "2. Jasa Servis Bengkel (tabel srvt_wo & srvt_wodetail): Volume Work Order (PKB), pendapatan jasa perawatan, jenis pekerjaan servis, dan histori servis kendaraan.\n"
+        "3. Suku Cadang & Sparepart: Pergerakan persediaan suku cadang, penjualan counter/part shop, dan omzet suku cadang.\n"
+        "4. Pelanggan & Customer (tabel glbm_customer): Profil pelanggan terdaftar, histori pembelian unit, dan persebaran wilayah pelanggan.\n\n"
+        "Silakan ketik pertanyaan spesifik yang ingin Anda ketahui atau klik salah satu rekomendasi pertanyaan di bawah ini."
+    )
+    saran = [
+        "Tampilkan 5 model mobil dengan penjualan tertinggi",
+        "Berapa total pendapatan servis bengkel tahun 2025?",
+        "Daftar 10 customer dengan transaksi pembelian unit terbesar",
+        "Tren volume transaksi servis bulanan sepanjang tahun 2024",
+    ]
+    durasi_ms = int((time.monotonic() - t0) * 1000)
+    response = {
+        "source": "conversational",
+        "confidence": "A",
+        "status": "success",
+        "question": question,
+        "ringkasan": ringkasan,
+        "sql": "",
+        "params": [],
+        "columns": [],
+        "rows": [],
+        "row_count": 0,
+        "truncated": False,
+        "duration_ms": durasi_ms,
+        "memory_id": None,
+        "saran": saran,
+        "metode": "conversational_guide",
+        "is_conversational_text": True,
+        "allow_explain": False,
+    }
+    conv_id = await ambil_atau_buat_conversation(
+        core_pool, user_id, branch_code, question, conversation_id=conversation_id
+    )
+    response["conversation_id"] = conv_id
+    await simpan_pesan(core_pool, conv_id, "user", question)
+    await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
+
+    await tulis_audit(
+        core_pool,
+        user_id=user_id,
+        branch_code=branch_code,
+        prompt_text=question,
+        ai_json_filter={"mode": "conversational_guide"},
+        generated_sql="",
+        execution_time_ms=durasi_ms,
+        status="success",
+        error_message=None,
+    )
+    return response
+
+
+async def tangani_kueri_eksplanatori(
+    core_pool,
+    conversation_id: int | None,
+    question: str,
+    user_id: int,
+    branch_code: str,
+    t0: float,
+) -> dict:
+    """Mode Percakapan Eksplanatori: menjelaskan secara naratif hasil kueri/tabel sebelumnya."""
+    durasi_ms = int((time.monotonic() - t0) * 1000)
+
+    # Dictionary penjelas kolom database operasional dealer
+    PENJELASAN_KOLOM = {
+        "trxdt": "Tanggal resmi transaksi dicatat di sistem",
+        "tgl": "Tanggal pencatatan transaksi",
+        "tanggal": "Tanggal transaksi",
+        "tglinvoice": "Tanggal terbitnya faktur/invoice",
+        "nomor": "Nomor dokumen faktur transaksi resmi",
+        "notrx": "Nomor identifikasi transaksi",
+        "nama_customer": "Nama pelanggan atau pemilik kendaraan yang bertransaksi",
+        "customer": "Nama pelanggan yang bertransaksi",
+        "nama_model": "Model atau tipe varian unit kendaraan",
+        "model": "Model atau tipe kendaraan",
+        "tipe": "Tipe spesifik kendaraan",
+        "warna": "Warna unit kendaraan",
+        "hjakhir": "Total nilai nominal transaksi setelah memperhitungkan diskon dan pajak (Rupiah)",
+        "hargajual": "Harga jual bruto kendaraan sebelum diskon",
+        "hargabeli": "Harga beli / harga pokok perolehan kendaraan",
+        "total_omzet": "Akumulasi total nilai penjualan bruto (Rupiah)",
+        "total_penjualan": "Total nominal penjualan unit kendaraan (Rupiah)",
+        "total_unit": "Jumlah kuantitas fisik kendaraan yang ditransaksikan",
+        "total_unit_terjual": "Jumlah fisik unit mobil yang terjual",
+        "wo_no": "Nomor Work Order / Perintah Kerja bengkel",
+        "nopolisi": "Nomor plat polisi kendaraan pelanggan yang diservis",
+        "total_jasa": "Biaya jasa pengerjaan perawatan atau perbaikan oleh bengkel (Rupiah)",
+        "total_part": "Nilai suku cadang yang digunakan dalam servis bengkel (Rupiah)",
+        "nama_foreman": "Nama kepala regu teknisi yang mengawasi pengerjaan servis",
+        "penerima": "Service Advisor yang menerima kendaraan di bengkel",
+        "tahun": "Tahun transaksi",
+        "bulan": "Bulan transaksi",
+    }
+
+    prev_row = None
+    if conversation_id:
+        prev_row = await core_pool.fetchrow(
+            "SELECT content FROM messages WHERE conversation_id = $1 AND role = 'assistant' ORDER BY id DESC LIMIT 1",
+            conversation_id,
+        )
+
+    if not prev_row:
+        ringkasan = (
+            "Tidak ada data atau tabel sebelumnya yang aktif dalam sesi percakapan ini. "
+            "Silakan ajukan pertanyaan data tertentu, misalnya: 'Tampilkan 5 model mobil terlaris' "
+            "atau 'Berapa total pendapatan servis bengkel tahun 2025?'."
+        )
+        saran = [
+            "Tampilkan 5 model mobil dengan penjualan tertinggi",
+            "Berapa total pendapatan servis bengkel tahun 2025?",
+            "Daftar 10 customer dengan transaksi pembelian unit terbesar",
+        ]
+    else:
+        prev_data = {}
+        try:
+            prev_data = json.loads(prev_row["content"])
+        except Exception:
+            pass
+
+        if prev_data.get("metode") == "conversational_guide" or (not prev_data.get("sql") and not prev_data.get("rows")):
+            ringkasan = (
+                "Pesan sebelumnya merupakan ringkasan panduan modul data yang tersedia di dealer Anda. "
+                "Untuk memeriksa data operasional nyata, Anda dapat meminta data penjualan unit, "
+                "servis bengkel, atau suku cadang."
+            )
+            saran = [
+                "Tampilkan 5 model mobil dengan penjualan tertinggi",
+                "Berapa total pendapatan servis bengkel tahun 2025?",
+                "Tren volume transaksi servis bulanan sepanjang tahun 2024",
+            ]
+        else:
+            prev_q = prev_data.get("question") or "permintaan data sebelumnya"
+            sql = (prev_data.get("sql") or "").lower()
+            cols = prev_data.get("columns") or []
+            rows = prev_data.get("rows") or []
+            row_count = prev_data.get("row_count", len(rows))
+
+            modul_nama = "Operasional Dealer"
+            modul_tabel = ""
+            if "untt_penjualan" in sql or any(k in prev_q.lower() for k in ["jual", "penjualan", "mobil", "unit"]):
+                modul_nama = "Penjualan Unit Kendaraan"
+                modul_tabel = "untt_penjualan"
+                saran = [
+                    "Berapa total omzet penjualan unit per bulan di tahun 2025?",
+                    "Tampilkan 5 customer dengan pembelian unit terbanyak",
+                    "Tren volume penjualan unit mobil sepanjang tahun 2024",
+                ]
+            elif "srvt_wo" in sql or "srvt_wodetail" in sql or any(k in prev_q.lower() for k in ["servis", "service", "bengkel", "pkb", "wo"]):
+                modul_nama = "Jasa Servis & Perawatan Bengkel"
+                modul_tabel = "srvt_wo & srvt_wodetail"
+                saran = [
+                    "Berapa total pendapatan jasa servis bengkel tahun 2025?",
+                    "Tampilkan 5 jenis pekerjaan servis yang paling sering dikerjakan",
+                    "Tren jumlah unit kendaraan yang diservis per bulan",
+                ]
+            elif "untt_pembelian" in sql or any(k in prev_q.lower() for k in ["beli", "pembelian", "kulakan", "pengadaan"]):
+                modul_nama = "Pembelian Unit Kendaraan"
+                modul_tabel = "untt_pembelian"
+                saran = [
+                    "Berapa total unit yang dibeli dealer tahun 2025?",
+                    "Daftar supplier unit kendaraan utama",
+                    "Perbandingan total unit dibeli vs unit terjual",
+                ]
+            elif "srvm_" in sql or any(k in prev_q.lower() for k in ["sparepart", "suku cadang", "part"]):
+                modul_nama = "Suku Cadang & Sparepart"
+                modul_tabel = "srvm_parts"
+                saran = [
+                    "Tampilkan 10 suku cadang dengan perputaran tercepat",
+                    "Berapa total nilai penjualan suku cadang tahun 2025?",
+                    "Daftar suku cadang dengan pergerakan tertinggi",
+                ]
+            elif "glbm_customer" in sql or any(k in prev_q.lower() for k in ["customer", "pelanggan"]):
+                modul_nama = "Master Data Pelanggan / Customer"
+                modul_tabel = "glbm_customer"
+                saran = [
+                    "Daftar pelanggan aktif dengan transaksi terbanyak",
+                    "Persebaran pelanggan berdasarkan kota",
+                    "Daftar customer yang melakukan pembelian unit di tahun 2025",
+                ]
+            else:
+                modul_nama = "Transaksi Operasional Cabang"
+                saran = [
+                    "Tampilkan rincian transaksi per bulan",
+                    "Berapa total nilai transaksi keseluruhan?",
+                    "Tampilkan 5 transaksi dengan nominal terbesar",
+                ]
+
+            paragraf = []
+            baris_info = f"{row_count} baris data" if row_count > 0 else "data"
+            paragraf.append(
+                f"Tabel di atas menampilkan {baris_info} dari modul **{modul_nama}**"
+                + (f" (tabel `{modul_tabel}`)" if modul_tabel else "")
+                + f", yang dihasilkan untuk menjawab pertanyaan: *\"{prev_q}\"*."
+            )
+
+            kolom_penjelas = []
+            for c in cols[:6]:
+                c_clean = str(c).lower().strip()
+                desc = PENJELASAN_KOLOM.get(c_clean)
+                if desc:
+                    kolom_penjelas.append(f"- **{c}**: {desc}")
+
+            if kolom_penjelas:
+                paragraf.append("Rincian fungsi kolom yang disajikan:\n" + "\n".join(kolom_penjelas))
+
+            paragraf.append(
+                "Data tersebut bersumber langsung dari database cabang Anda tanpa rekayasa. "
+                "Jika Anda ingin melihat data periode lain, rincian salesman, atau analisis tren, "
+                "silakan pilih salah satu pertanyaan di bawah atau ajukan pertanyaan baru."
+            )
+            ringkasan = "\n\n".join(paragraf)
+
+    response = {
+        "source": "conversational",
+        "confidence": "A",
+        "status": "success",
+        "question": question,
+        "ringkasan": ringkasan,
+        "sql": "",
+        "params": [],
+        "columns": [],
+        "rows": [],
+        "row_count": 0,
+        "truncated": False,
+        "duration_ms": durasi_ms,
+        "memory_id": None,
+        "saran": saran,
+        "metode": "conversational_explanation",
+        "is_conversational_text": True,
+        "allow_explain": False,
+    }
+    conv_id = await ambil_atau_buat_conversation(
+        core_pool, user_id, branch_code, question, conversation_id=conversation_id
+    )
+    response["conversation_id"] = conv_id
+    await simpan_pesan(core_pool, conv_id, "user", question)
+    await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
+
+    await tulis_audit(
+        core_pool,
+        user_id=user_id,
+        branch_code=branch_code,
+        prompt_text=question,
+        ai_json_filter={"mode": "conversational_explanation"},
+        generated_sql="",
+        execution_time_ms=durasi_ms,
+        status="success",
+        error_message=None,
+    )
+    return response
+
+
 async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                               question: str, branch_code: str,
                               llm_call_fn=None,
@@ -885,6 +1232,18 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
 
         # Ambil konteks percakapan aktif (tahun + topik) secara terisolasi per conversation_id
         active_context = await ambil_konteks_percakapan_aktif(core_pool, conversation_id)
+
+        # 0.0. Mode Percakapan Eksplanatori ("loh data apa ini?", "maksud tabel ini apa?")
+        if _is_explanatory_question(question):
+            return await tangani_kueri_eksplanatori(
+                core_pool, conversation_id, question, user_id, branch_code, t0
+            )
+
+        # 0.0.1. Mode Panduan Orientasi Modul Dealer ("kasih aku dong data data", "ada data apa aja", "halo")
+        if _is_general_guide_question(question):
+            return await tangani_kueri_panduan_umum(
+                core_pool, conversation_id, question, user_id, branch_code, t0
+            )
 
         # 0.1. Cek Pertanyaan Eksplanatori Keterbatasan Data / Cut-off Tanggal (0 Panggilan LLM, 100% Akurat)
         cutoff_info = _is_data_cutoff_question(question, active_context=active_context)

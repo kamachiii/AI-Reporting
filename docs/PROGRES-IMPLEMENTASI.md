@@ -1561,6 +1561,49 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
     - Skenario B (Balas Hanya Tahun): User ketik *"2025"* -> AI mengaudit seluruh divisi operasional tahun 2025.
     - Skenario C (Pergantian Topik): User mengetik *"siapa 5 customer terbesar?"* -> AI langsung mengeksekusi kueri baru via Vanna tanpa terjebak di slot lama.
 
+### 3at. Arsitektur Multi-Mode Percakapan: Mode Data, Penjelasan Eksplanatori, dan Panduan Orientasi Sistem (2026-09-08)
+
+- **Latar Belakang & Kasus Riil (`tester02` Percakapan #31)**:
+  1. *Kueri Vague/Umum Dipaksa Jadi SQL*: Saat user mengetik *"kasih aku dong data data"*, asisten secara buta mengeksekusi SQL acak ke `untt_penjualan` dan melempar tabel 50 baris dengan ringkasan kaku: *"Berhasil menampilkan 50 baris data dari database."*.
+  2. *Pertanyaan Eksplanatori Dijawab Lemparan Tabel Lagi*: Saat user bingung dan bertanya *"loh data apa ini?"*, sistem menganggap pertanyaan itu sebagai Text-to-SQL baru, mengeksekusi query lagi, dan memuntahkan tabel 50 baris yang sama.
+  3. *Arahan Pengguna*: *"berarti harus gimana? berarti ga harus selalu setiap chattan itu memberikan tabel dan grafik kann... bisa juga text.. kira kira gimana.. kasih tau aku plan kamu.. JANGAN CODING DLUU"*.
+
+- **Arsitektur 3 Mode Respons Percakapan**:
+  1. **Mode Data & Analitik (`mode: data_query`)**:
+     - Ditujukan untuk permintaan data spesifik (omzet, kuantiti unit, ranking, rincian perbandingan).
+     - Menghasilkan: Eksekusi SQL terverifikasi + Tabel Data Interaktif + Visualisasi Grafik Auto-Adaptive + Ringkasan Angka Terformat.
+  2. **Mode Penjelasan Jawaban Sebelumnya (`mode: conversational_explanation`)**:
+     - Ditujukan untuk pertanyaan seperti: *"loh data apa ini?"*, *"ini data apa?"*, *"maksud tabel ini apa?"*, *"jelaskan data di atas"*, *"apa maksud kolom hjakhir?"*.
+     - Menghasilkan: **100% Teks Naratif Murni** menjelaskan secara manusiawi modul transaksi riil (`untt_penjualan` -> Penjualan Unit, `srvt_wo` -> Jasa Servis Bengkel, `glbm_customer` -> Master Customer), fungsi kolom-kolom utama, dan 3 saran eksplorasi data lanjutan.
+     - **0 SQL baru, 0 lemparan tabel duplikat**.
+  3. **Mode Panduan Orientasi Modul Dealer (`mode: conversational_guide`)**:
+     - Ditujukan untuk pertanyaan vague atau sapaan: *"kasih aku dong data data"*, *"ada data apa aja di sini"*, *"kamu bisa apa saja"*, *"halo"*.
+     - Menghasilkan: Teks panduan ramah mengenai 4 pilar modul data operasional yang tersedia di dealer (Penjualan Unit, Jasa Servis Bengkel, Suku Cadang, dan Master Customer) + 4 horizontal prompt chips siap klik.
+     - **0 SQL acak, 0 tabel sembarangan**.
+
+- **Implementasi Komponen & Berkas**:
+  1. **Backend Engine (`vanna_engine.py`)**:
+     - `_is_general_guide_question(question)`: mendeteksi sapaan dan kueri data sangat samar (vague) via token filtering ketat tanpa salah mendeteksi kueri data riil.
+     - `_is_explanatory_question(question)`: mendeteksi pertanyaan eksplanatori yang menanyakan maksud data/tabel/kolom sebelumnya.
+     - `tangani_kueri_panduan_umum(...)`: menyusun panduan operasional dealer dengan 4 saran pertanyaan siap klik (`is_conversational_text: True`, `metode: "conversational_guide"`).
+     - `tangani_kueri_eksplanatori(...)`: menginspeksi pesan asisten terakhir pada `conversation_id`, membedah modul transaksi riil yang baru ditampilkan beserta kamus fungsi kolom (`PENJELASAN_KOLOM`), dan menyusun narasi editorial yang berkelas.
+     - Pengecualian pesan conversational dari `ambil_konteks_percakapan_aktif` agar teks panduan tidak mencemari topik percakapan berikutnya.
+     - Pembersihan 2 memori usang (ID #78 & #79) dari `sql_memory` yang sebelumnya terlanjur diapprove user pada saat bug lempar tabel.
+  2. **Frontend UI (`AssistantAnswerCard.jsx` & `UserWorkspace.jsx`)**:
+     - `isConversational` rendering: Jika `is_conversational_text` aktif, kartu menampilkan header badge *"Panduan Asisten AI"* atau *"Penjelasan Data Percakapan"*, teks naratif berjarak baris nyaman dan kontras tinggi, serta horizontal clickable suggestion chips dengan icon `ArrowRight`.
+     - Tidak merender kotak tabel kosong (*"Tidak ada data"*), tidak merender dark code window SQL, dan tidak merender tombol download Excel.
+     - 100% kepatuhan aturan: **Zero Emoji**, token warna Claude Editorial (`bg-canvas`, `border-hairline`, `text-ink`, `text-body`, `text-primary`).
+
+- **Hasil Verifikasi**:
+  - Backend compile: `compileall app` lolos 100% (exit code 0).
+  - Backend pytest: **572 passed in 35.57s** (100% lulus, +3 unit test baru).
+  - Frontend lint: `npm run lint` lolos (**0 errors**).
+  - Frontend build: `npm run build` lolos (exit code 0, 1.24s).
+  - Live Multi-Turn Simulation (`test_live_conversational_modes.py`):
+    - **Turn 1** (*"kasih aku dong data data"*): menghasilkan panduan orientasi modul 4 pilar + 4 prompt chips. 0 SQL acak, 0 tabel.
+    - **Turn 2** (*"siapa 5 customer terbesar"*): menghasilkan tabel 5 customer teratas dari database.
+    - **Turn 3** (*"loh data apa ini?"*): menghasilkan teks naratif manusiawi yang menjelaskan tabel customer di atas tanpa mengeksekusi SQL atau melempar tabel baru.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -1631,6 +1674,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Koreksi Inversi Nilai Komparasi Tahunan, Formatting Kuantitas Suku Cadang & Audit Eksplanatori Cut-Off Data** — SELESAI (lihat §3aq).
 - [x] **Isolasi Sesi Percakapan Riwayat Chat & Klarifikasi Konteks Pertanyaan Keterbatasan Data** — SELESAI (lihat §3ar).
 - [x] **Arsitektur Conversational Slot-Filling & Natural Clarification Flow** — SELESAI (lihat §3as).
+- [x] **Arsitektur Multi-Mode Percakapan: Mode Data, Penjelasan Eksplanatori, dan Panduan Orientasi Sistem** — SELESAI (lihat §3at).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. *Dedicated Executive Dashboard Page*: Ditutup/dibatalkan atas arahan pengguna untuk mempertahankan identitas murni Conversational AI Assistant.
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.

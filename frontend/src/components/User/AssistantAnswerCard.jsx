@@ -806,6 +806,111 @@ export default function AssistantAnswerCard({
     });
   };
 
+  const isConversational = Boolean(
+    answer?.is_conversational_text ||
+    answer?.metode === 'conversational_explanation' ||
+    answer?.metode === 'conversational_guide'
+  );
+
+  if (isConversational) {
+    const isGuide = answer?.metode === 'conversational_guide';
+    const textContent = bersihkanRingkasan(answer.ringkasan || '');
+    const rawParagraphs = textContent.split('\n\n').filter(Boolean);
+
+    return (
+      <div className="bg-canvas border border-hairline rounded-lg shadow-2xs p-4 sm:p-5 space-y-4">
+        {/* Header Badge */}
+        <div className="flex items-center justify-between gap-3 border-b border-hairline pb-3 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-surface-card border border-hairline text-ink text-xs font-medium">
+              {isGuide ? <Compass size={12} className="text-primary" /> : <Lightbulb size={12} className="text-primary" />}
+              <span>{isGuide ? 'Panduan Asisten AI' : 'Penjelasan Data Percakapan'}</span>
+            </span>
+            <span className="text-[11px] text-muted font-mono bg-surface-card px-2 py-0.5 rounded-md border border-hairline">
+              Modus: <strong className="text-ink">{isGuide ? 'Panduan Sistem' : 'Eksplanatori'}</strong>
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2.5 text-xs text-muted font-mono">
+            {durasi && <span className="tabular-nums font-mono">{durasi}</span>}
+          </div>
+        </div>
+
+        {/* Narrative Text */}
+        <div className="space-y-3 font-sans text-sm sm:text-[14.5px] leading-relaxed text-ink">
+          {rawParagraphs.map((para, idx) => {
+            const lines = para.split('\n');
+            if (lines.length > 1 && lines.some((l) => l.trim().startsWith('- ') || /^\d+\.\s/.test(l.trim()))) {
+              const headerLine = lines[0];
+              const listLines = lines.slice(1);
+              return (
+                <div key={idx} className="space-y-1.5 pt-0.5">
+                  {headerLine && <p className="font-medium text-ink">{headerLine}</p>}
+                  <ul className="space-y-1 pl-1 text-body text-xs sm:text-[13.5px]">
+                    {listLines.map((line, lIdx) => {
+                      const trimmed = line.trim();
+                      const isBullet = trimmed.startsWith('- ');
+                      const isNumbered = /^\d+\.\s/.test(trimmed);
+                      const cleanLine = isBullet ? trimmed.substring(2) : isNumbered ? trimmed.replace(/^\d+\.\s*/, '') : trimmed;
+                      const hasColon = cleanLine.includes(':');
+
+                      return (
+                        <li key={lIdx} className="flex items-start gap-2 leading-relaxed">
+                          <span className="text-primary/70 shrink-0 select-none mt-0.5 font-mono text-[11px]">
+                            {isNumbered ? `${lIdx + 1}.` : '•'}
+                          </span>
+                          <span>
+                            {hasColon ? (
+                              <>
+                                <strong className="font-medium text-ink">{cleanLine.split(':')[0]}:</strong>
+                                <span className="text-body">{cleanLine.substring(cleanLine.indexOf(':') + 1)}</span>
+                              </>
+                            ) : (
+                              <span className="text-body">{cleanLine}</span>
+                            )}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              );
+            }
+
+            return (
+              <p key={idx} className="text-body leading-relaxed">
+                {para}
+              </p>
+            );
+          })}
+        </div>
+
+        {/* Suggestion Chips */}
+        {Array.isArray(answer.saran) && answer.saran.length > 0 && onAsk && (
+          <div className="pt-3 border-t border-hairline space-y-2">
+            <p className="text-[11px] text-muted flex items-center gap-1.5 font-medium">
+              <Compass size={12} className="text-primary" />
+              <span>{isGuide ? 'Rekomendasi pertanyaan siap klik:' : 'Pertanyaan eksplorasi lanjutan:'}</span>
+            </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              {answer.saran.map((s, idx) => (
+                <button
+                  key={`${s}-${idx}`}
+                  type="button"
+                  onClick={() => onAsk(s)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-hairline rounded-md bg-canvas hover:bg-surface-soft hover:border-primary/40 hover:text-ink text-body transition-colors cursor-pointer text-left shadow-2xs group"
+                >
+                  <ArrowRight size={11} className="text-primary group-hover:translate-x-0.5 transition-transform shrink-0" />
+                  <span>{s}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="bg-canvas border border-hairline rounded-lg shadow-2xs p-4 sm:p-5 space-y-4">
