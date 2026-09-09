@@ -574,20 +574,50 @@ def _format_ringkasan_otomatis(rows: list, columns: list, question: str = "") ->
 
 
 def deteksi_topik_eksplisit(question: str) -> str | None:
-    """Mendeteksi domain topik bisnis otomotif eksplisit dari teks pertanyaan pengguna.
-    Kata kunci eksplisit ini memiliki prioritas tertinggi (override) di atas inherited_topic riwayat.
+    """Mendeteksi domain topik bisnis otomotif eksplisit dari teks pertanyaan pengguna
+    dengan batasan kata (word-boundary regex) dan validasi konteks sekeliling kata
+    untuk mencegah false positive (mis. 'servis pelanggan' vs servis bengkel, 'partisipasi' vs sparepart).
+    
+    Kata kunci eksplisit ini memiliki prioritas tertinggi (override 100%) di atas inherited_topic riwayat.
     """
     if not question:
         return None
     q_lower = question.lower()
-    if any(w in q_lower for w in ["beli", "pembelian", "kulakan", "pengadaan", "hpunit", "tglinvoice"]):
+
+    # 1. Pengecualian konteks ambigu non-bengkel (Customer Service / Layanan Pelanggan)
+    is_cs_context = any(cs in q_lower for cs in [
+        "customer service", "cs", "servis pelanggan", "service pelanggan",
+        "pelayanan pelanggan", "layanan pelanggan", "kepuasan pelanggan", "kualitas servis"
+    ])
+    has_workshop_cues = bool(re.search(
+        r'\b(bengkel|mekanik|wo|pkb|work order|perbaikan|reparasi|oli|jasa|kendaraan|mobil|motor|tune[- ]?up|totalestimasibiaya)\b',
+        q_lower
+    ))
+
+    # Helper pencocokan regex word boundary
+    def _match_any(patterns: list[str]) -> bool:
+        for p in patterns:
+            if re.search(r'\b' + p + r'\b', q_lower):
+                return True
+        return False
+
+    # 2. Deteksi Pembelian (Pengadaan / Kulakan Kendaraan)
+    if _match_any(["beli", "pembelian", "kulakan", "pengadaan", "beli unit", "beli mobil", "hpunit", "tglinvoice"]):
         return "pembelian"
-    if any(w in q_lower for w in ["servis", "service", "bengkel", "wo", "pkb", "mekanik"]):
-        return "servis"
-    if any(w in q_lower for w in ["sparepart", "suku cadang", "part"]):
+
+    # 3. Deteksi Servis / Bengkel (dengan guard konteks CS)
+    if not is_cs_context or has_workshop_cues:
+        if _match_any(["servis", "service", "bengkel", "wo", "pkb", "mekanik", "perbaikan", "reparasi", "tune[- ]?up", "ganti oli"]):
+            return "servis"
+
+    # 4. Deteksi Sparepart / Suku Cadang (menghindari 'partisipasi', 'departemen', dsb)
+    if _match_any(["sparepart", "spare-part", "spare part", "suku cadang", "onderdil", "part", "stok part", "srvt_wodetail"]):
         return "sparepart"
-    if any(w in q_lower for w in ["jual", "penjualan", "omzet", "unit terjual", "spk", "hjakhir"]):
+
+    # 5. Deteksi Penjualan (Unit Terjual / Omzet Dealer)
+    if _match_any(["jual", "penjualan", "omzet", "omset", "unit terjual", "mobil terjual", "spk", "hjakhir", "dealer"]):
         return "penjualan"
+
     return None
 
 

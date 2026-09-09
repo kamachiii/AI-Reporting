@@ -517,6 +517,14 @@ def test_explicit_keyword_override():
     assert deteksi_topik_eksplisit("Cek data suku cadang 2025") == "sparepart"
     assert deteksi_topik_eksplisit("Bagaimana dengan performa tahun 2024?") is None
 
+    # 1.1 Pencegahan False Positive (Konteks CS & Substring non-otomotif)
+    assert deteksi_topik_eksplisit("Bagaimana cara menghubungi customer service?") is None
+    assert deteksi_topik_eksplisit("Tingkat kepuasan servis pelanggan") is None
+    assert deteksi_topik_eksplisit("Berapa mobil yang diservis di bengkel?") == "servis"
+    assert deteksi_topik_eksplisit("Berapa orang yang berpartisipasi dalam acara?") is None
+    assert deteksi_topik_eksplisit("Two network managers wonderful") is None
+    assert deteksi_topik_eksplisit("Beliau adalah kepala cabang") is None
+
     # 2. Kata kunci eksplisit mengalahkan (100% override) inherited_topic penjualan
     comp = _deteksi_kueri_komparasi_periode(
         "Bandingkan servis tahun 2023 vs 2024", inherited_topic="penjualan"
@@ -663,6 +671,67 @@ def test_zero_cross_session_bleed():
     assert res_202_ctx["topic"] == "penjualan"
     assert res_101_ctx["year"] == 2023
     assert res_202_ctx["year"] == 2024
+
+
+@pytest.mark.integration
+def test_zero_cross_session_bleed_real_db():
+    """Integrasi Database Nyata: Membuktikan WHERE conversation_id = $1
+    menjamin zero cross-session bleed secara nyata di PostgreSQL.
+    """
+    import asyncio
+    import pytest
+    from app.core.database import get_core_pool, close_core_pool
+    from app.services.vanna_engine import ambil_konteks_percakapan_aktif, deteksi_topik_riwayat_percakapan
+
+    async def _run():
+        try:
+            pool = await get_core_pool()
+        except Exception:
+            pytest.skip("PostgreSQL Core Docker (port 5433) tidak aktif, lewati integrasi DB.")
+            return
+
+        # 1. Buat 2 sesi percakapan nyata di database core
+        c1 = await pool.fetchval(
+            "INSERT INTO conversations (user_id, branch_code, title) VALUES (1, 'TST_01', 'Test Sesi Servis Integrasi') RETURNING id"
+        )
+        c2 = await pool.fetchval(
+            "INSERT INTO conversations (user_id, branch_code, title) VALUES (1, 'TST_01', 'Test Sesi Penjualan Integrasi') RETURNING id"
+        )
+
+        try:
+            # 2. Masukkan pesan terpisah
+            await pool.execute(
+                "INSERT INTO messages (conversation_id, role, content) VALUES ($1, 'user', 'Berapa total servis dan wo bengkel tahun 2023?')",
+                c1
+            )
+            await pool.execute(
+                "INSERT INTO messages (conversation_id, role, content) VALUES ($1, 'user', 'Berapa omzet penjualan mobil tahun 2024?')",
+                c2
+            )
+
+            # 3. Eksekusi paralel membaca dari PostgreSQL nyata
+            r1_ctx, r2_ctx, r1_topik, r2_topik = await asyncio.gather(
+                ambil_konteks_percakapan_aktif(pool, c1),
+                ambil_konteks_percakapan_aktif(pool, c2),
+                deteksi_topik_riwayat_percakapan(pool, c1),
+                deteksi_topik_riwayat_percakapan(pool, c2),
+            )
+
+            # 4. Verifikasi isolasi mutlak
+            assert r1_topik == "servis"
+            assert r2_topik == "penjualan"
+            assert r1_ctx["topic"] == "servis"
+            assert r2_ctx["topic"] == "penjualan"
+            assert r1_ctx["year"] == 2023
+            assert r2_ctx["year"] == 2024
+
+        finally:
+            # 5. Pembersihan data uji (cleanup)
+            await pool.execute("DELETE FROM messages WHERE conversation_id IN ($1, $2)", c1, c2)
+            await pool.execute("DELETE FROM conversations WHERE id IN ($1, $2)", c1, c2)
+
+    asyncio.run(_run())
+
 
 
 

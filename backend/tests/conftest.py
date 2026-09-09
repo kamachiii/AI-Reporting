@@ -87,3 +87,8 @@ SCHEMA_CONFIG_DEALER = {
 def schema_config_dealer():
     """Salinan skema dealer_dummy untuk satu test (bebas dimodifikasi)."""
     return copy.deepcopy(SCHEMA_CONFIG_DEALER)
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "integration: tanda pengujian yang membutuhkan database nyata")
+
