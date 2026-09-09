@@ -447,6 +447,113 @@ function CustomChartTooltip({ active, payload, label }) {
   return null;
 }
 
+/**
+ * Render inline markdown (**teks tebal**, *teks miring*, `kode`) secara aman dan elegan
+ * untuk menghasilkan tipografi berstandar editorial layaknya Claude/Gemini/GPT.
+ */
+function renderMarkdownInline(str) {
+  if (!str || typeof str !== 'string') return str;
+  const parts = [];
+  const regex = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = regex.exec(str)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(str.substring(lastIndex, match.index));
+    }
+    const token = match[0];
+    if (token.startsWith('**') && token.endsWith('**') && token.length >= 4) {
+      parts.push(
+        <strong key={match.index} className="font-semibold text-ink">
+          {token.slice(2, -2)}
+        </strong>
+      );
+    } else if (token.startsWith('*') && token.endsWith('*') && token.length >= 2) {
+      parts.push(
+        <em key={match.index} className="italic text-ink/90">
+          {token.slice(1, -1)}
+        </em>
+      );
+    } else if (token.startsWith('`') && token.endsWith('`') && token.length >= 2) {
+      parts.push(
+        <code key={match.index} className="font-mono text-xs bg-surface-card border border-hairline px-1.5 py-0.5 rounded text-primary">
+          {token.slice(1, -1)}
+        </code>
+      );
+    }
+    lastIndex = regex.lastIndex;
+  }
+
+  if (lastIndex < str.length) {
+    parts.push(str.substring(lastIndex));
+  }
+
+  return parts.length > 0 ? parts : str;
+}
+
+/**
+ * Komponen Markdown Content dengan hierarki tipografi editorial,
+ * mendukung paragraf mengalir, daftar berbutir (bullet list), dan daftar bernomor.
+ */
+function MarkdownNarrativeContent({ content }) {
+  if (!content) return null;
+  const rawParagraphs = content.split(/\n\n+/).filter(Boolean);
+
+  return (
+    <div className="space-y-3 font-sans text-sm sm:text-[14.5px] leading-relaxed text-ink">
+      {rawParagraphs.map((para, idx) => {
+        const lines = para.split('\n').filter(Boolean);
+        const hasListItems = lines.some((l) => /^[•\-*]|\d+\.\s/.test(l.trim()));
+
+        if (hasListItems) {
+          const header = lines.length > 1 && !/^[•\-*]|\d+\.\s/.test(lines[0].trim()) ? lines[0] : null;
+          const listLines = header ? lines.slice(1) : lines;
+
+          return (
+            <div key={idx} className="space-y-1.5 pt-0.5">
+              {header && (
+                <p className="font-medium text-ink leading-relaxed">
+                  {renderMarkdownInline(header)}
+                </p>
+              )}
+              <ul className="space-y-1.5 pl-1 text-body text-xs sm:text-[13.5px]">
+                {listLines.map((line, lIdx) => {
+                  const trimmed = line.trim();
+                  const isNumbered = /^\d+\.\s*/.test(trimmed);
+                  const isBullet = /^[•\-*]\s*/.test(trimmed);
+                  const clean = isNumbered
+                    ? trimmed.replace(/^\d+\.\s*/, '')
+                    : isBullet
+                    ? trimmed.replace(/^[•\-*]\s*/, '')
+                    : trimmed;
+
+                  return (
+                    <li key={lIdx} className="flex items-start gap-2 leading-relaxed">
+                      <span className="text-primary/70 shrink-0 select-none mt-1 font-mono text-[11px]">
+                        {isNumbered ? `${lIdx + 1}.` : '•'}
+                      </span>
+                      <span className="text-body flex-1">
+                        {renderMarkdownInline(clean)}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          );
+        }
+
+        return (
+          <p key={idx} className="text-body leading-relaxed">
+            {renderMarkdownInline(para.trim())}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Format narasi analisis eksekutif agar terstruktur rapi, tidak menjadi semut berbaris. */
 function FormattedExecutiveAnalysis({ text }) {
   if (!text) return null;
@@ -493,12 +600,12 @@ function FormattedExecutiveAnalysis({ text }) {
                   {bulletItems.map((item, bIdx) => (
                     <li key={bIdx} className="flex items-start gap-2 text-sm text-ink">
                       <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0 mt-2" />
-                      <span className="leading-relaxed">{item}</span>
+                      <span className="leading-relaxed">{renderMarkdownInline(item)}</span>
                     </li>
                   ))}
                 </ul>
               ) : (
-                <p className="text-ink text-sm leading-relaxed">{rawContent}</p>
+                <p className="text-ink text-sm leading-relaxed">{renderMarkdownInline(rawContent)}</p>
               )}
             </div>
           );
@@ -513,7 +620,7 @@ function FormattedExecutiveAnalysis({ text }) {
                 return (
                   <li key={lIdx} className="flex items-start gap-2 text-sm text-body">
                     <span className="w-1.5 h-1.5 rounded-full bg-primary/70 shrink-0 mt-2" />
-                    <span>{cleaned}</span>
+                    <span>{renderMarkdownInline(cleaned)}</span>
                   </li>
                 );
               })}
@@ -523,7 +630,7 @@ function FormattedExecutiveAnalysis({ text }) {
 
         return (
           <p key={idx} className="text-body leading-relaxed">
-            {para}
+            {renderMarkdownInline(para)}
           </p>
         );
       })}
@@ -814,7 +921,6 @@ export default function AssistantAnswerCard({
     // Bersihkan karakter emoji
     rawText = rawText.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim();
     const textContent = bersihkanRingkasan(rawText);
-    const rawParagraphs = textContent.split('\n\n').filter(Boolean);
 
     const conversationalSaran = (Array.isArray(answer.saran) && answer.saran.length > 0)
       ? answer.saran
@@ -845,53 +951,7 @@ export default function AssistantAnswerCard({
         </div>
 
         {/* Narrative Text */}
-        <div className="space-y-3 font-sans text-sm sm:text-[14.5px] leading-relaxed text-ink">
-          {rawParagraphs.map((para, idx) => {
-            const lines = para.split('\n');
-            if (lines.length > 1 && lines.some((l) => l.trim().startsWith('- ') || /^\d+\.\s/.test(l.trim()))) {
-              const headerLine = lines[0];
-              const listLines = lines.slice(1);
-              return (
-                <div key={idx} className="space-y-1.5 pt-0.5">
-                  {headerLine && <p className="font-medium text-ink">{headerLine}</p>}
-                  <ul className="space-y-1 pl-1 text-body text-xs sm:text-[13.5px]">
-                    {listLines.map((line, lIdx) => {
-                      const trimmed = line.trim();
-                      const isBullet = trimmed.startsWith('- ');
-                      const isNumbered = /^\d+\.\s/.test(trimmed);
-                      const cleanLine = isBullet ? trimmed.substring(2) : isNumbered ? trimmed.replace(/^\d+\.\s*/, '') : trimmed;
-                      const hasColon = cleanLine.includes(':');
-
-                      return (
-                        <li key={lIdx} className="flex items-start gap-2 leading-relaxed">
-                          <span className="text-primary/70 shrink-0 select-none mt-0.5 font-mono text-[11px]">
-                            {isNumbered ? `${lIdx + 1}.` : '•'}
-                          </span>
-                          <span>
-                            {hasColon ? (
-                              <>
-                                <strong className="font-medium text-ink">{cleanLine.split(':')[0]}:</strong>
-                                <span className="text-body">{cleanLine.substring(cleanLine.indexOf(':') + 1)}</span>
-                              </>
-                            ) : (
-                              <span className="text-body">{cleanLine}</span>
-                            )}
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              );
-            }
-
-            return (
-              <p key={idx} className="text-body leading-relaxed">
-                {para}
-              </p>
-            );
-          })}
-        </div>
+        <MarkdownNarrativeContent content={textContent} />
 
         {/* Suggestion Chips */}
         {conversationalSaran.length > 0 && onAsk && (
@@ -962,9 +1022,9 @@ export default function AssistantAnswerCard({
             <div className="text-[10px] font-mono text-muted uppercase tracking-wider mb-1">
               Ringkasan Eksekutif
             </div>
-            <p className="font-sans text-sm sm:text-[15px] leading-relaxed text-ink font-medium">
-              {bersihkanRingkasan(answer.ringkasan)}
-            </p>
+            <div className="font-sans text-sm sm:text-[15px] leading-relaxed text-ink font-medium">
+              {renderMarkdownInline(bersihkanRingkasan(answer.ringkasan))}
+            </div>
           </div>
         )}
 

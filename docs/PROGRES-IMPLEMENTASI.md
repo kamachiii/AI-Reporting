@@ -75,6 +75,7 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **Eliminasi Badge Visual Ctrl+B & Perluasan Trigger Fan-Out Tiap Divisi** | selesai | `a25c07b` | Menghapus badge teks visual Ctrl+B dari floating handle (informasi tetap via hover title), menghapus cache memory tunggal #67, dan memperluas trigger regex fanout_engine untuk menangani typo 'peforma' & frasa 'tiap divisi' sehingga perbandingan performa antar divisi per tahun sukses terpecah ke 4 tab (Komparasi, Unit, Servis, Sparepart) |
 | **Progressive Comparison (Gaya 1 -> Gaya 2) & Zero Emoji** | selesai | LIVE | Deteksi kueri periode (Gaya 1 tabel terpadu default + chart); ProactiveBreakdownOffer interaktif ke Gaya 2 (multi-tab rincian terpisah per periode tanpa jargon 3S); Penegakan 100% Zero-Emoji (SVG Lucide SplitSquareVertical, Calendar, Table2); 562 test backend lulus, lint 0 error, build 0 error |
 | **Arsitektur Chatbot Percakapan Murni & Dynamic Multi-Query** | selesai | LIVE | Mode Percakapan Murni (0 SQL, 0 Table untuk salam, konsep bisnis dealer PKB/SPK/VIN, kapabilitas); Eliminasi pola 3S fan-out divisi & tombol ambiguitas pembajak kueri; Kueri analitik tunggal 1 tabel presisi; Dynamic Multi-Query berbasis permintaan nyata (tab judul kustom); 577 test lulus, lint 0 error, build 0 error |
+| **Conversational AI Standar Gemini-Claude & Inline Markdown** | selesai | LIVE | Penanganan kueri konsultatif/hipotetis ("semisal semua data bisa?") 0 SQL; Multi-turn 5 riwayat percakapan; unforced json LLM streaming; Markdown inline formatter (**bold**, *italic*, code) editorial; 16/16 test skenario E2E lulus; 577 test lulus, lint 0 error, build 0 error |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -1751,6 +1752,57 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
     - *Percakapan Murni*: *"halo selamat sore"*, *"apa itu PKB?"*, *"apa bedanya norangka dan nopolisi?"*, *"kamu bisa apa saja?"*, *"terima kasih banyak"* lolos 100% dengan respons naratif Indonesia luwes, 0 SQL, 0 tabel.
     - *Kueri Tunggal*: *"berapa total penjualan tahun 2025?"* (1 baris: `total_penjualan_2025: Rp 69,83 Miliar`, 187 ms), *"tampilkan 5 mobil terlaris"* (5 baris, 125 ms) lolos 100% tabel tunggal tanpa pola 3S atau kata divisi.
     - *Multi-Tabel Dinamis*: *"tampilkan 5 mobil terlaris dan 5 pelanggan teratas"* lolos 100% dengan 2 tab dinamis: Tab 1 *"5 Mobil Terlaris"* dan Tab 2 *"5 Pelanggan Teratas"*.
+
+### 3ay. Conversational AI Standar Gemini-Claude, Multi-Turn Context, dan Inline Markdown Typography (commit: HEAD)
+
+- **Latar Belakang & Penyelidikan Kasus `tester02` (Percakapan #67)**:
+  1. *Masalah di Percakapan Riil*: Pengguna `tester02` mengajukan pertanyaan konsultatif/hipotetis: *"semisal gw mau SEMUA DATA bisa?"*.
+  2. *Akar Masalah*: Sistem salah mengklasifikasikan frasa *"semua data"* sebagai kueri analitis data alih-alih pertanyaan konsultatif batasan sistem. Akibatnya, sistem mengeksekusi kueri berat `UNION ALL` 13 tahun lintas 3 tabel (`untt_penjualan`, `srvt_wo`, `srvt_wodetail`) dan mengembalikan tabel ringkasan tahun dengan 13 baris dan narasi kaku robotik, alih-alih menjelaskan batasan arsitektur database berskala 2.387 tabel secara elegan layaknya Gemini, GPT, atau Claude.
+  3. *Pembungkus JSON Mentah*: Pemanggilan LLM via gateway OpenAI-compatible (`panggil_llm_default`) memaksakan parameter `response_format: {"type": "json_object"}`. Hal ini memaksa model AI mengembalikan format JSON mentah seperti `{"response": "..."}`, yang pada pesan pendek dapat mengalami malformed string.
+  4. *Ketiadaan Inline Markdown Parser*: Komponen antarmuka chat di frontend sebelumnya mencetak tanda asteriks mentah `**kata**`, `*kata*`, dan code block tanpa dirender menjadi elemen HTML tipografi yang sebenarnya.
+
+- **Solusi & Rekayasa Arsitektur**:
+  1. **Unforced JSON LLM Call (`query_planner.py`)**:
+     - Menambahkan parameter `response_json: bool = True` pada fungsi `panggil_llm_default`.
+     - Ketika `response_json=False`, `response_format: {"type": "json_object"}` tidak dikirim ke gateway LLM, memberikan kebebasan penuh bagi model untuk mengalirkan teks Markdown alami bebas JSON.
+  2. **Perluasan Mesin Pendeteksi Percakapan & Hipotetis (`vanna_engine.py`)**:
+     - *Pertanyaan Hipotetis/Kapabilitas*: Menangkap pola `semisal ...`, `misal ...`, `kalau ... bisa?`, `apakah bisa ...`, `bisa ga kalau ...`.
+     - *Ekspresi Keraguan & Fillers*: Menangkap pola `emm apa yaa..`, `bingung mau tanya apa`, `rekomendasi dong`.
+     - *Permintaan Skala Tak Berbatas*: Menangkap pola `semisal gw mau semua data bisa?`, `semua data`, `tampilkan semua data`.
+     - *Fitur & Kapabilitas Sistem*: Menangkap pola `bisa ekspor ke excel gak?`, `apakah ada fitur grafik?`.
+  3. **Multi-Turn Conversation History (`vanna_engine.py`)**:
+     - Fungsi `tangani_kueri_percakapan` kini secara otomatis memuat 5 riwayat percakapan terakhir dari database core (`chat_history`) dan menginjeksikannya ke dalam konteks LLM, menciptakan kesinambungan obrolan yang kontekstual dan kohesif layaknya ChatGPT dan Claude.
+  4. **Pembersih Ekstraksi & Fallback Editorial Kontekstual (`vanna_engine.py`)**:
+     - Fungsi `_ekstrak_teks_naratif_bersih` mengupas tuntas jika model tetap menyisipkan pembungkus JSON seperti `{"response": "..."}`.
+     - Fallback edukatif komprehensif disiapkan per-kategori jika koneksi penyedia LLM eksternal mengalami timeout atau limitasi kuota.
+  5. **Tipografi Inline Markdown Editorial (`AssistantAnswerCard.jsx`)**:
+     - Helper `renderMarkdownInline(str)` merender `**bold**` menjadi `<strong className="font-semibold text-ink">`, `*italic*` menjadi `<em>`, dan `` `code` `` menjadi `<code>` dengan background surface lembut.
+     - Komponen `MarkdownNarrativeContent` menyusun hierarki visual paragraf yang mengalir (`leading-relaxed`), poin-poin bertingkat dengan penanda rapi, serta penomoran otomatis.
+     - Menghapus variabel tak terpakai untuk mempertahankan standar ESLint 0 warning pada file baru/ubahan.
+
+- **Hasil Verifikasi & Bukti Empiris**:
+  - **Uji E2E Simulasi 16 Skenario Percakapan (`test_e2e_chatbot_gemini_gpt_claude.py`)**:
+    1. Sapaan santai (`"aloww"`) -> LULUS (0 SQL, narasi ramah)
+    2. Sapaan kilat (`"p"`) -> LULUS (0 SQL, narasi responsif)
+    3. Sapaan formal (`"halo selamat pagi"`) -> LULUS (0 SQL, salam hangat)
+    4. Keraguan / filler (`"emm apa yaa.."` -> LULUS (0 SQL, panduan topik)
+    5. Minta ide (`"bingung mau nanya apa nih"`) -> LULUS (0 SQL, ide pertanyaan dealer)
+    6. Permintaan skala luas hipotetis (`"semisal gw mau SEMUA DATA bisa?"`) -> LULUS (0 SQL, edukasi batasan 2.387 tabel)
+    7. Batasan kapasitas data (`"apakah bisa menampilkan semua data?"`) -> LULUS (0 SQL, saran filtrasi spesifik)
+    8. Pertanyaan ambigu singkat (`"semua data"`) -> LULUS (0 SQL, panduan eksplorasi)
+    9. Fitur ekspor (`"bisa ekspor ke excel gak?"`) -> LULUS (0 SQL, penjelasan fitur Excel & Chart)
+    10. Fitur visualisasi (`"apakah ada fitur grafik?"`) -> LULUS (0 SQL, panduan visual chart)
+    11. Konsep bisnis otomotif (`"apa bedanya PKB sama SPK?"`) -> LULUS (0 SQL, perbandingan istilah dealer)
+    12. Konsep regulasi kendaraan (`"apa itu OTR dan off the road?"`) -> LULUS (0 SQL, terminologi harga)
+    13. Kueri analitis data agregat (`"berapa total penjualan tahun 2025?"`) -> LULUS (1 tabel teragregasi: 350 unit, Rp 69,83 Miliar)
+    14. Kueri analitis data peringkat (`"tampilkan 5 mobil terlaris"`) -> LULUS (1 tabel 5 mobil teratas)
+    15. Kueri analitis multi-laporan dinamis (`"tampilkan 5 mobil terlaris dan 5 pelanggan teratas"`) -> LULUS (2 tab dinamis)
+    16. Ucapan apresiasi penutup (`"mantap banget, makasih ya"`) -> LULUS (0 SQL, apresiasi balik)
+    - **Hasil: 16/16 Lulus Sempurna (100.0% Pass Rate)**.
+  - Backend compile: `compileall app` lolos (exit code 0).
+  - Backend pytest: `pytest tests/ -q` lolos (**577 passed in 62.38s**).
+  - Frontend lint: `npm run lint` lolos (**0 errors**).
+  - Frontend build: `npm run build` lolos (**exit code 0, 1.01s**).
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 

@@ -288,11 +288,11 @@ def _parse_dan_validasi(raw: str, schema_config: dict) -> tuple[dict | None, lis
 # ---------------------------------------------------------------------------
 # Default LLM call (httpx, pola ai_orchestrator.build_chat_url)
 # ---------------------------------------------------------------------------
-async def panggil_llm_default(system: str, user: str, ai_config: dict) -> str:
+async def panggil_llm_default(system: str, user: str, ai_config: dict, response_json: bool = True) -> str:
     """Panggilan HTTP default ke gateway AI (openai/anthropic).
 
-    openai: messages system+user + response_format json_object (memaksa
-    output JSON murni di sisi gateway). anthropic: system terpisah + messages.
+    openai: messages system+user + response_format json_object jika response_json=True.
+    anthropic: system terpisah + messages.
     Semua kegagalan jaringan/HTTP/konten -> PlanningError (bukan exception
     HTTP — pemetaan status dilakukan router).
     """
@@ -315,8 +315,9 @@ async def panggil_llm_default(system: str, user: str, ai_config: dict) -> str:
                 {"role": "user", "content": user},
             ],
             "temperature": temperature,
-            "response_format": {"type": "json_object"},
         }
+        if response_json:
+            payload["response_format"] = {"type": "json_object"}
     else:  # anthropic
         headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01",
                    "Content-Type": "application/json"}

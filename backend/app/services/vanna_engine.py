@@ -922,10 +922,12 @@ def _is_general_guide_question(question: str) -> bool:
     fillers = {
         "kasih", "minta", "berikan", "tampilkan", "bagi", "kirim", "lihat", "cek",
         "coba", "tolong", "dong", "aku", "saya", "kami", "ya", "kan", "lah", "sih",
-        "min", "bot", "ai", "apa", "aja", "saja", "deh", "nih", "tuh", "ke", "buat", "untuk"
+        "min", "bot", "ai", "apa", "aja", "saja", "deh", "nih", "tuh", "ke", "buat", "untuk",
+        "gw", "gua", "gue", "mau", "pengen", "bisa", "gak", "ga", "nggak", "tidak", "kah",
+        "semisal", "misal", "misalkan", "kalau", "jika"
     }
     words = [w for w in q_clean.split() if w not in fillers]
-    if words in [["data"], ["data", "data"], ["database"], []]:
+    if words in [["data"], ["data", "data"], ["database"], ["semua", "data"], ["seluruh", "data"], ["semua"], []]:
         return True
 
     # 5. Deteksi Kueri Non-Data (Short casual message tanpa kata kunci bisnis otomotif apa pun)
@@ -1081,7 +1083,8 @@ async def tangani_kueri_panduan_umum(
 
 def _is_conversational_question(question: str) -> bool:
     """Deteksi apakah pertanyaan pengguna merupakan percakapan murni, sapaan, kapabilitas,
-    atau pertanyaan istilah / konsep otomotif (yang harus dijawab dengan teks naratif tanpa SQL)."""
+    pertanyaan hipotetis / kemungkinan, pertanyaan fitur sistem, atau istilah / konsep otomotif
+    (yang harus dijawab dengan teks naratif tanpa SQL)."""
     if not question:
         return False
     q = question.strip().lower()
@@ -1092,7 +1095,46 @@ def _is_conversational_question(question: str) -> bool:
     if _is_general_guide_question(question):
         return True
 
-    # 2. Pola pertanyaan istilah, konsep, definisi, perbedaan
+    # 2. Pertanyaan Hipotetis / Kemampuan / Kemungkinan / Meta
+    # Contoh: "semisal gw mau semua data bisa?", "bisa gak kalau...", "apakah bisa minta data...",
+    # "bisa ekspor excel ga?", "ada grafik gak?", "kamu pakai model apa?"
+    hypothetical_patterns = [
+        r"^(?:semisal|misal|misalkan|seumpama|kalau|jika|bagaimana jika|gimana kalau|gimana jika)\b",
+        r"^(?:apakah|apa)\s+(?:bisa|memungkinkan|bisa bantu|ada)\b",
+        r"^(?:bisa|bisakah)\s+(?:gak|ga|nggak|tidak|kah)?\s*(?:kalau|jika|minta|tampilkan|ekspor|bikin|buat|download)\b",
+        r"^(?:bisa|bisa bantu)\s+(?:apa\s+saja|apa\s+aja|apaan\s+aja)\??$",
+        r"^(?:mau\s+nanya|mau\s+tanya|nanya\s+dong|tanya\s+dong)\b",
+        r"\b(?:bisa\s+di\s*ekspor|bisa\s+download|bisa\s+unduh|fitur\s+grafik|ada\s+grafik)\b",
+        r"\b(?:kamu\s+siapa|kamu\s+dibuat|siapa\s+pembuatmu|kamu\s+pakai\s+model|kamu\s+pakai\s+ai|data\s+dari\s+mana)\b",
+    ]
+    for pat in hypothetical_patterns:
+        if re.search(pat, q_clean):
+            # Kecuali jika jelas ada perintah agregasi analitis langsung tanpa konjungsi hipotetis
+            if not re.search(r"^(?:tampilkan|hitung|berapa|daftar)\s+", q_clean):
+                return True
+
+    # 3. Pertanyaan Broad "Semua Data" tanpa spesifikasi entitas / metrik
+    broad_data_patterns = [
+        r"^(?:semisal\s+)?(?:gw\s+|aku\s+|saya\s+)?(?:mau\s+|minta\s+|tampilkan\s+|lihat\s+)?(?:semua|seluruh)\s+data(?:\s+bisa|\s+dong|\s+deh)?\??$",
+        r"^(?:semua\s+data|seluruh\s+data|semua)$",
+        r"^(?:tampilkan\s+|minta\s+)?semua\s+database\??$",
+    ]
+    for pat in broad_data_patterns:
+        if re.search(pat, q_clean):
+            return True
+
+    # 4. Ungkapan keraguan / kebingungan / fillers ("emm apa yaa", "bingung mau tanya apa")
+    hesitation_patterns = [
+        r"^(?:e+m+|h+m+|uhm+|eh+)\s*(?:apa\s+ya+|gimana\s+ya+|mau\s+nanya\s+apa)*",
+        r"^(?:bingung|gatau|ga\s+tau|nggak\s+tahu|tidak\s+tahu)\s+(?:mau\s+)?(?:nanya|tanya|minta)\s+apa",
+        r"^(?:kasih\s+|beri\s+)?(?:ide|saran|rekomendasi)(?:\s+dong|\s+pertanyaan)?",
+        r"^(?:tunggu|bentar|sebentar)\s*(?:dulu)?$",
+    ]
+    for pat in hesitation_patterns:
+        if re.search(pat, q_clean):
+            return True
+
+    # 5. Pola pertanyaan istilah, konsep, definisi, perbedaan
     concept_patterns = [
         r"^(?:apa\s+(?:sih\s+)?(?:itu|arti|artinya|maksud|maksudnya|kepanjangan|kepanjangannya|definisi|pengertian)\s+)(.+)",
         r"^(.+?)\s+(?:itu\s+apa|artinya\s+apa|maksudnya\s+apa|kepanjangannya\s+apa)\??$",
@@ -1105,7 +1147,7 @@ def _is_conversational_question(question: str) -> bool:
         if re.search(pat, q_clean):
             return True
 
-    # 3. Kata penutup / respon apresiasi santai
+    # 6. Kata penutup / respon apresiasi santai
     closing_words = {
         "terima kasih", "makasih", "makasih banyak", "terima kasih banyak",
         "thanks", "thank you", "thx", "tq", "mantap", "mantap jiwa", "keren", "keren banget",
@@ -1115,6 +1157,43 @@ def _is_conversational_question(question: str) -> bool:
         return True
 
     return False
+
+
+def _ekstrak_teks_naratif_bersih(raw: str) -> str:
+    """Membersihkan output teks percakapan dari pembungkus JSON atau prefix format yang tidak diinginkan."""
+    if not raw:
+        return ""
+    t = raw.strip()
+
+    # 1. Coba parse JSON standar jika model membungkus dalam JSON object
+    try:
+        m = re.search(r"\{[\s\S]*\}", t)
+        if m:
+            d = json.loads(m.group(0))
+            if isinstance(d, dict):
+                for k in ["jawaban", "reply", "response", "message", "text", "penjelasan", "ringkasan", "answer", "content"]:
+                    if k in d and isinstance(d[k], str) and len(d[k].strip()) > 5:
+                        return d[k].strip()
+                first_s = next((v for v in d.values() if isinstance(v, str) and len(v.strip()) > 5), None)
+                if first_s:
+                    return first_s.strip()
+    except Exception:
+        pass
+
+    # 2. Tangani kasus LLM mengembalikan JSON malformed / prefix seperti: {"response":"Halo{"response":"...
+    m_str = re.search(r'["\'](?:response|message|text|jawaban)["\']\s*:\s*["\']([\s\S]+?)["\']\s*\}?$', t)
+    if m_str:
+        val = m_str.group(1)
+        val = val.replace('\\"', '"').replace('\\n', '\n').replace('\\t', '\t')
+        if '{"response":' in val:
+            val = val.split('{"response":')[-1].strip('"\': ')
+        return val.strip()
+
+    # 3. Potong prefix {"response": " jika tersisa di awal string
+    clean = re.sub(r'^\s*\{\s*["\']\w+["\']\s*:\s*["\']?', '', t)
+    clean = re.sub(r'["\']?\s*\}\s*$', '', clean)
+    clean = clean.replace('\\n', '\n').replace('\\"', '"')
+    return clean.strip()
 
 
 async def tangani_kueri_percakapan(
@@ -1131,54 +1210,106 @@ async def tangani_kueri_percakapan(
     durasi_ms = int((time.monotonic() - t0) * 1000)
     answer_text = ""
 
+    # Muat konteks multi-turn riwayat percakapan sebelumnya
+    history_context = ""
+    if conversation_id:
+        try:
+            prev_msgs = await core_pool.fetch(
+                "SELECT role, content FROM messages WHERE conversation_id = $1 ORDER BY id DESC LIMIT 5",
+                conversation_id
+            )
+            if prev_msgs:
+                hist_lines = []
+                for m in reversed(prev_msgs):
+                    r = "Pengguna" if m["role"] == "user" else "Asisten"
+                    txt = m["content"]
+                    try:
+                        j = json.loads(txt)
+                        txt = j.get("ringkasan") or j.get("question") or txt
+                    except Exception:
+                        pass
+                    hist_lines.append(f"{r}: {txt[:200]}")
+                history_context = "Riwayat percakapan sebelumnya:\n" + "\n".join(hist_lines) + "\n\n"
+        except Exception as e_hist:
+            logger.debug("Gagal memuat riwayat percakapan: %s", e_hist)
+
     # Coba panggil LLM untuk jawaban percakapan yang cerdas dan luwes
     panggil_fn = llm_call_fn or panggil_llm_default
     if ai_config:
         try:
             system_msg = (
-                "Anda adalah Asisten AI Dealer Otomotif yang cerdas, profesional, dan ramah. "
-                "Anda mendampingi staf dan manajemen dealer dalam memahami data operasional dan istilah bisnis dealer otomotif. "
-                "Tugas Anda: "
-                "1. Jika pengguna menyapa, memuji, atau berterima kasih: tanggapi dengan sopan, hangat, dan profesional. "
-                "2. Jika pengguna menanyakan kapabilitas atau fitur: jelaskan secara ringkas modul data apa saja yang bisa dianalisis "
-                "(Penjualan Unit Kendaraan, Jasa Servis Bengkel, Suku Cadang & Sparepart, Profil Pelanggan). "
-                "3. Jika pengguna menanyakan istilah, konsep, atau singkatan bisnis otomotif (seperti PKB/Perintah Kerja Bengkel, "
-                "SPK/Surat Pesanan Kendaraan, VIN/Nomor Rangka, Faktur, COGS/HPP, DPP, OTR, dll.): berikan penjelasan yang ringkas, akurat, "
-                "dan mudah dipahami dalam konteks operasional dealer otomotif. "
-                "Aturan penulisan: "
-                "- Gunakan bahasa Indonesia yang baik, santun, dan profesional. "
-                "- Format teks secara rapi menggunakan paragraf singkat atau poin-poin jika perlu. "
-                "- Jawab langsung dalam teks biasa atau markdown naratif. JANGAN membungkus jawaban dalam format JSON. "
-                "- JANGAN mengarang data angka transaksi spesifik cabang. "
-                "- JANGAN gunakan emoji apapun (Zero Emoji Policy)."
+                "Anda adalah Asisten AI Analis Data Dealer Otomotif (DMS AI Platform) yang cerdas, profesional, dan empatik, "
+                "layaknya model AI modern seperti Claude, Gemini, atau GPT.\n"
+                "Sistem ini terhubung langsung ke database operasional cabang dealer (ERP Otobitz Cloud) dengan lebih dari 2.300 tabel.\n"
+                "Modul data utama yang tersedia:\n"
+                "1. Penjualan Unit Kendaraan (faktur penjualan, SPK, stok unit, model mobil terlaris, diskon, performa salesman)\n"
+                "2. Jasa Servis Bengkel (Work Order/PKB, estimasi biaya, histori servis per nopol/norangka, SA, teknisi)\n"
+                "3. Suku Cadang & Sparepart (persediaan stok part, part masuk/keluar, omzet penjualan counter)\n"
+                "4. Pelanggan & Customer (profil pelanggan terdaftar, histori pembelian unit, persebaran kota)\n"
+                "5. Keuangan & Kasir (pembayaran kasir, piutang customer, faktur)\n"
+                "\n"
+                "Fitur unggulan platform yang dapat disebutkan jika relevan:\n"
+                "- Visualisasi Grafik Interaktif Otomatis (Recharts Bar & Line Chart)\n"
+                "- Ekspor Spreadsheet Excel (.xlsx) standar akuntansi lengkap dengan grafik native bawaan Excel\n"
+                "- Verifikasi SQL otomatis dan SQL Memory replay untuk kecepatan tinggi\n"
+                "\n"
+                "Panduan Menjawab:\n"
+                "- Jika pengguna ragu atau bingung (misal 'emm apa yaa', 'bingung mau tanya apa'): Sambut dengan ramah dan tawarkan 3-4 ide pertanyaan data paling menarik.\n"
+                "- Jika pengguna menanyakan 'semua data' (misal 'semisal gw mau semua data bisa?', 'bisa tampilkan semua data?'): Jelaskan secara diplomatis bahwa database dealer sangat besar dengan jutaan transaksi di ribuan tabel, sehingga menampilkan seluruh data sekaligus tidak praktis dan membuat tampilan macet. Arahkan pengguna untuk memilih modul data spesifik atau rentang tahun tertentu.\n"
+                "- Jika pengguna menanyakan fitur (grafik, ekspor excel, model AI, sumber data): Jelaskan secara jelas dan informatif.\n"
+                "- Jika pengguna menanyakan istilah atau konsep bisnis otomotif (PKB, SPK, VIN, OTR, DPP, COGS, dll): Berikan penjelasan yang tepat dan ringkas dalam konteks dealer.\n"
+                "- Format teks: Gunakan Markdown yang rapi, paragraf pendek (1-2 kalimat), dan bullet points dengan judul tebal (**label**).\n"
+                "- DILARANG menggunakan emoji (Zero Emoji Policy). JANGAN mengembalikan format JSON, jawab langsung dalam teks Markdown naratif."
             )
-            raw_output = await panggil_fn(system_msg, f"Pertanyaan pengguna: {question}", ai_config)
-            if raw_output and len(raw_output.strip()) > 10:
-                cleaned_text = raw_output.strip()
-                # Jika LLM membungkus respons dalam JSON, ekstrak nilainya
-                try:
-                    m_json = re.search(r"\{[\s\S]*\}", cleaned_text)
-                    if m_json:
-                        parsed = json.loads(m_json.group(0))
-                        if isinstance(parsed, dict):
-                            for key in ["jawaban", "reply", "response", "message", "text", "penjelasan", "ringkasan", "answer"]:
-                                if key in parsed and isinstance(parsed[key], str) and len(parsed[key]) > 5:
-                                    cleaned_text = parsed[key]
-                                    break
-                            else:
-                                first_str = next((v for v in parsed.values() if isinstance(v, str) and len(v) > 5), None)
-                                if first_str:
-                                    cleaned_text = first_str
-                except Exception:
-                    pass
-                answer_text = _bersihkan_emoji_teks(cleaned_text)
+            prompt_input = f"{history_context}Pertanyaan pengguna saat ini: {question}"
+            try:
+                raw_output = await panggil_fn(system_msg, prompt_input, ai_config, response_json=False)
+            except TypeError:
+                raw_output = await panggil_fn(system_msg, prompt_input, ai_config)
+
+            if raw_output and len(raw_output.strip()) > 5:
+                extracted = _ekstrak_teks_naratif_bersih(raw_output)
+                if extracted and len(extracted) > 5:
+                    answer_text = _bersihkan_emoji_teks(extracted)
         except Exception as e_llm:
             logger.warning("Panggilan LLM percakapan gagal (%s), beralih ke respons deterministik fallback...", e_llm)
 
     # Fallback cerdas jika LLM tidak tersedia atau gagal
     if not answer_text:
         q_l = question.lower()
-        if any(w in q_l for w in ["pkb", "wo", "perintah kerja"]):
+        if any(w in q_l for w in ["semua data", "seluruh data"]) or (any(w in q_l for w in ["semisal", "misal"]) and "data" in q_l):
+            answer_text = (
+                "Secara teknis, Anda dapat mengakses seluruh data yang ada di database dealer. "
+                "Namun, sistem ERP Otobitz Cloud cabang Anda memiliki lebih dari 2.300 tabel dengan jutaan baris transaksi. "
+                "Menampilkan seluruh data sekaligus tentu tidak praktis dan akan membuat antarmuka menjadi sangat lambat serta sulit dianalisis.\n\n"
+                "Untuk mendapatkan wawasan yang jelas dan terarah, Anda dapat memilih modul data berikut:\n\n"
+                "- **Penjualan Unit Kendaraan**: Analisis total omzet, tren tahunan/bulanan, atau ranking mobil terlaris.\n"
+                "- **Jasa Servis Bengkel**: Rekapitulasi pengerjaan Work Order (PKB) dan pendapatan jasa perawatan.\n"
+                "- **Suku Cadang & Sparepart**: Pergerakan stok suku cadang dan omzet part shop.\n"
+                "- **Pelanggan**: Daftar pelanggan aktif dan histori pembelian unit.\n\n"
+                "Modul mana yang ingin Anda periksa terlebih dahulu?"
+            )
+        elif any(w in q_l for w in ["apa ya", "bingung", "ide", "rekomendasi", "saran", "gatau", "ga tau"]):
+            answer_text = (
+                "Santai saja, tidak perlu terburu-buru. Saya siap membantu Anda kapan saja.\n\n"
+                "Berikut beberapa rekomendasi pertanyaan bisnis yang sering dianalisis oleh manajemen dealer:\n\n"
+                "- **Penjualan**: *Berapa total penjualan unit tahun 2025?* atau *Tampilkan 5 model mobil terlaris*.\n"
+                "- **Bengkel**: *Berapa total pendapatan servis bengkel tahun 2025?* atau *Tren servis bulanan*.\n"
+                "- **Pelanggan**: *Daftar 10 customer dengan transaksi pembelian terbesar*.\n"
+                "- **Stok**: *Berapa sisa stok unit mobil saat ini?*\n\n"
+                "Silakan pilih salah satu pertanyaan di atas atau sampaikan topik yang ingin Anda ketahui."
+            )
+        elif any(w in q_l for w in ["excel", "ekspor", "export", "download", "unduh"]):
+            answer_text = (
+                "Ya, tentu bisa. Setiap laporan data yang disajikan oleh sistem ini dapat langsung Anda unduh dalam format **Excel (.xlsx) berstandar akuntansi**.\n\n"
+                "File Excel yang diunduh sudah dilengkapi dengan format mata uang Rupiah yang rapi, header dokumen resmi, serta **grafik visual bawaan Excel** yang disematkan langsung di dalam spreadsheet. Cukup klik tombol **Ekspor Excel** di pojok kanan atas kartu laporan."
+            )
+        elif any(w in q_l for w in ["grafik", "chart", "diagram"]):
+            answer_text = (
+                "Ya, sistem ini dilengkapi visualisasi grafik interaktif otomatis. "
+                "Untuk setiap kueri data yang memuat kategori atau periode waktu (misalnya tren penjualan per bulan atau perbandingan model mobil), Anda dapat langsung beralih antara tampilan **Tabel**, **Grafik Batang (Bar Chart)**, atau **Grafik Garis (Line Chart)** melalui tombol toggle di atas tabel."
+            )
+        elif any(w in q_l for w in ["pkb", "wo", "perintah kerja"]):
             answer_text = (
                 "PKB (Perintah Kerja Bengkel) atau Work Order (WO) adalah dokumen kerja resmi di bengkel dealer "
                 "yang mencatat instruksi pengerjaan perawatan atau perbaikan kendaraan pelanggan. "
@@ -1216,10 +1347,10 @@ async def tangani_kueri_percakapan(
         elif any(w in q_l for w in ["bisa apa", "fitur", "bantu apa", "kapabilitas"]):
             answer_text = (
                 "Sebagai Asisten AI Database Dealer, saya siap membantu Anda menganalisis data operasional cabang:\n\n"
-                "1. Penjualan Unit Kendaraan: Volume penjualan, tren omzet bulanan dan tahunan, ranking tipe mobil terlaris, serta performa wiraniaga (sales).\n"
-                "2. Jasa Servis Bengkel: Volume pengerjaan Work Order (PKB), pendapatan jasa perawatan, dan histori servis kendaraan.\n"
-                "3. Suku Cadang & Sparepart: Ketersediaan persediaan suku cadang, barang keluar-masuk, dan nilai penjualan counter part.\n"
-                "4. Pelanggan: Profil pelanggan setia dan persebaran transaksi konsumen.\n\n"
+                "- **Penjualan Unit Kendaraan**: Volume penjualan, tren omzet bulanan dan tahunan, ranking tipe mobil terlaris, serta performa wiraniaga (sales).\n"
+                "- **Jasa Servis Bengkel**: Volume pengerjaan Work Order (PKB), pendapatan jasa perawatan, dan histori servis kendaraan.\n"
+                "- **Suku Cadang & Sparepart**: Ketersediaan persediaan suku cadang, barang keluar-masuk, dan nilai penjualan counter part.\n"
+                "- **Pelanggan**: Profil pelanggan setia dan persebaran transaksi konsumen.\n\n"
                 "Silakan ajukan pertanyaan spesifik mengenai data yang ingin Anda periksa."
             )
         else:
@@ -1229,12 +1360,36 @@ async def tangani_kueri_percakapan(
                 "Apa yang ingin Anda analisis hari ini?"
             )
 
-    saran = [
-        "Tampilkan 5 model mobil dengan penjualan tertinggi",
-        "Berapa total pendapatan servis bengkel tahun 2025?",
-        "Daftar 10 customer dengan transaksi pembelian unit terbesar",
-        "Berapa sisa stok mobil saat ini?",
-    ]
+    # Saran pertanyaan kontekstual yang relevan
+    q_lower = question.lower()
+    if any(w in q_lower for w in ["semua data", "seluruh data", "semisal", "misal"]):
+        saran = [
+            "Tampilkan ringkasan penjualan unit tahun 2025",
+            "Berapa total pendapatan servis bengkel tahun 2025?",
+            "Tampilkan 5 model mobil terlaris sepanjang masa",
+            "Daftar 10 customer dengan transaksi pembelian unit terbesar",
+        ]
+    elif any(w in q_lower for w in ["servis", "service", "pkb", "wo", "bengkel"]):
+        saran = [
+            "Berapa total pendapatan servis bengkel tahun 2025?",
+            "Tampilkan 5 pekerjaan servis dengan frekuensi tertinggi",
+            "Tren jumlah unit yang diservis per bulan tahun 2024",
+            "Siapa Service Advisor dengan penanganan PKB terbanyak?",
+        ]
+    elif any(w in q_lower for w in ["sparepart", "part", "suku cadang"]):
+        saran = [
+            "Tampilkan 10 suku cadang dengan perputaran tercepat",
+            "Berapa total nilai penjualan suku cadang tahun 2025?",
+            "Daftar sparepart dengan nilai transaksi terbesar",
+            "Berapa sisa stok part saat ini?",
+        ]
+    else:
+        saran = [
+            "Tampilkan 5 model mobil dengan penjualan tertinggi",
+            "Berapa total pendapatan servis bengkel tahun 2025?",
+            "Daftar 10 customer dengan transaksi pembelian unit terbesar",
+            "Berapa sisa stok mobil saat ini?",
+        ]
 
     response = {
         "source": "conversational",
