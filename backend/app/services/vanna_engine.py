@@ -431,6 +431,42 @@ WHERE EXTRACT(YEAR FROM w.tanggal) = {target_year} AND w.batal = false AND d.par
     }
 
 
+def _cari_kolom_tahun_transaksi(columns: list) -> str | None:
+    """Mencari kolom tahun transaksi secara cerdas dengan prioritas semantik:
+    1. Exact match: 'tahun', 'year', 'thn', 'periode_tahun'
+    2. Kolom waktu transaksi/faktur: 'tahun_invoice', 'tahun_transaksi', 'tahun_penjualan', dsb.
+    3. Kolom tahun generik tetapi bebas dari kata benda atribut fisik kendaraan ('tahun_rakit', 'tahun_pembuatan', 'id_tahun').
+    """
+    if not columns:
+        return None
+
+    cols_str = [str(c) for c in columns]
+    cols_lower = {str(c).lower().strip(): c for c in columns}
+
+    # 1. Exact match prioritas utama
+    for exact in ("tahun", "year", "thn", "periode_tahun"):
+        if exact in cols_lower:
+            return cols_lower[exact]
+
+    # 2. Kolom penanda waktu transaksi bisnis
+    tx_markers = ("invoice", "transaksi", "penjualan", "pembelian", "faktur", "wo", "pkb", "tgl", "date")
+    for c in cols_str:
+        c_low = c.lower().strip()
+        if any(t in c_low for t in ("tahun", "year", "thn")):
+            if any(m in c_low for m in tx_markers):
+                return c
+
+    # 3. Kolom tahun generik tetapi bebas dari kata benda atribut fisik kendaraan
+    blacklist = ("rakit", "pembuatan", "buat", "model", "umur", "usia", "id_tahun", "stok")
+    for c in cols_str:
+        c_low = c.lower().strip()
+        if any(t in c_low for t in ("tahun", "year", "thn")):
+            if not any(b in c_low for b in blacklist):
+                return c
+
+    return None
+
+
 def _format_ringkasan_otomatis(rows: list, columns: list, question: str = "") -> str:
     """Ringkasan naratif deterministik otomatis tanpa panggil LLM lagi (hemat 100% token)."""
     n = len(rows)
@@ -454,8 +490,8 @@ def _format_ringkasan_otomatis(rows: list, columns: list, question: str = "") ->
         base_summary = f"Ditemukan 1 baris hasil ({', '.join(items)})."
 
     # Deteksi apakah ini perbandingan tahunan / periode
-    elif any(any(t in str(c).lower() for t in ["tahun", "year", "thn"]) for c in columns):
-        thn_col = next((c for c in columns if any(t in str(c).lower() for t in ["tahun", "year", "thn"])), None)
+    elif _cari_kolom_tahun_transaksi(columns):
+        thn_col = _cari_kolom_tahun_transaksi(columns)
 
         money_cols = [c for c in columns if _is_column_money(c)]
         qty_cols = [c for c in columns if _is_column_qty(c)]
@@ -949,6 +985,8 @@ def _deteksi_kueri_komparasi_periode(question: str, inherited_topic: str | None 
     frasa_subject = f"transaksi {subject}" if subject != "transaksi" else "data transaksi"
 
     unique_years = sorted(list(dict.fromkeys(years)))
+    if len(unique_years) > 5:
+        unique_years = unique_years[-5:]  # Batasi maksimal 5 periode terbaru demi keselamatan memori & pool
 
     if len(unique_years) >= 2:
         p1, p2 = unique_years[0], unique_years[1]
@@ -996,6 +1034,8 @@ def cek_apakah_minta_rincian_terpisah(question: str, inherited_topic: str | None
     is_rincian = any(w in q_lower for w in ["rincian", "detail", "faktur", "transaksi", "tabel terpisah"])
     years = re.findall(r'\b(20[12]\d)\b', q_lower)
     unique_years = sorted(list(dict.fromkeys(years)))
+    if len(unique_years) > 5:
+        unique_years = unique_years[-5:]  # Batasi maksimal 5 tabel terpisah
 
     if (is_terpisah or is_rincian) and len(unique_years) >= 2:
         p1, p2 = unique_years[0], unique_years[1]

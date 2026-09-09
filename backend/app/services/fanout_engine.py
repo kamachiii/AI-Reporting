@@ -427,7 +427,7 @@ def _ekstrak_periode_waktu(question: str) -> List[str]:
         if y not in seen_years:
             seen_years.append(y)
     if len(seen_years) >= 2:
-        return seen_years
+        return seen_years[-5:] if len(seen_years) > 5 else seen_years
 
     quarters = re.findall(r"\b(q[1-4]|kuartal\s*[1-4]|triwulan\s*[1-4]|semester\s*[1-2]|s[1-2])\b", q_lower)
     seen_q: List[str] = []
