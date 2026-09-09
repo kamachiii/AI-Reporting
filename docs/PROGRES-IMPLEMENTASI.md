@@ -1903,6 +1903,47 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
     - Tabel 8 kategori ERP (`vw_`, `srv`, `untt`, `stpm`, `cari_`, `glbm`, `acctt`, `Lainnya`) ter-render sebagai tabel HTML arsitektural yang presisi, angka rata kanan berfont monospace tabular, dan badge kode rapi.
     - Zero emoji & zero pipe leaks terverifikasi visual.
 
+### 3az. Dialogue State Tracking (DST), Direct Action Policy & Mechanical Output Guard (2026-09-09)
+
+- **Latar Belakang Masalah (Audit Percakapan `tester02`, Conversation ID 79)**:
+  - User meminta data modul keuangan dan grafik interaktif di turn #11.
+  - Asisten AI di turn #12 menyajikan opsi modul keuangan secara naratif.
+  - Di turn #13, user mendelegasikan: *"hmm yaudah atur aja.."*.
+  - Di turn #14, AI mengalami **stalling/ping-pong**: *"Baik saya yang atur... Silakan ketik 'lanjutkan' dan saya langsung proses."*
+  - Di turn #15, user mengetik: *"lanjutkan"*.
+  - Di turn #16, kata *"lanjutkan"* dicegat oleh regex kalimat pendek (`_is_general_guide_question`) dan dibelokkan ke mode percakapan kosong (`source: "conversational"`). LLM kemudian **berhalusinasi mengarang tabel numerik fiktif** (*Januari 12,4 M, Total 177 M*) dan **berbohong bahwa grafik interaktif sudah disiapkan di panel kanan**, padahal query SQL kosong dan `rows: 0`.
+  - Di turn #17, user komplain: *"loh grafiknya mana?"*, dan di turn #18 AI lepas tangan & gaslighting: *"Mohon maaf... saya tidak menampilkan grafik secara langsung, silakan pakai Excel / Power BI..."*.
+  - *Akar Masalah*: **Kegagalan State Management & Split-Brain Router**. Sistem tidak memiliki memori dialog turn sebelumnya (*Dialogue State Tracking*) untuk mengetahui bahwa AI sedang menawarkan proposal aksi, serta ketiadaan *Mechanical Output Guard* berbasis kode keras (Python fence) untuk membabat tabel fiktif dan klaim palsu.
+
+- **Arsitektur & Solusi Teknis yang Diterapkan**:
+  1. **Dialogue State Tracking (DST)** (`evaluasi_state_percakapan`):
+     - Membaca pesan asisten terakhir pada percakapan aktif dari tabel `messages`.
+     - Mendeteksi `pending_proposal` yang berstatus `awaiting_confirmation`.
+     - Mengenali frase persetujuan dan delegasi pengguna (*"atur aja"*, *"lanjutkan"*, *"gas"*, *"pilihan 2"*, dll) via `is_action_confirmation_phrase(question)`.
+     - Memetakan respon pengguna secara deterministik ke `default_action.query` atau pilihan opsi spesifik (misal: *"Tampilkan tren penjualan unit dan total omzet per bulan tahun 2025"*).
+     - Menandai status proposal menjadi `accepted` di database (`UPDATE messages SET content = ...`) agar tidak terulang.
+  2. **Direct Action Policy (No-Stall Rule)**:
+     - Ketika pengguna memberikan persetujuan / delegasi tindakan, sistem DILARANG menunda eksekusi dengan meminta ketik kata sandi lagi.
+     - Router langsung memotong jalur percakapan (`if not is_action_accepted and _is_conversational_question(...)`) dan mengalirkan kueri langsung ke **SQL Pipeline riil**.
+  3. **Mechanical Output Guard** (`_periksa_integritas_output_percakapan`):
+     - Memeriksa teks naratif pada jalur non-SQL menggunakan *block markdown parser*.
+     - Jika terdeteksi tabel numerik yang memuat data transaksi fiktif (bukan skema ERP), seluruh blok tabel numerik tersebut dibabat habis.
+     - Memblokir klaim eksekusi palsu (*"analisis selesai dijalankan"*, *"grafik interaktif sudah disiapkan di panel"*).
+     - Jika teks menjadi kosong akibat pembersihan, sistem menyajikan fallback jujur bahwa sistem perlu mengeksekusi kueri ke database cabang nyata.
+  4. **Penanganan Eksplanatori Grafik Jujur**:
+     - `_is_explanatory_question` mendeteksi pertanyaan user mengenai grafik yang belum tampil (*"loh grafiknya mana?"*, *"mana grafiknya"*).
+     - Asisten menjelaskan secara transparan bahwa grafik otomatis aktif di panel atas begitu kueri SQL dieksekusi dari database, dan memberikan tombol rekomendasi kueri nyata.
+
+- **Verifikasi & Bukti Nyata**:
+  - Unit Test Baru: `backend/tests/test_dialogue_state_tracking.py` (**7 passed in 1.39s**).
+  - Rangkaian Pengujian Penuh Backend: `pytest tests/ -q` (**590 passed in 39.93s**, 0 failed).
+  - Frontend Lint: `npm run lint` (**0 error**, 100% lulus).
+  - Frontend Build: `npm run build` (**exit 0**, built in 1.54s).
+  - Live End-to-End Simulation Replay (`scratch/test_live_dst_replay.py`):
+    - Turn 1: User meminta data keuangan -> Assistant memberikan pending proposal modul keuangan tervalidasi.
+    - Turn 2: User mengetik *"hmm yaudah atur aja.."* -> Query di-resolve ke *"Tampilkan tren penjualan unit dan total omzet per bulan tahun 2025"*, mengeksekusi database operasional dealer, menghasilkan **11 baris data transaksi nyata**, query SQL riil, dan grafik tren otomatis aktif!
+    - Turn 3: User bertanya *"loh grafiknya mana?"* -> Dijawab akurat dan jujur mengenai data modul penjualan unit.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -1978,6 +2019,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Resolusi Kueri Mobil Terlaris, Anti-Loop Greeting Fanout, Textarea Auto-Resize, Smart Scroll & Pembersihan Total UI Pengguna** — SELESAI (lihat §3aw).
 - [x] **Transformasi Conversational AI Murni, Eliminasi Fake Stepper, Penahanan Ekspor Excel, dan Skema Agnostik** — SELESAI (lihat §3ax).
 - [x] **Parser Editorial Markdown Table & Heading, Eliminasi Pipa Teks Mentah** — SELESAI (lihat §3ay).
+- [x] **Dialogue State Tracking (DST), Direct Action Policy & Mechanical Output Guard** — SELESAI (lihat §3az).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. *Dedicated Executive Dashboard Page*: Ditutup/dibatalkan atas arahan pengguna untuk mempertahankan identitas murni Conversational AI Assistant.
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.

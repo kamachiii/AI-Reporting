@@ -736,6 +736,201 @@ async def rekonsiliasi_slot_percakapan(core_pool, conversation_id: int | None, q
         return question, False
 
 
+def is_action_confirmation_phrase(question: str) -> bool:
+    """Deteksi apakah input pengguna berupa konfirmasi persetujuan, delegasi tindakan,
+    atau pemilihan opsi (misal: 'atur aja', 'lanjutkan', 'oke', 'gas', 'opsi 2', 'pilihan 1')."""
+    if not question:
+        return False
+    q = question.strip().lower()
+    q_clean = re.sub(r'[?!.,;:\'"]+', ' ', q).strip()
+    q_clean = re.sub(r'\s+', ' ', q_clean)
+
+    action_words = {
+        "atur aja", "yaudah atur aja", "kamu yang atur", "kamu aja yang atur",
+        "terserah", "terserah kamu", "lanjutkan", "lanjut", "gas", "gaskan",
+        "proses", "eksekusi", "jalankan", "oke lanjut", "ok lanjut", "siap laksanakan",
+        "boleh", "boleh deh", "yaudah", "aturin", "aturkan", "pilihin", "pilihin aja",
+        "opsi 1", "opsi 2", "opsi 3", "opsi 4",
+        "pilihan 1", "pilihan 2", "pilihan 3", "pilihan 4",
+        "nomor 1", "nomor 2", "nomor 3", "nomor 4", "1", "2", "3", "4"
+    }
+    if q_clean in action_words:
+        return True
+    return bool(re.search(
+        r"^(?:hmm\s+)?(?:yaudah\s+)?(?:atur\s+aja|kamu\s+(?:aja\s+)?yang\s+atur|terserah(?:\s+kamu)?|lanjutkan|lanjut|gas|gaskan|proses|eksekusi|jalankan|pilihin(?:\s+aja)?)(?:\s+deh|\s+ya|\s+dong)?$",
+        q_clean
+    ))
+
+
+async def evaluasi_state_percakapan(core_pool, conversation_id: int | None, question: str) -> tuple[str, bool, dict | None]:
+    """Dialogue State Tracking: Memeriksa apakah sesi aktif memiliki pending_proposal (tawaran modul/analisis)
+    dan mengonfirmasi apakah balasan pengguna adalah persetujuan/delegasi tindakan ('atur aja', 'lanjutkan', 'opsi 2').
+
+    Returns:
+        tuple: (resolved_query, is_action_accepted, proposal_dict)
+    """
+    if not conversation_id or not question:
+        return question, False, None
+
+    try:
+        row = await core_pool.fetchrow(
+            "SELECT id, content FROM messages WHERE conversation_id = $1 AND role = 'assistant' ORDER BY id DESC LIMIT 1",
+            conversation_id
+        )
+        if not row or not row["content"]:
+            return question, False, None
+
+        raw_content = row["content"]
+        try:
+            assistant_data = json.loads(raw_content)
+        except Exception:
+            return question, False, None
+
+        proposal = assistant_data.get("pending_proposal")
+        if not proposal or proposal.get("status") != "awaiting_confirmation":
+            return question, False, None
+
+        q_lower = question.strip().lower()
+        q_clean = re.sub(r'[?!.,;:\'"]+', ' ', q_lower).strip()
+        q_clean = re.sub(r'\s+', ' ', q_clean)
+
+        # 1. Cek pembatalan eksplisit
+        if any(kw in q_clean for kw in ["batal", "ga jadi", "nggak jadi", "cancel", "tutup"]):
+            logger.info("Pengguna membatalkan pending proposal pada conversation %s", conversation_id)
+            return question, False, None
+
+        async def _tandai_proposal_diterima(chosen_item):
+            try:
+                proposal["status"] = "accepted"
+                proposal["accepted_action"] = chosen_item
+                assistant_data["pending_proposal"] = proposal
+                await core_pool.execute(
+                    "UPDATE messages SET content = $1 WHERE id = $2",
+                    json.dumps(assistant_data, default=str),
+                    row["id"]
+                )
+            except Exception as e_upd:
+                logger.debug("Gagal update status pending_proposal di DB: %s", e_upd)
+
+        # 2. Cek pemilihan nomor opsi eksplisit (contoh: "opsi 2", "pilihan 1", "nomor 3", atau angka "2")
+        options = proposal.get("options") or []
+        opt_num_m = re.search(r'\b(?:opsi|pilihan|nomor)?\s*([1-4])\b', q_clean)
+        if opt_num_m and any(w in q_clean for w in ["opsi", "pilihan", "nomor"]):
+            idx = int(opt_num_m.group(1)) - 1
+            if 0 <= idx < len(options):
+                chosen = options[idx]
+                logger.info("Dialogue State Tracking: Pengguna memilih opsi #%d (%s) -> %s", idx + 1, chosen.get("id"), chosen.get("query"))
+                await _tandai_proposal_diterima(chosen)
+                return chosen.get("query", question), True, chosen
+
+        # 3. Cek kecocokan kata kunci spesifik opsi terkuat
+        best_opt = None
+        max_score = 0
+        for opt in options:
+            kws = opt.get("keywords") or [opt.get("id", ""), opt.get("label", "").lower()]
+            score = sum(1 for kw in kws if kw in q_clean)
+            if score > max_score:
+                max_score = score
+                best_opt = opt
+        if best_opt and max_score > 0:
+            logger.info("Dialogue State Tracking: Pengguna memilih opsi via keyword '%s' -> %s", best_opt.get("id"), best_opt.get("query"))
+            await _tandai_proposal_diterima(best_opt)
+            return best_opt.get("query", question), True, best_opt
+
+        # 4. Cek konfirmasi umum / delegasi tindakan ("atur aja", "lanjutkan", "gas", "terserah", "yaudah")
+        if is_action_confirmation_phrase(question):
+            default_action = proposal.get("default_action") or (options[0] if options else None)
+            if default_action and default_action.get("query"):
+                logger.info("Dialogue State Tracking: Pengguna menyetujui default action proposal -> %s", default_action.get("query"))
+                await _tandai_proposal_diterima(default_action)
+                return default_action.get("query"), True, default_action
+
+        return question, False, None
+    except Exception as e:
+        logger.warning("Gagal evaluasi state percakapan: %s", e)
+        return question, False, None
+
+
+def _periksa_integritas_output_percakapan(text: str) -> tuple[bool, str]:
+    """Mechanical Output Guard: Memeriksa apakah teks naratif memuat tabel data fiktif
+    atau klaim eksekusi/grafik palsu di jalur percakapan (non-SQL).
+    
+    Returns:
+        tuple: (is_valid, cleaned_text)
+    """
+    if not text:
+        return True, ""
+
+    claim_pattern = re.compile(
+        r'\b(?:analisis\s+selesai\s+dijalankan|berikut\s+hasilnya\s*:|grafik\s+interaktif\s+sudah\s+(?:saya\s+)?(?:di)?siapkan|sudah\s+(?:saya\s+)?(?:di)?siapkan\s+di\s+panel|grafik\s+(?:interaktif\s+)?(?:sudah\s+)?(?:telah\s+)?(?:di)?siapkan)\b',
+        re.IGNORECASE
+    )
+
+    has_false_claim = bool(claim_pattern.search(text))
+    has_numeric_table = False
+    schema_keys = ['vw_', 'srv', 'untt', 'stpm', 'cari_', 'glbm', 'acctt', 'kategori', 'modul']
+
+    lines = text.split('\n')
+    cleaned_lines = []
+    idx = 0
+    n = len(lines)
+
+    while idx < n:
+        line = lines[idx]
+        stripped = line.strip()
+
+        # Deteksi awal blok tabel markdown
+        if stripped.startswith('|') and stripped.endswith('|'):
+            table_block = []
+            while idx < n and lines[idx].strip().startswith('|') and lines[idx].strip().endswith('|'):
+                table_block.append(lines[idx])
+                idx += 1
+
+            # Evaluasi apakah blok tabel ini memuat data transaksi numerik (halusinasi non-SQL)
+            is_fake_numeric_table = False
+            for t_row in table_block:
+                t_str = t_row.strip()
+                is_schema = any(k in t_str.lower() for k in schema_keys)
+                has_nums = bool(re.search(r'\|\s*\d+[\d.,]*\s*\|', t_str))
+                if has_nums and not is_schema:
+                    is_fake_numeric_table = True
+                    break
+
+            if is_fake_numeric_table:
+                has_numeric_table = True
+                # Seluruh tabel fiktif dibuang (tidak dimasukkan ke cleaned_lines)
+            else:
+                cleaned_lines.extend(table_block)
+            continue
+
+        # Baris teks biasa: cek klaim fiktif
+        if claim_pattern.search(line):
+            has_false_claim = True
+            idx += 1
+            continue
+
+        cleaned_lines.append(line)
+        idx += 1
+
+    cleaned_text = "\n".join(cleaned_lines).strip()
+    cleaned_text = re.sub(r'\n{3,}', '\n\n', cleaned_text)
+
+    is_valid = not (has_false_claim or has_numeric_table)
+    if not is_valid:
+        logger.warning(
+            "Mechanical Output Guard mendeteksi klaim/tabel fiktif di respons percakapan (has_claim=%s, has_table=%s)",
+            has_false_claim, has_numeric_table
+        )
+        if len(cleaned_text) < 30:
+            cleaned_text = (
+                "Untuk menampilkan data transaksi ini secara akurat beserta visualisasi grafiknya, "
+                "sistem perlu mengeksekusi kueri langsung ke database cabang Anda. "
+                "Silakan klik salah satu rekomendasi kueri di bawah ini untuk langsung memuat data nyata."
+            )
+
+    return is_valid, cleaned_text
+
+
 def _deteksi_kueri_komparasi_periode(question: str, inherited_topic: str | None = None) -> dict | None:
     """Deteksi kueri perbandingan antar periode (misal: 2024 vs 2025)."""
     q_lower = (question or "").lower()
@@ -877,6 +1072,8 @@ def _is_general_guide_question(question: str) -> bool:
     """Deteksi apakah pertanyaan pengguna merupakan sapaan, percakapan santai, atau permintaan panduan umum."""
     if not question:
         return False
+    if is_action_confirmation_phrase(question):
+        return False
     q = question.strip().lower()
     q_clean = re.sub(r'[?!.,;:\'"]+', ' ', q).strip()
     q_clean = re.sub(r'\s+', ' ', q_clean)
@@ -976,6 +1173,9 @@ def _is_explanatory_question(question: str) -> bool:
         r"(?:tadi|barusan).*(?:data|tabel)\s+apa",
         r"(?:data|tabel)\s+apa.*(?:tadi|barusan)",
         r".*(?:data|tabel)\s+apa\s+(?:yang\s+)?(?:lu|kamu|anda)\s+kasih",
+        r"^(?:loh\s+)?(?:mana\s+grafik(?:nya)?|grafik(?:nya)?\s+(?:kok\s+)?(?:mana|ga\s+ada|nggak\s+ada|tidak\s+ada|belum\s+muncul))\??$",
+        r"^(?:loh\s+)?(?:mana\s+tabel(?:nya)?|tabel(?:nya)?\s+(?:kok\s+)?(?:mana|ga\s+ada|nggak\s+ada|tidak\s+ada|belum\s+muncul))\??$",
+        r"^(?:loh\s+)?grafik(?:nya)?\s+mana\??$",
     ]
     for pat in patterns:
         if re.search(pat, q_clean):
@@ -1094,6 +1294,8 @@ def _is_conversational_question(question: str) -> bool:
     pertanyaan hipotetis / kemungkinan, pertanyaan fitur sistem, atau istilah / konsep otomotif
     (yang harus dijawab dengan teks naratif tanpa SQL)."""
     if not question:
+        return False
+    if is_action_confirmation_phrase(question):
         return False
     q = question.strip().lower()
     q_clean = re.sub(r'[?!.,;:\'"]+', ' ', q).strip()
@@ -1266,6 +1468,10 @@ async def tangani_kueri_percakapan(
                 "- Jika pengguna menanyakan 'semua data' (misal 'semisal gw mau semua data bisa?', 'bisa tampilkan semua data?'): Jelaskan secara diplomatis bahwa database dealer sangat besar dengan jutaan transaksi di ribuan tabel, sehingga menampilkan seluruh data sekaligus tidak praktis dan membuat tampilan macet. Arahkan pengguna untuk memilih modul data spesifik atau rentang tahun tertentu.\n"
                 "- Jika pengguna menanyakan fitur (grafik, ekspor excel, model AI, sumber data): Jelaskan secara jelas dan informatif.\n"
                 "- Jika pengguna menanyakan istilah atau konsep bisnis otomotif (PKB, SPK, VIN, OTR, DPP, COGS, dll): Berikan penjelasan yang tepat dan ringkas dalam konteks dealer.\n"
+                "- DILARANG meminta pengguna mengetik kata sandi konfirmasi seperti 'Silakan ketik lanjutkan'.\n"
+                "- DILARANG berpura-pura telah mengeksekusi analisis database atau mengarang hasil analisis/tabel angka fiktif di dalam teks percakapan.\n"
+                "- DILARANG mengklaim 'grafik sudah disiapkan di panel', karena grafik visual hanya muncul setelah kueri SQL nyata dieksekusi.\n"
+                "- Jika pengguna menanyakan modul data (misal keuangan, kasir, piutang), jelaskan ruang lingkupnya secara ringkas dan tawarkan opsi pertanyaan konkret.\n"
                 "- Format teks: Gunakan Markdown yang rapi, paragraf pendek (1-2 kalimat), dan bullet points dengan judul tebal (**label**).\n"
                 "- DILARANG menggunakan emoji (Zero Emoji Policy). JANGAN mengembalikan format JSON, jawab langsung dalam teks Markdown naratif."
             )
@@ -1374,28 +1580,148 @@ async def tangani_kueri_percakapan(
                 "Apa yang ingin Anda analisis hari ini?"
             )
 
-    # Saran pertanyaan kontekstual yang relevan
+    # Mechanical Output Guard: cegah halusinasi tabel numerik / klaim eksekusi fiktif
+    _, answer_text = _periksa_integritas_output_percakapan(answer_text)
+
+    # Dialogue State Tracking: Bentuk pending_proposal jika pertanyaan menyentuh topik modul bisnis
+    pending_proposal = None
     q_lower = question.lower()
-    if any(w in q_lower for w in ["semua data", "seluruh data", "semisal", "misal"]):
+    if any(w in q_lower for w in ["keuangan", "kasir", "uang", "finansial", "piutang", "pembayaran"]):
+        pending_proposal = {
+            "intent": "financial_analysis",
+            "topic": "keuangan",
+            "status": "awaiting_confirmation",
+            "options": [
+                {
+                    "id": "omzet_unit_bulanan",
+                    "label": "Tren Penjualan Unit & Omzet Bulanan 2025",
+                    "query": "Tampilkan tren penjualan unit dan total omzet per bulan tahun 2025",
+                    "keywords": ["penjualan", "omzet", "tren", "bulanan", "keuangan"]
+                },
+                {
+                    "id": "pendapatan_servis_bulanan",
+                    "label": "Pendapatan Servis Bengkel Bulanan 2025",
+                    "query": "Berapa total pendapatan servis bengkel tahun 2025 per bulan?",
+                    "keywords": ["servis", "bengkel", "jasa", "perawatan"]
+                },
+                {
+                    "id": "komparasi_divisi",
+                    "label": "Perbandingan Pendapatan Antar Divisi",
+                    "query": "Bandingkan performa tiap divisi dalam tiap tahunnya",
+                    "keywords": ["divisi", "komparasi", "bandingkan", "tahunan"]
+                },
+                {
+                    "id": "top_customer",
+                    "label": "Top 10 Customer Pembelian Terbesar",
+                    "query": "Daftar 10 customer dengan pembelian unit terbanyak",
+                    "keywords": ["customer", "pelanggan", "terbesar"]
+                }
+            ],
+            "default_action": {
+                "id": "omzet_unit_bulanan",
+                "query": "Tampilkan tren penjualan unit dan total omzet per bulan tahun 2025"
+            }
+        }
+        saran = [opt["query"] for opt in pending_proposal["options"]]
+    elif any(w in q_lower for w in ["jual", "penjualan", "mobil", "unit"]):
+        pending_proposal = {
+            "intent": "sales_analysis",
+            "topic": "penjualan",
+            "status": "awaiting_confirmation",
+            "options": [
+                {
+                    "id": "mobil_terlaris",
+                    "label": "5 Model Mobil Terlaris 2025",
+                    "query": "Tampilkan 5 model mobil terlaris tahun 2025 beserta grafiknya",
+                    "keywords": ["terlaris", "model", "mobil"]
+                },
+                {
+                    "id": "tren_penjualan",
+                    "label": "Tren Penjualan Bulanan",
+                    "query": "Tampilkan tren penjualan unit per bulan tahun 2025",
+                    "keywords": ["tren", "bulanan"]
+                },
+                {
+                    "id": "top_customer",
+                    "label": "Top Customer Pembelian Unit",
+                    "query": "Daftar 10 customer dengan transaksi pembelian unit terbesar",
+                    "keywords": ["customer", "pelanggan"]
+                }
+            ],
+            "default_action": {
+                "id": "mobil_terlaris",
+                "query": "Tampilkan 5 model mobil terlaris tahun 2025 beserta grafiknya"
+            }
+        }
+        saran = [opt["query"] for opt in pending_proposal["options"]]
+    elif any(w in q_lower for w in ["servis", "service", "pkb", "wo", "bengkel"]):
+        pending_proposal = {
+            "intent": "service_analysis",
+            "topic": "servis",
+            "status": "awaiting_confirmation",
+            "options": [
+                {
+                    "id": "servis_bulanan",
+                    "label": "Pendapatan Servis Bengkel 2025",
+                    "query": "Berapa total pendapatan servis bengkel tahun 2025 per bulan beserta grafiknya?",
+                    "keywords": ["pendapatan", "bulanan", "omzet"]
+                },
+                {
+                    "id": "pekerjaan_terbanyak",
+                    "label": "5 Pekerjaan Servis Terbanyak",
+                    "query": "Tampilkan 5 pekerjaan servis dengan frekuensi tertinggi",
+                    "keywords": ["pekerjaan", "jasa", "terbanyak"]
+                },
+                {
+                    "id": "top_sa",
+                    "label": "Top Service Advisor",
+                    "query": "Siapa Service Advisor dengan penanganan PKB terbanyak?",
+                    "keywords": ["sa", "service advisor"]
+                }
+            ],
+            "default_action": {
+                "id": "servis_bulanan",
+                "query": "Berapa total pendapatan servis bengkel tahun 2025 per bulan beserta grafiknya?"
+            }
+        }
+        saran = [opt["query"] for opt in pending_proposal["options"]]
+    elif any(w in q_lower for w in ["sparepart", "part", "suku cadang"]):
+        pending_proposal = {
+            "intent": "parts_analysis",
+            "topic": "suku cadang",
+            "status": "awaiting_confirmation",
+            "options": [
+                {
+                    "id": "part_terlaris",
+                    "label": "10 Suku Cadang Tercepat",
+                    "query": "Tampilkan 10 suku cadang dengan perputaran tercepat",
+                    "keywords": ["tercepat", "fast moving"]
+                },
+                {
+                    "id": "omzet_part",
+                    "label": "Total Nilai Penjualan Part 2025",
+                    "query": "Berapa total nilai penjualan suku cadang tahun 2025?",
+                    "keywords": ["nilai", "omzet", "penjualan"]
+                },
+                {
+                    "id": "stok_part",
+                    "label": "Sisa Stok Suku Cadang",
+                    "query": "Berapa sisa stok part saat ini?",
+                    "keywords": ["stok", "sisa", "gudang"]
+                }
+            ],
+            "default_action": {
+                "id": "part_terlaris",
+                "query": "Tampilkan 10 suku cadang dengan perputaran tercepat"
+            }
+        }
+        saran = [opt["query"] for opt in pending_proposal["options"]]
+    elif any(w in q_lower for w in ["semua data", "seluruh data", "semisal", "misal"]):
         saran = [
             "Tampilkan ringkasan penjualan unit tahun 2025",
             "Berapa total pendapatan servis bengkel tahun 2025?",
             "Tampilkan 5 model mobil terlaris sepanjang masa",
             "Daftar 10 customer dengan transaksi pembelian unit terbesar",
-        ]
-    elif any(w in q_lower for w in ["servis", "service", "pkb", "wo", "bengkel"]):
-        saran = [
-            "Berapa total pendapatan servis bengkel tahun 2025?",
-            "Tampilkan 5 pekerjaan servis dengan frekuensi tertinggi",
-            "Tren jumlah unit yang diservis per bulan tahun 2024",
-            "Siapa Service Advisor dengan penanganan PKB terbanyak?",
-        ]
-    elif any(w in q_lower for w in ["sparepart", "part", "suku cadang"]):
-        saran = [
-            "Tampilkan 10 suku cadang dengan perputaran tercepat",
-            "Berapa total nilai penjualan suku cadang tahun 2025?",
-            "Daftar sparepart dengan nilai transaksi terbesar",
-            "Berapa sisa stok part saat ini?",
         ]
     else:
         saran = [
@@ -1423,6 +1749,7 @@ async def tangani_kueri_percakapan(
         "metode": "conversational",
         "is_conversational_text": True,
         "allow_explain": False,
+        "pending_proposal": pending_proposal,
     }
 
     conv_id = await ambil_atau_buat_conversation(
@@ -1527,25 +1854,49 @@ async def tangani_kueri_eksplanatori(
         tabs = prev_data.get("tabs") or []
         rows = prev_data.get("rows") or (tabs[0].get("rows") if tabs else [])
         if not rows:
+            is_graphic_inquiry = any(w in question.lower() for w in ["grafik", "chart", "diagram"])
             prev_ringkasan = prev_data.get("ringkasan") or ""
-            if prev_ringkasan:
+            if is_graphic_inquiry:
+                ringkasan = (
+                    "Visualisasi grafik interaktif (Line Chart dan Bar Chart) otomatis aktif di panel atas "
+                    "begitu kueri data berhasil dieksekusi dari database.\n\n"
+                    "Pada percakapan sebelumnya, kita baru membahas modul dan opsi data, sehingga kueri SQL belum dieksekusi "
+                    "dan belum ada baris data transaksi nyata yang ditarik.\n\n"
+                    "Silakan klik salah satu kueri data di bawah ini untuk langsung mengeksekusi database dan memunculkan grafik interaktifnya:"
+                )
+                pending_p = prev_data.get("pending_proposal")
+                if pending_p and pending_p.get("options"):
+                    saran = [opt["query"] for opt in pending_p["options"][:4]]
+                else:
+                    saran = [
+                        "Tampilkan total pembayaran kasir per bulan tahun 2025 beserta grafik trennya",
+                        "Tampilkan 5 model mobil dengan penjualan tertinggi",
+                        "Berapa total pendapatan servis bengkel tahun 2025?",
+                        "Tren volume transaksi servis bulanan sepanjang tahun 2024",
+                    ]
+            elif prev_ringkasan:
                 ringkasan = (
                     f"Pada jawaban sebelumnya, saya memberikan penjelasan naratif berikut:\n\n"
                     f"> {prev_ringkasan}\n\n"
                     "Belum ada tabel data transaksi spesifik yang dimuat. Jika Anda ingin memeriksa data operasional nyata, "
                     "silakan pilih modul data yang ingin ditampilkan (seperti Penjualan Mobil, Servis Bengkel, atau Suku Cadang)."
                 )
+                saran = [
+                    "Tampilkan 5 model mobil dengan penjualan tertinggi",
+                    "Berapa total pendapatan servis bengkel tahun 2025?",
+                    "Tren volume transaksi servis bulanan sepanjang tahun 2024",
+                ]
             else:
                 ringkasan = (
                     "Pesan sebelumnya tidak memuat data tabel transaksi untuk dijelaskan. "
                     "Untuk memeriksa data operasional nyata, Anda dapat meminta data penjualan unit, "
                     "servis bengkel, atau suku cadang."
                 )
-            saran = [
-                "Tampilkan 5 model mobil dengan penjualan tertinggi",
-                "Berapa total pendapatan servis bengkel tahun 2025?",
-                "Tren volume transaksi servis bulanan sepanjang tahun 2024",
-            ]
+                saran = [
+                    "Tampilkan 5 model mobil dengan penjualan tertinggi",
+                    "Berapa total pendapatan servis bengkel tahun 2025?",
+                    "Tren volume transaksi servis bulanan sepanjang tahun 2024",
+                ]
         else:
             prev_q = prev_data.get("question") or "permintaan data sebelumnya"
             sql = (prev_data.get("sql") or (tabs[0].get("sql") if tabs else "") or "").lower()
@@ -1689,6 +2040,12 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
         question, is_reconciled = await rekonsiliasi_slot_percakapan(core_pool, conversation_id, question)
         q_norm = normalisasi_pertanyaan(question)
 
+        # Dialogue State Tracking: Evaluasi apakah pengguna menyetujui pending proposal dari turn sebelumnya (Direct Action Policy)
+        question, is_action_accepted, active_proposal = await evaluasi_state_percakapan(core_pool, conversation_id, question)
+        if is_action_accepted:
+            logger.info("Dialogue State Tracking: Aksi disetujui -> Kueri dialihkan ke kueri operasional: %s", question)
+            q_norm = normalisasi_pertanyaan(question)
+
         # Deteksi topik riwayat percakapan sebelumnya untuk multi-turn chat continuity
         inherited_topic = await deteksi_topik_riwayat_percakapan(core_pool, conversation_id)
 
@@ -1696,7 +2053,7 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
         active_context = await ambil_konteks_percakapan_aktif(core_pool, conversation_id)
 
         # 0.0. Mode Percakapan Eksplanatori ("loh data apa ini?", "tadi lu kasih data apa?", "maksud tabel ini apa?")
-        if _is_explanatory_question(question):
+        if not is_action_accepted and _is_explanatory_question(question):
             return await tangani_kueri_eksplanatori(
                 core_pool, conversation_id, question, user_id, branch_code, t0, ai_config=ai_config
             )
@@ -1761,7 +2118,7 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
             return response
 
         # 0.0.2. Mode Percakapan Murni (Sapaan, Terima Kasih, Istilah Bisnis / Konsep Otomotif, Kapabilitas)
-        if _is_conversational_question(question):
+        if not is_action_accepted and _is_conversational_question(question):
             return await tangani_kueri_percakapan(
                 core_pool, conversation_id, question, user_id, branch_code, t0,
                 ai_config=ai_config, llm_call_fn=llm_call_fn
