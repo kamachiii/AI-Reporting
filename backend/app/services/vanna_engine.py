@@ -85,17 +85,11 @@ async def ambil_konteks_vanna(core_pool, question: str, branch_code: str = "GLOB
         params = [f"%{w}%" for w in words[:6]]
         where_sql = " OR ".join(conditions)
 
-        # Prioritaskan tabel fisik transaksi (untt_penjualan, untt_pembelian) daripada view terpotong
+        # Prioritaskan tabel fisik dasar daripada view terpotong bila ada
         order_sql = """
             (CASE 
-                WHEN content ILIKE 'Table untt_penjualan%' THEN 0
-                WHEN content ILIKE 'Table untt_pembelian%' THEN 0
-                WHEN content ILIKE 'Table untt_%' THEN 1
-                WHEN content ILIKE 'Table srvt_%' THEN 2
-                WHEN content ILIKE 'Table prtt_%' THEN 2
-                WHEN content ILIKE '%vw_daftar_outstanding%' THEN 3
-                WHEN content ILIKE 'Table vw_%' THEN 4
-                ELSE 5 
+                WHEN content ILIKE 'Table vw_%' THEN 2
+                ELSE 0 
             END), length(content) ASC
         """
         rows = await core_pool.fetch(
@@ -109,11 +103,12 @@ async def ambil_konteks_vanna(core_pool, question: str, branch_code: str = "GLOB
             if m:
                 tables_found.append(m.group(1))
 
-    # Jika pencarian kosong, berikan tabel-tabel utama umum
+    # Jika pencarian kata kosong, berikan tabel-tabel teratas yang tersedia
     if not contexts:
         rows = await core_pool.fetch(
             "SELECT content FROM global_knowledge_base "
-            "WHERE content ILIKE '%pembelian%' OR content ILIKE '%penjualan%' "
+            "WHERE content ILIKE 'Table %' "
+            "ORDER BY length(content) ASC "
             "LIMIT 5"
         )
         for r in rows:
@@ -147,21 +142,28 @@ def susun_prompt_vanna(question: str, context: str, inherited_topic: str | None 
     """Susun prompt persis dengan template resmi Vanna AI."""
     topic_context_note = ""
     if inherited_topic and not any(w in question.lower() for w in ["jual", "penjualan", "beli", "pembelian", "servis", "service", "bengkel", "part", "sparepart"]):
-        topic_context_note = f"\n=== Active Multi-turn Conversation Context:\nThe user is currently discussing '{inherited_topic}' in this session. Maintain this context (e.g., if topic is 'pembelian', generate SQL querying untt_pembelian).\n"
+        topic_context_note = f"\n=== Active Multi-turn Conversation Context:\nThe user is currently discussing '{inherited_topic}' in this session. Maintain relevant context if applicable.\n"
 
-    return f"""You are a Postgres expert. Please help to generate a SQL query to answer the question. Your response should ONLY be based on the given context and follow the response guidelines and format instructions.
+    return f"""You are a Postgres expert and AI data assistant for an operational enterprise database.
+Your response should be based on the given context and follow the response guidelines:
 {topic_context_note}
-=== Context:
+=== Database Context & Relationships:
 {context}
 
-=== Question:
+=== User Input:
 {question}
 
 === Response Guidelines:
-1. If the provided context is sufficient, please generate a valid SQL query without any explanations.
-2. Ensure the query runs cleanly on PostgreSQL.
-3. Return ONLY the SQL query enclosed in ```sql ... ``` code block.
-4. Strictly apply the automotive business rules provided in the context (e.g. filtering out cancelled or returned records with untt_penjualan.batal = 0 AND untt_penjualan.retur = 0).
+1. If the user is asking for operational or transactional data, reports, metrics, or table queries:
+   - Generate ONE valid PostgreSQL SELECT query.
+   - Return ONLY the SQL query enclosed in ```sql ... ``` code block.
+   - Use the tables, columns, and relationships provided in the context.
+   - Do not include explanations outside the SQL code block.
+2. If the user's input is a casual conversation, greeting, capability question, clarification, or question about concepts/terms that DOES NOT require querying database tables:
+   - DO NOT generate SQL.
+   - Respond directly and helpfully in Indonesian (Markdown format) without any ```sql code block.
+   - Keep the tone polite, concise, empathetic, and clear (like Claude, Gemini, or ChatGPT).
+   - Zero emoji policy: do not include emoji symbols in your response.
 """
 
 
@@ -2240,26 +2242,34 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
             
             # 3. Panggil LLM (Hanya 1 Panggilan Tunggal!)
             panggil_fn = llm_call_fn or panggil_llm_default
-            system_msg = "You are a Postgres expert. Respond only with SQL code block."
+            system_msg = (
+                "You are an expert AI data assistant and PostgreSQL specialist. "
+                "If the input asks for data, output ONLY SQL code block (```sql ... ```). "
+                "If the input is conversational or does not require a database query, respond naturally and helpfully in Indonesian Markdown."
+            )
             raw_output = await panggil_fn(system_msg, vanna_prompt, ai_config)
             
-            # 4. Ekstrak SQL
+            # 4. Evaluasi Respons LLM (SQL Query vs Percakapan Naratif)
             sql = ekstrak_sql(raw_output)
-            if not sql.lower().startswith("select") and not sql.lower().startswith("with"):
-                raise ValueError(f"AI tidak menghasilkan kueri SELECT yang valid: {raw_output[:200]}")
+            is_sql = bool(sql.lower().startswith("select") or sql.lower().startswith("with"))
+            sql_clean = re.sub(r'--.*', '', sql).strip() if is_sql else ""
+            has_from_table = bool(re.search(r'\bfrom\s+[a-zA-Z0-9_"]+', sql_clean, re.IGNORECASE)) if is_sql else False
 
-            # 4.1 Anti-Dummy SQL Interceptor: cegah LLM "ngobrol" via query dummy tanpa FROM tabel (misal: SELECT 'Alohaa!' AS pesan)
-            sql_clean = re.sub(r'--.*', '', sql).strip()
-            has_from_table = bool(re.search(r'\bfrom\s+[a-zA-Z0-9_"]+', sql_clean, re.IGNORECASE))
-            if not has_from_table:
-                logger.info("Anti-Dummy SQL Interceptor menangkap kueri tanpa FROM tabel: %s", sql)
+            if not is_sql or not has_from_table:
+                # LLM memilih merespons secara percakapan / naratif murni (0 SQL, 0 Database)
+                logger.info("AI merespons dengan percakapan naratif murni (0 SQL): %s", raw_output[:120])
                 extracted_text = ""
-                str_match = re.search(r"'(.*?)'", sql, re.DOTALL)
-                if str_match:
-                    extracted_text = str_match.group(1).strip()
+                if is_sql and not has_from_table:
+                    str_match = re.search(r"'(.*?)'", sql, re.DOTALL)
+                    if str_match:
+                        extracted_text = str_match.group(1).strip()
+                if not extracted_text:
+                    extracted_text = _ekstrak_teks_naratif_bersih(raw_output)
+                if not extracted_text or len(extracted_text) < 5:
+                    extracted_text = raw_output.strip()
                 if not extracted_text:
                     extracted_text = (
-                        "Halo! Senang bertemu dengan Anda. Silakan tanyakan data transaksi operasional dealer cabang Anda, "
+                        "Halo! Senang bertemu dengan Anda. Silakan tanyakan data transaksi operasional cabang Anda, "
                         "seperti penjualan unit kendaraan, jasa servis bengkel, atau suku cadang."
                     )
                 extracted_text = _bersihkan_emoji_teks(extracted_text)
@@ -2284,7 +2294,7 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                         "Daftar 10 customer dengan transaksi pembelian unit terbesar",
                         "Tren volume transaksi servis bulanan sepanjang tahun 2024",
                     ],
-                    "metode": "conversational_guide",
+                    "metode": "conversational_llm",
                     "is_conversational_text": True,
                     "allow_explain": False,
                 }
@@ -2304,9 +2314,8 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                     ai_json_filter={
                         "provider": ai_provider,
                         "model": ai_model,
-                        "category": "conversational_guide",
-                        "mode": "conversational_intercepted",
-                        "raw_sql": sql,
+                        "category": "conversational",
+                        "mode": "conversational_llm",
                     },
                     generated_sql="",
                     execution_time_ms=durasi_ms,
