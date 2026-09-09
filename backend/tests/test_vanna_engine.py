@@ -92,7 +92,7 @@ async def test_jalankan_mode_vanna_mock():
             return "```sql\nSELECT tahun, total FROM vw_pembelian;\n```"
 
         res = await jalankan_mode_vanna(
-            fake_core_pool, fake_tpm, user, "bandingkan pembelian unit mobil 2025 dan 2026", "TST_01",
+            fake_core_pool, fake_tpm, user, "tampilkan 5 model mobil terlaris tahun 2025", "TST_01",
             llm_call_fn=fake_llm
         )
 
@@ -100,6 +100,54 @@ async def test_jalankan_mode_vanna_mock():
         assert res["confidence"] == "A"
         assert "SELECT tahun, total" in res["sql"]
         assert res["row_count"] == 1
+
+
+@pytest.mark.anyio
+async def test_jalankan_mode_vanna_komparasi_deterministik():
+    fake_core_pool = AsyncMock()
+    fake_core_pool.fetchrow = AsyncMock(return_value=None)
+    fake_core_pool.fetch = AsyncMock(return_value=[])
+    fake_core_pool.fetchval = AsyncMock(return_value=1)
+    fake_core_pool.execute = AsyncMock()
+
+    fake_tpm = AsyncMock()
+    fake_conn = AsyncMock()
+    fake_conn.execute = AsyncMock()
+    fake_conn.fetch = AsyncMock(return_value=[
+        {"tahun": 2020, "unit_terjual": 870, "total_omzet": 173565000000},
+        {"tahun": 2021, "unit_terjual": 777, "total_omzet": 155011500000},
+        {"tahun": 2022, "unit_terjual": 888, "total_omzet": 177156000000},
+    ])
+
+    fake_pool_tenant = MagicMock()
+    fake_pool_tenant.acquire.return_value = _AsyncContextManager(fake_conn)
+    fake_tpm.get_pool = AsyncMock(return_value=fake_pool_tenant)
+
+    user = {"user_id": 1, "username": "testuser"}
+
+    with patch("app.services.vanna_engine.resolve_tenant", return_value={"tenant_id": 1, "branch_code": "TST_01"}), \
+         patch("app.services.vanna_engine.resolve_ai_config", return_value={"model": "test-model"}):
+
+        # Kueri komparasi 3 tahun eliptikal: 0 panggilan LLM, deterministik ke untt_penjualan
+        llm_called = False
+        async def fake_llm(sys, usr, cfg):
+            nonlocal llm_called
+            llm_called = True
+            return "SELECT 1;"
+
+        res = await jalankan_mode_vanna(
+            fake_core_pool, fake_tpm, user, "sekarang coba bandingkan 2020 vs 2021 vs 2022", "TST_01",
+            inherited_topic="penjualan",
+            llm_call_fn=fake_llm
+        )
+
+        assert res["source"] == "vanna"
+        assert res["confidence"] == "A"
+        assert llm_called is False  # Membuktikan 0 LLM token
+        assert "untt_penjualan" in res["sql"]
+        assert "IN (2020, 2021, 2022)" in res["sql"]
+        assert res["is_comparison"] is True
+        assert len(res["comparison_meta"]["periods"]) == 3
         assert any("terpisah" in s for s in res["saran"])
 
 @pytest.mark.anyio

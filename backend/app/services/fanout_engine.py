@@ -418,8 +418,8 @@ def _format_rupiah_singkat(val: float) -> str:
     return f"Rp {num:,.0f}"
 
 
-def _ekstrak_dua_periode(question: str) -> Optional[tuple[str, str]]:
-    """Mengekstrak 2 tahun atau 2 periode waktu dari kueri."""
+def _ekstrak_periode_waktu(question: str) -> List[str]:
+    """Mengekstrak seluruh tahun atau periode waktu dari kueri."""
     q_lower = (question or "").lower()
     years = re.findall(r"\b(20[1-3][0-9])\b", q_lower)
     seen_years: List[str] = []
@@ -427,7 +427,7 @@ def _ekstrak_dua_periode(question: str) -> Optional[tuple[str, str]]:
         if y not in seen_years:
             seen_years.append(y)
     if len(seen_years) >= 2:
-        return seen_years[0], seen_years[1]
+        return seen_years
 
     quarters = re.findall(r"\b(q[1-4]|kuartal\s*[1-4]|triwulan\s*[1-4]|semester\s*[1-2]|s[1-2])\b", q_lower)
     seen_q: List[str] = []
@@ -435,8 +435,16 @@ def _ekstrak_dua_periode(question: str) -> Optional[tuple[str, str]]:
         if q not in seen_q:
             seen_q.append(q)
     if len(seen_q) >= 2:
-        return seen_q[0], seen_q[1]
+        return seen_q
 
+    return seen_years or seen_q
+
+
+def _ekstrak_dua_periode(question: str) -> Optional[tuple[str, str]]:
+    """Mengekstrak 2 tahun atau 2 periode waktu dari kueri."""
+    periodes = _ekstrak_periode_waktu(question)
+    if len(periodes) >= 2:
+        return periodes[0], periodes[1]
     return None
 
 
@@ -453,11 +461,11 @@ def cek_apakah_minta_rincian_terpisah(question: str) -> Optional[Dict[str, Any]]
     if not (has_terpisah or (has_rincian and bool(re.search(r"\b(?:dan|vs|versus|serta)\b", q_lower)))):
         return None
 
-    periode = _ekstrak_dua_periode(question)
-    if not periode:
+    periodes = _ekstrak_periode_waktu(question)
+    if len(periodes) < 2:
         return None
 
-    p1, p2 = periode
+    p1, p2 = periodes[0], periodes[1]
 
     topic = "penjualan"
     table_hint = "untt_penjualan"
@@ -479,27 +487,24 @@ def cek_apakah_minta_rincian_terpisah(question: str) -> Optional[Dict[str, Any]]
         table_hint = "untt_penjualan"
         date_col = "tanggal"
 
+    domains = [
+        {
+            "id": f"periode_{p}",
+            "title": f"Rincian Tahun {p}",
+            "icon": "Calendar",
+            "focus": f"Daftar detail transaksi {topic} tahun {p}",
+            "hint": f"Tampilkan data baris transaksi dari '{table_hint}' pada tahun {p} (filter {date_col} tahun {p}). Batasi LIMIT 50.",
+        }
+        for p in periodes
+    ]
+
     return {
         "category": "rincian_terpisah",
+        "periods": periodes,
         "p1": p1,
         "p2": p2,
         "topic": topic,
-        "domains": [
-            {
-                "id": f"periode_{p1}",
-                "title": f"Rincian Tahun {p1}",
-                "icon": "Calendar",
-                "focus": f"Daftar detail transaksi {topic} tahun {p1}",
-                "hint": f"Tampilkan data baris transaksi dari '{table_hint}' pada tahun {p1} (filter {date_col} tahun {p1}). Batasi LIMIT 50.",
-            },
-            {
-                "id": f"periode_{p2}",
-                "title": f"Rincian Tahun {p2}",
-                "icon": "Calendar",
-                "focus": f"Daftar detail transaksi {topic} tahun {p2}",
-                "hint": f"Tampilkan data baris transaksi dari '{table_hint}' pada tahun {p2} (filter {date_col} tahun {p2}). Batasi LIMIT 50.",
-            },
-        ]
+        "domains": domains,
     }
 
 
@@ -514,15 +519,15 @@ def _deteksi_kueri_komparasi_periode(question: str) -> Optional[Dict[str, Any]]:
         return None
 
     has_comp_kw = bool(re.search(r"\b(?:bandingkan|komparasi|perbandingan|versus|vs|growth|pertumbuhan|tren\s+antar|selisih|dibandingkan|dibanding|banding)\b", q_lower))
-    periode = _ekstrak_dua_periode(question)
-    if not periode:
+    periodes = _ekstrak_periode_waktu(question)
+    if len(periodes) < 2:
         return None
 
     has_connector = bool(re.search(r"\b(?:vs|versus|dan|ke|dengan|serta|dibanding)\b", q_lower))
     if not (has_comp_kw or has_connector):
         return None
 
-    p1, p2 = periode
+    p1, p2 = periodes[0], periodes[1]
     topic = "penjualan"
     if any(w in q_lower for w in ["beli", "pembelian", "kulakan", "pengadaan"]):
         topic = "pembelian"
@@ -535,6 +540,7 @@ def _deteksi_kueri_komparasi_periode(question: str) -> Optional[Dict[str, Any]]:
 
     return {
         "is_comparison": True,
+        "periods": periodes,
         "p1": p1,
         "p2": p2,
         "topic": topic,

@@ -2034,6 +2034,48 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
     - Tab 2024: 50 rows | Full Count: 952 | Full Money: Rp 189,92 Miliar.
     - Ringkasan 100% konsisten dengan Turn #4 tanpa kontradiksi angka sedikit pun.
 
+### 3bc. Deterministic Comparison Engine & N-Tabel Dinamis Multi-Tahun (> 3 Tabel) (2026-09-09)
+
+- **Latar Belakang & Investigasi Masalah User (`tester02`, Turn 17-18)**:
+  - Pada Turn 17, setelah membahas modul penjualan sepanjang Turn 1–16, pengguna mengajukan kueri komparasi eliptikal (tanpa kata benda): *"sekarang coba bandingkan 2020 vs 2021 vs 2022"*.
+  - Timbul 3 kegagalan sistemik:
+    1. **Topik Melenceng ke Pembelian**: LLM probabilistik membaca ribuan tabel dan memilih `untt_pembelian` (kulakan unit) alih-alih `untt_penjualan`, menghasilkan angka pembelian yang sama sekali tidak relevan dengan sesi aktif.
+    2. **Tahun ke-3 Terpotong**: Logika `years[:2]` membuang tahun `2022`, sehingga saran dan metadata hanya menangkap 2 tahun.
+    3. **Fallback Ringkasan Robotik**: Karena kueri menghasilkan kolom `tahun_invoice`, pengecekan kaku `"tahun" in columns` gagal dan AI menampilkan: *"Berhasil menampilkan 3 baris data dari database."*.
+  - Pengguna bertanya:
+    1. *"apakah dengan langkah itu bisa jamin error yg sama hilang?"*
+    2. *"apakah nanti user ketika meminta tabel lebih dari 3 tetap aman?"*
+
+- **Solusi & Arsitektur Teknis**:
+  1. **Deterministic Comparison Engine (Zero LLM, 0 Halusinasi, 0 Token)**:
+     - Mengimplementasikan `susun_kueri_komparasi_deterministik()` di `backend/app/services/vanna_engine.py`.
+     - Ketika terdeteksi kueri perbandingan waktu standar tanpa dimensi atribut mikro (seperti model/warna), sistem langsung menyusun SQL deterministik yang dipetakan ke `inherited_topic` aktif:
+       - `penjualan`: `SELECT EXTRACT(YEAR FROM tanggal)::INT AS tahun, COUNT(nomor) AS unit_terjual, COALESCE(SUM(hjakhir), 0) AS total_omzet FROM untt_penjualan WHERE NOT COALESCE(batal, FALSE) AND NOT COALESCE(retur, FALSE) AND EXTRACT(YEAR FROM tanggal) IN (...) GROUP BY 1 ORDER BY 1 ASC;`
+       - `pembelian`: kueri ke `untt_pembelian`.
+       - `servis`: kueri ke `srvt_wo`.
+       - `sparepart`: kueri ke `srvt_wodetail`.
+     - **Garansi 100%**: Topik tidak mungkin tertukar ke pembelian, kueri mengeksekusi dalam ~15ms (0 token AI).
+  2. **Dukungan N-Tabel Dinamis Multi-Tahun (> 3 Tabel)**:
+     - Menghapus pembatasan kaku `years[:2]` di `vanna_engine.py` dan `fanout_engine.py`.
+     - Mengubahnya menjadi iterasi dinamis `unique_years = sorted(list(dict.fromkeys(years)))`.
+     - Jika user meminta 3 tahun (`2020, 2021, 2022`), dibuatkan tepat 3 tab (`thn_2020`, `thn_2021`, `thn_2022`).
+     - Jika meminta 4 tahun (`2020, 2021, 2022, 2023`), dibuatkan 4 tab.
+     - Setiap tab dieksekusi paralel via `asyncio.gather` dengan Window Function (`COUNT(*) OVER()`, `SUM(...) OVER()`) dan batas aman `LIMIT 50` baris agar memori browser tetap ringan dan bebas lag.
+  3. **Deteksi Kolom Tahun Fleksibel pada `_format_ringkasan_otomatis`**:
+     - Mengganti pencocokan kaku menjadi substring match (`any(t in str(c).lower() for t in ["tahun", "year", "thn"])`).
+     - Kolom `tahun_invoice`, `tahun_transaksi`, `thn`, atau `year` kini langsung terdeteksi dan menghasilkan ringkasan perbandingan tahun yang kaya (format Rupiah Indonesia).
+
+- **Verifikasi & Bukti Nyata**:
+  - Backend compileall: **exit 0**.
+  - Backend test suite: `pytest tests/ -q` (**597 passed in 36.43s**, 0 failed).
+  - Frontend lint: `npm run lint` (**0 error, 0 warning baru**).
+  - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 1.42s).
+  - Real Database Execution Test against `backup_demo_otobitzcloud`:
+    - Uji 1 (3 Tahun Gaya 1): 2020 (870 unit, Rp 173,56 M), 2021 (777 unit, Rp 155,01 M), 2022 (888 unit, Rp 177,16 M) via `untt_penjualan`.
+    - Uji 2 (3 Tahun Gaya 2): Dihasilkan 3 tab (`Rincian Tahun 2020`, `Rincian Tahun 2021`, `Rincian Tahun 2022`) dengan Window Agregat lengkap.
+    - Uji 3 (4 Tahun Gaya 1): Dihasilkan 4 baris data komparasi 2020 s/d 2023 lengkap.
+    - Uji 4 (4 Tahun Gaya 2): Dihasilkan 4 tab terpisah secara dinamis tanpa batas artifisial.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -2112,6 +2154,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Dialogue State Tracking (DST), Direct Action Policy & Mechanical Output Guard** — SELESAI (lihat §3az).
 - [x] **Executive Dossier Layout, KPI Metric Banner & Quick Operational Deck** — SELESAI (lihat §3ba).
 - [x] **SQL Window Aggregation Rincian Terpisah, Eliminasi Disinformasi Sampel & Penyelarasan Multiturn** — SELESAI (lihat §3bb).
+- [x] **Deterministic Comparison Engine & N-Tabel Dinamis Multi-Tahun (> 3 Tabel)** — SELESAI (lihat §3bc).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. *Dedicated Executive Dashboard Page*: Ditutup/dibatalkan atas arahan pengguna untuk mempertahankan identitas murni Conversational AI Assistant.
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.

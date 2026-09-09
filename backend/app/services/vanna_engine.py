@@ -454,9 +454,8 @@ def _format_ringkasan_otomatis(rows: list, columns: list, question: str = "") ->
         base_summary = f"Ditemukan 1 baris hasil ({', '.join(items)})."
 
     # Deteksi apakah ini perbandingan tahunan / periode
-    elif "tahun" in [str(c).lower() for c in columns]:
-        col_map = {str(c).lower(): c for c in columns}
-        thn_col = col_map.get("tahun")
+    elif any(any(t in str(c).lower() for t in ["tahun", "year", "thn"]) for c in columns):
+        thn_col = next((c for c in columns if any(t in str(c).lower() for t in ["tahun", "year", "thn"])), None)
 
         money_cols = [c for c in columns if _is_column_money(c)]
         qty_cols = [c for c in columns if _is_column_qty(c)]
@@ -932,7 +931,7 @@ def _periksa_integritas_output_percakapan(text: str) -> tuple[bool, str]:
 
 
 def _deteksi_kueri_komparasi_periode(question: str, inherited_topic: str | None = None) -> dict | None:
-    """Deteksi kueri perbandingan antar periode (misal: 2024 vs 2025)."""
+    """Deteksi kueri perbandingan antar periode (misal: 2024 vs 2025 atau 2020 vs 2021 vs 2022)."""
     q_lower = (question or "").lower()
     years = re.findall(r'\b(20[12]\d)\b', q_lower)
     is_vs = any(w in q_lower for w in [" vs ", " versus ", "bandingkan", "perbandingan", "komparasi", " beda ", "selisih", "dibandingkan", "dibanding"])
@@ -949,24 +948,37 @@ def _deteksi_kueri_komparasi_periode(question: str, inherited_topic: str | None 
 
     frasa_subject = f"transaksi {subject}" if subject != "transaksi" else "data transaksi"
 
-    if len(years) >= 2:
-        p1, p2 = sorted(years[:2])
+    unique_years = sorted(list(dict.fromkeys(years)))
+
+    if len(unique_years) >= 2:
+        p1, p2 = unique_years[0], unique_years[1]
+        if len(unique_years) == 2:
+            thn_text = f"tahun {p1} dan {p2}"
+        else:
+            thn_text = f"tahun {', '.join(unique_years[:-1])} dan {unique_years[-1]}"
+
+        saran_list = [
+            f"Tampilkan rincian {frasa_subject} {thn_text} secara terpisah"
+        ]
+        for yr in unique_years:
+            saran_list.append(f"Lihat detail {frasa_subject} tahun {yr}")
+
         return {
             "type": "year",
-            "periods": [p1, p2],
+            "periods": unique_years,
+            "p1": p1,
+            "p2": p2,
             "subject": subject,
-            "suggestions": [
-                f"Tampilkan rincian {frasa_subject} tahun {p1} dan {p2} secara terpisah",
-                f"Lihat detail {frasa_subject} tahun {p1}",
-                f"Lihat detail {frasa_subject} tahun {p2}",
-            ]
+            "suggestions": saran_list
         }
-    elif is_vs and len(years) == 1:
-        p1 = years[0]
+    elif is_vs and len(unique_years) == 1:
+        p1 = unique_years[0]
         p_prev = str(int(p1) - 1)
         return {
             "type": "year",
             "periods": [p_prev, p1],
+            "p1": p_prev,
+            "p2": p1,
             "subject": subject,
             "suggestions": [
                 f"Tampilkan rincian {frasa_subject} tahun {p_prev} dan {p1} secara terpisah",
@@ -978,14 +990,15 @@ def _deteksi_kueri_komparasi_periode(question: str, inherited_topic: str | None 
 
 
 def cek_apakah_minta_rincian_terpisah(question: str, inherited_topic: str | None = None) -> dict | None:
-    """Deteksi jika user meminta rincian periode terpisah (Gaya 2)."""
+    """Deteksi jika user meminta rincian periode terpisah (Gaya 2) untuk N tahun (2, 3, 4, 5+)."""
     q_lower = (question or "").lower()
     is_terpisah = any(w in q_lower for w in ["terpisah", "sendiri-sendiri", "masing-masing", "pisah", "pecah", "tiap tabel", "per tabel"])
     is_rincian = any(w in q_lower for w in ["rincian", "detail", "faktur", "transaksi", "tabel terpisah"])
     years = re.findall(r'\b(20[12]\d)\b', q_lower)
+    unique_years = sorted(list(dict.fromkeys(years)))
 
-    if (is_terpisah or is_rincian) and len(years) >= 2:
-        p1, p2 = sorted(years[:2])
+    if (is_terpisah or is_rincian) and len(unique_years) >= 2:
+        p1, p2 = unique_years[0], unique_years[1]
 
         # Tentukan topik dari kueri eksplisit atau inherited_topic dari percakapan
         topic = inherited_topic or "penjualan"
@@ -1029,30 +1042,93 @@ def cek_apakah_minta_rincian_terpisah(question: str, inherited_topic: str | None
             columns_to_select = "nomor_wo, part, jenis"
 
         window_select = f"{columns_to_select}, COUNT(*) OVER() AS total_transaksi_tahun, SUM({money_col}) OVER() AS total_omzet_tahun"
-        sql_1 = f"SELECT {window_select} FROM {table} WHERE EXTRACT(YEAR FROM {date_col}) = {p1} AND {filter_clause} ORDER BY {order_col} DESC LIMIT 50;"
-        sql_2 = f"SELECT {window_select} FROM {table} WHERE EXTRACT(YEAR FROM {date_col}) = {p2} AND {filter_clause} ORDER BY {order_col} DESC LIMIT 50;"
+        domains = []
+        for yr in unique_years:
+            sql_yr = f"SELECT {window_select} FROM {table} WHERE EXTRACT(YEAR FROM {date_col}) = {yr} AND {filter_clause} ORDER BY {order_col} DESC LIMIT 50;"
+            domains.append({
+                "id": f"thn_{yr}",
+                "title": f"Rincian Tahun {yr}",
+                "icon": "Calendar",
+                "sql": sql_yr,
+            })
 
         return {
             "category": "rincian_terpisah",
             "mode": "separated_years",
+            "periods": unique_years,
             "p1": p1,
             "p2": p2,
             "topic": topic,
-            "domains": [
-                {
-                    "id": f"thn_{p1}",
-                    "title": f"Rincian Tahun {p1}",
-                    "icon": "Calendar",
-                    "sql": sql_1,
-                },
-                {
-                    "id": f"thn_{p2}",
-                    "title": f"Rincian Tahun {p2}",
-                    "icon": "Calendar",
-                    "sql": sql_2,
-                }
-            ]
+            "table": table,
+            "domains": domains,
         }
+    return None
+
+
+def susun_kueri_komparasi_deterministik(comp_info: dict | None, question: str) -> str | None:
+    """Menyusun kueri SQL komparasi tahunan secara deterministik (0 LLM Token, 0 Halusinasi).
+    Aktif jika pertanyaan menuntut komparasi temporal antar tahun pada level modul/agregat,
+    bukan rincian atribut khusus (model, warna, dsb).
+    """
+    if not comp_info or not comp_info.get("periods") or len(comp_info["periods"]) < 2:
+        return None
+
+    q_lower = (question or "").lower()
+    # Jika menanyakan atribut atau dimensi spesifik, serahkan ke LLM
+    spesifik_keywords = [
+        "model", "tipe", "warna", "sales", "wiraniaga", "customer", "pelanggan",
+        "wilayah", "kota", "leasing", "mekanik", "kasir", "grade", "cabang"
+    ]
+    if any(k in q_lower for k in spesifik_keywords):
+        return None
+
+    periods = comp_info["periods"]
+    years_csv = ", ".join(str(p) for p in periods)
+    subject = comp_info.get("subject") or "penjualan"
+
+    if subject == "penjualan" or subject == "transaksi":
+        return f"""SELECT 
+    EXTRACT(YEAR FROM tanggal)::INT AS tahun,
+    COUNT(nomor) AS unit_terjual,
+    COALESCE(SUM(hjakhir), 0) AS total_omzet
+FROM untt_penjualan
+WHERE NOT COALESCE(batal, FALSE) AND NOT COALESCE(retur, FALSE)
+  AND EXTRACT(YEAR FROM tanggal) IN ({years_csv})
+GROUP BY EXTRACT(YEAR FROM tanggal)::INT
+ORDER BY tahun ASC;"""
+
+    elif subject == "pembelian":
+        return f"""SELECT 
+    EXTRACT(YEAR FROM tglinvoice)::INT AS tahun,
+    COUNT(nomor) AS total_unit_dibeli,
+    COALESCE(SUM(hpunit), 0) AS total_nilai_pembelian
+FROM untt_pembelian
+WHERE EXTRACT(YEAR FROM tglinvoice) IN ({years_csv})
+GROUP BY EXTRACT(YEAR FROM tglinvoice)::INT
+ORDER BY tahun ASC;"""
+
+    elif subject == "servis":
+        return f"""SELECT 
+    EXTRACT(YEAR FROM tanggal)::INT AS tahun,
+    COUNT(nomor) AS total_servis,
+    COALESCE(SUM(totalestimasibiaya), 0) AS total_biaya_servis
+FROM srvt_wo
+WHERE NOT COALESCE(batal, FALSE)
+  AND EXTRACT(YEAR FROM tanggal) IN ({years_csv})
+GROUP BY EXTRACT(YEAR FROM tanggal)::INT
+ORDER BY tahun ASC;"""
+
+    elif subject in ("suku cadang", "sparepart"):
+        return f"""SELECT 
+    EXTRACT(YEAR FROM tanggal)::INT AS tahun,
+    COUNT(nomor_wo) AS total_item_part,
+    COALESCE(SUM(part), 0) AS total_nilai_part
+FROM srvt_wodetail
+WHERE part > 0
+  AND EXTRACT(YEAR FROM tanggal) IN ({years_csv})
+GROUP BY EXTRACT(YEAR FROM tanggal)::INT
+ORDER BY tahun ASC;"""
+
     return None
 
 
@@ -2036,7 +2112,8 @@ async def tangani_kueri_eksplanatori(
 async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                               question: str, branch_code: str,
                               llm_call_fn=None,
-                              conversation_id: int | None = None) -> dict:
+                              conversation_id: int | None = None,
+                              inherited_topic: str | None = None) -> dict:
     """Eksekusi kueri menggunakan Mode Vanna murni."""
     t0 = time.monotonic()
     user_id = user["user_id"]
@@ -2062,7 +2139,8 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
             q_norm = normalisasi_pertanyaan(question)
 
         # Deteksi topik riwayat percakapan sebelumnya untuk multi-turn chat continuity
-        inherited_topic = await deteksi_topik_riwayat_percakapan(core_pool, conversation_id)
+        if inherited_topic is None:
+            inherited_topic = await deteksi_topik_riwayat_percakapan(core_pool, conversation_id)
 
         # Ambil konteks percakapan aktif (tahun + topik) secara terisolasi per conversation_id
         active_context = await ambil_konteks_percakapan_aktif(core_pool, conversation_id)
@@ -2492,17 +2570,22 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
 
                 # Rekomendasi saran pertanyaan kontekstual (Anti Self-Referencing / De-duplikasi kueri user)
                 if fanout_info.get("category") == "rincian_terpisah":
-                    p1 = str(fanout_info.get("p1") or "").strip()
-                    p2 = str(fanout_info.get("p2") or "").strip()
+                    periods = [str(p).strip() for p in fanout_info.get("periods", []) if str(p).strip()]
+                    if not periods:
+                        p1 = str(fanout_info.get("p1") or "").strip()
+                        p2 = str(fanout_info.get("p2") or "").strip()
+                        periods = [p for p in (p1, p2) if p]
                     topic = fanout_info.get("topic") or inherited_topic or "transaksi"
                     frasa_topik = f"transaksi {topic}" if topic != "transaksi" else "data transaksi"
-                    if p1 and p2:
+                    if len(periods) >= 2:
+                        thn_str = " vs ".join(periods) if len(periods) <= 3 else f"{periods[0]} s/d {periods[-1]}"
                         saran_list = [
-                            f"Bandingkan performa {topic} tahun {p1} vs {p2} dalam satu tabel",
-                            f"Tampilkan tren bulanan {topic} tahun {p1}",
-                            f"Tampilkan tren bulanan {topic} tahun {p2}"
+                            f"Bandingkan performa {topic} tahun {thn_str} dalam satu tabel",
                         ]
-                    elif p1:
+                        for p in periods[:3]:
+                            saran_list.append(f"Tampilkan tren bulanan {topic} tahun {p}")
+                    elif len(periods) == 1:
+                        p1 = periods[0]
                         saran_list = [
                             f"Tampilkan tren bulanan {topic} tahun {p1}",
                             f"Bandingkan performa {topic} dengan tahun sebelumnya",
@@ -2634,26 +2717,37 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
         ai_config = await resolve_ai_config(core_pool, user.get("username", ""), branch_code)
         
         async with VANNA_SEMAPHORE:
-            # 1. Ambil Konteks Semantik Murni dari pgvector (dengan fallback aman)
-            context_text, _ = await ambil_konteks_vanna(core_pool, question, branch_code, inherited_topic=inherited_topic)
-            
-            # 2. Susun Prompt Vanna
-            vanna_prompt = susun_prompt_vanna(question, context_text, inherited_topic=inherited_topic)
-            
-            # 3. Panggil LLM (Hanya 1 Panggilan Tunggal!)
             panggil_fn = llm_call_fn or panggil_llm_default
-            system_msg = (
-                "You are an expert AI data assistant and PostgreSQL specialist. "
-                "If the input asks for data, output ONLY SQL code block (```sql ... ```). "
-                "If the input is conversational or does not require a database query, respond naturally and helpfully in Indonesian Markdown."
-            )
-            raw_output = await panggil_fn(system_msg, vanna_prompt, ai_config)
-            
-            # 4. Evaluasi Respons LLM (SQL Query vs Percakapan Naratif)
-            sql = ekstrak_sql(raw_output)
-            is_sql = bool(sql.lower().startswith("select") or sql.lower().startswith("with"))
-            sql_clean = re.sub(r'--.*', '', sql).strip() if is_sql else ""
-            has_from_table = bool(re.search(r'\bfrom\s+[a-zA-Z0-9_"]+', sql_clean, re.IGNORECASE)) if is_sql else False
+
+            # 0.6. Cek Komparasi Temporal Deterministik (0 Halusinasi, 0 Token LLM)
+            comp_info = _deteksi_kueri_komparasi_periode(question, inherited_topic=inherited_topic)
+            deterministic_comp_sql = susun_kueri_komparasi_deterministik(comp_info, question) if comp_info else None
+
+            if deterministic_comp_sql:
+                sql = deterministic_comp_sql
+                is_sql = True
+                has_from_table = True
+                logger.info("Menggunakan SQL Komparasi Deterministik (0 Token): %s", sql.replace("\n", " "))
+            else:
+                # 1. Ambil Konteks Semantik Murni dari pgvector (dengan fallback aman)
+                context_text, _ = await ambil_konteks_vanna(core_pool, question, branch_code, inherited_topic=inherited_topic)
+                
+                # 2. Susun Prompt Vanna
+                vanna_prompt = susun_prompt_vanna(question, context_text, inherited_topic=inherited_topic)
+                
+                # 3. Panggil LLM (Hanya 1 Panggilan Tunggal!)
+                system_msg = (
+                    "You are an expert AI data assistant and PostgreSQL specialist. "
+                    "If the input asks for data, output ONLY SQL code block (```sql ... ```). "
+                    "If the input is conversational or does not require a database query, respond naturally and helpfully in Indonesian Markdown."
+                )
+                raw_output = await panggil_fn(system_msg, vanna_prompt, ai_config)
+                
+                # 4. Evaluasi Respons LLM (SQL Query vs Percakapan Naratif)
+                sql = ekstrak_sql(raw_output)
+                is_sql = bool(sql.lower().startswith("select") or sql.lower().startswith("with"))
+                sql_clean = re.sub(r'--.*', '', sql).strip() if is_sql else ""
+                has_from_table = bool(re.search(r'\bfrom\s+[a-zA-Z0-9_"]+', sql_clean, re.IGNORECASE)) if is_sql else False
 
             if not is_sql or not has_from_table:
                 # LLM memilih merespons secara percakapan / naratif murni (0 SQL, 0 Database)
