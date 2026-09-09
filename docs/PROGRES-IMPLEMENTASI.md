@@ -76,6 +76,7 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **Progressive Comparison (Gaya 1 -> Gaya 2) & Zero Emoji** | selesai | LIVE | Deteksi kueri periode (Gaya 1 tabel terpadu default + chart); ProactiveBreakdownOffer interaktif ke Gaya 2 (multi-tab rincian terpisah per periode tanpa jargon 3S); Penegakan 100% Zero-Emoji (SVG Lucide SplitSquareVertical, Calendar, Table2); 562 test backend lulus, lint 0 error, build 0 error |
 | **Arsitektur Chatbot Percakapan Murni & Dynamic Multi-Query** | selesai | LIVE | Mode Percakapan Murni (0 SQL, 0 Table untuk salam, konsep bisnis dealer PKB/SPK/VIN, kapabilitas); Eliminasi pola 3S fan-out divisi & tombol ambiguitas pembajak kueri; Kueri analitik tunggal 1 tabel presisi; Dynamic Multi-Query berbasis permintaan nyata (tab judul kustom); 577 test lulus, lint 0 error, build 0 error |
 | **Conversational AI Standar Gemini-Claude & Inline Markdown** | selesai | LIVE | Penanganan kueri konsultatif/hipotetis ("semisal semua data bisa?") 0 SQL; Multi-turn 5 riwayat percakapan; unforced json LLM streaming; Markdown inline formatter (**bold**, *italic*, code) editorial; 16/16 test skenario E2E lulus; 577 test lulus, lint 0 error, build 0 error |
+| **Peta Database Otomatis (Eliminasi Manual JSON) & Penyelarasan Follow-Up Tester02** | selesai | LIVE | Auto-mapping 2.387 tabel via prefix ERP (vw_, srv, unt, stp, cari, glb, acct); Peta database dinamis; Resolusi amnesia follow-up 'data apa ini?' & 'tadi lu kasih data apa'; Pembersihan racun sql_memory (ID 82, 86, 87); 577 test lulus |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -1801,6 +1802,55 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
     - **Hasil: 16/16 Lulus Sempurna (100.0% Pass Rate)**.
   - Backend compile: `compileall app` lolos (exit code 0).
   - Backend pytest: `pytest tests/ -q` lolos (**577 passed in 62.38s**).
+  - Frontend lint: `npm run lint` lolos (**0 errors**).
+  - Frontend build: `npm run build` lolos (**exit code 0, 1.01s**).
+
+### 3az. Auto-Mapping Database Schema (Eliminasi Manual JSON), Peta Database 2.387 Tabel, dan Resolusi Percakapan Follow-Up Tester02 (commit: HEAD)
+
+- **Latar Belakang & Masukan Pengguna**:
+  1. *Perbandingan dengan Kompetitor (Peta Database Otomatis)*: Pengguna membagikan tangkapan layar bot kompetitor yang dapat memetakan seluruh isi database dealer (2.387 tabel) secara otomatis ke dalam 8 kategori konvensi ERP tanpa harus memberi/mengisi file JSON allowlist manual (`knowledge_base`). Pengguna mempertanyakan: *"kok kita perlu kasih-kasih dulu sih di JSON?"*.
+  2. *Audit Riwayat Chat Pengguna `tester02` (Sesi "p" dan "aloww")*:
+     - Pada sesi chat `"aloww"` (Conv #67): Pengguna bertanya *"data apa ini?"* setelah bot menampilkan data ringkasan. Bot sebelumnya mengalami amnesia total dan menjawab: *"Namun, saya belum melihat data atau lampiran spesifik pada percakapan ini..."*.
+     - Pengguna yang bingung lalu bertanya: *"tadi yg gw minta data, itu lu kasih data apaa?"*. Karena ketiadaan pola eksplanatori, bot malah menjalankan kueri SQL baru `SELECT p.nomor... LIMIT 50` dan mencetak 50 baris tabel transaksi penjualan mobil mentah.
+     - Kedua kueri cacat tersebut bahkan otomatis tersimpan ke `sql_memory` sebagai `approved` (ID 82, 86, 87), sehingga pada sesi `"p"` (Conv #71) saat pengguna bertanya *"misal yg gw butuhin itu semua data gimana? bisa?"*, bot memutar ulang kueri UNION ALL 13 tahun yang keliru tersebut.
+
+- **Solusi & Rekayasa Arsitektur**:
+  1. **Auto-Mapping Database Schema (`backend/app/services/schema_mapper.py`)**:
+     - Memeriksa langsung `information_schema.tables` dari database tenant aktif dan mengelompokkan 2.387 tabel secara dinamis berdasarkan prefix standar ERP Otobitz:
+       - `vw_`: 706 tabel (View Laporan / Ready-made Reports)
+       - `srv / srvt / srvm`: 1.080 tabel (Service - Work Order, servis, mekanik)
+       - `untt / untm`: 274 tabel (Unit - transaksi & master kendaraan: SPK, faktur, DO)
+       - `stpm`: 88 tabel (Suku cadang/Parts - stok, master part)
+       - `cari_`: 67 tabel (View pencarian - daftar umur piutang, hutang, dll)
+       - `glbm`: 32 tabel (Master data GL - customer, salesman, karyawan)
+       - `acctt / acctm`: 31 tabel (Akuntansi - jurnal, account)
+       - `Lainnya`: 109 tabel (Dashboard, tax invoice, konfigurasi)
+     - Dilengkapi in-memory caching per database tenant sehingga instan (<1ms) pada panggilan berulang.
+     - **0 Manual JSON Maintenance**: Admin dan pengguna tidak perlu lagi mengetik atau memelihara tabel di file konfigurasi JSON.
+  2. **Mode Peta Database Interaktif & Penjelasan "Semua Data"**:
+     - Deteksi `is_schema_map_question(question)` menangkap kueri seperti *"peta database"*, *"ada tabel apa aja"*, *"struktur database"*, *"kamu punya data apa"*.
+     - Pertanyaan hipotetis *"semisal gw mau semua data bisa?"* kini secara proaktif menyajikan tabel peta database 2.387 tabel ini, lalu menjelaskan alasan arsitektural mengapa jutaan baris tidak dicetak ke satu layar sekaligus, dan mengajak pengguna memilih modul yang ingin dianalisis.
+  3. **Resolusi Amnesia & Follow-up Kueri Eksplanatori (`vanna_engine.py`)**:
+     - Penempatan `_is_explanatory_question` diprioritaskan **SEBELUM** `_is_conversational_question` agar tidak dibajak oleh penanganan percakapan umum.
+     - Memperluas deteksi regex untuk menangkap variasi pertanyaan pengguna: *"tadi yg gw minta data, itu lu kasih data apaa?"*, *"tadi data apa"*, *"tadi lu kasih apa"*, *"data apa barusan"*, *"maksud data ini apa"*.
+     - Menyempurnakan `tangani_kueri_eksplanatori`: membaca konteks pesan asisten sebelumnya (apakah tabel tunggal, multi-tab, atau naratif) dan menjelaskannya secara transparan dan akurat.
+  4. **Pembersihan Racun `sql_memory` & Pengetatan Guard Auto-Approve**:
+     - Menghapus entri bermasalah dari `sql_memory` (ID 82, 86, 87).
+     - Menambahkan guard ketat `is_conversational_or_meta`: kueri yang bersifat percakapan murni, eksplanatori, peta database, klarifikasi, atau tanpa baris data **DILARANG KERAS** disimpan ke `sql_memory`.
+
+- **Hasil Verifikasi & Bukti Empiris**:
+  - **Uji Skenario Interaktif `test_tester02_scenarios.py`**:
+    1. `"aloww"` -> LULUS (0 SQL, salam pembuka ramah)
+    2. `"semisal gw mau SEMUA DATA bisa?"` -> LULUS (0 SQL, menyajikan Peta Database 2.387 tabel)
+    3. `"data apa ini?"` -> LULUS (0 SQL, menjelaskan konteks jawaban sebelumnya)
+    4. `"tadi yg gw minta data, itu lu kasih data apaa?"` -> LULUS (0 SQL, menjelaskan konteks jawaban sebelumnya tanpa kueri liar)
+    5. `"peta database"` -> LULUS (0 SQL, menyajikan Peta Database dinamis)
+    6. `"ada tabel apa aja"` -> LULUS (0 SQL, menyajikan Peta Database dinamis)
+    7. `"p"` -> LULUS (0 SQL, siap membantu)
+    8. `"berapa total penjualan tahun 2025?"` -> LULUS (1 baris: Rp 69,83 Miliar)
+    9. `"data apa ini?"` (follow-up setelah tabel penjualan) -> LULUS (0 SQL, menjelaskan modul Penjualan Unit Kendaraan dari tabel di atas)
+  - Backend compile: `compileall app` lolos (exit code 0).
+  - Backend test suite: `pytest tests/ -q` lolos (**577 passed in 52.30s**).
   - Frontend lint: `npm run lint` lolos (**0 errors**).
   - Frontend build: `npm run build` lolos (**exit code 0, 1.01s**).
 

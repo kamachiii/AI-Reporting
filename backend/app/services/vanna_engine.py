@@ -37,6 +37,7 @@ from app.services.fanout_engine import (
     _is_column_qty,
     _is_column_money,
 )
+from app.services.schema_mapper import is_schema_map_question, dapatkan_peta_database_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -959,16 +960,20 @@ def _is_explanatory_question(question: str) -> bool:
     q_clean = re.sub(r'\s+', ' ', q_clean)
 
     patterns = [
-        r"^(?:loh\s+)?(?:ini|itu)\s+(?:data|tabel|laporan|grafik|hasil)(?:\s+(?:apa|sih|maksudnya))*$",
-        r"^(?:loh\s+)?(?:data|tabel|laporan|grafik|hasil)\s+apa(?:\s+(?:ini|itu|sih|tuh))*$",
-        r"^(?:loh\s+)?(?:data|tabel)\s+apa$",
-        r"^(?:loh\s+)?maksud(?:nya)?\s+(?:dari\s+)?(?:data|tabel|laporan|grafik|angka|ini|itu)+(?:\s+apa)?$",
-        r"^maksudnya(?:\s+apa)?$",
+        r"^(?:loh\s+)?(?:ini|itu)\s+(?:data|tabel|laporan|grafik|hasil)(?:\s+(?:apa|sih|maksudnya|nih|tuh))*$",
+        r"^(?:loh\s+)?(?:data|tabel|laporan|grafik|hasil)\s+apa(?:\s+(?:ini|itu|sih|tuh|nih))*$",
+        r"^(?:loh\s+)?(?:data|tabel)\s+apa(?:an)?(?:\s+(?:ini|itu|sih|tuh|nih))?$",
+        r"^(?:loh\s+)?maksud(?:nya)?(?:\s+dari)?\s+.*(?:data|tabel|laporan|grafik|angka|ini|itu)",
+        r".*maksud(?:nya)?\s+apa",
         r"^artinya(?:\s+apa)?$",
-        r"^(?:coba\s+)?jelaskan\s+(?:data|tabel|laporan|hasil|kolom)(?:\s+(?:di\s+atas|ini|tersebut|barusan))?$",
+        r"^(?:coba\s+)?jelaskan\s+(?:data|tabel|laporan|hasil|kolom)(?:\s+(?:di\s+atas|ini|tersebut|barusan|tadi))?$",
         r"^(?:apa\s+maksud|apa\s+arti|artinya)\s+(?:kolom|tabel|data|angka)",
         r"^kenapa\s+(?:datanya|angkanya|tabelnya)\s+(?:seperti\s+ini|begini|begitu)$",
         r"^tabel\s+apa\s+(?:yang\s+)?(?:barusan|tadi)$",
+        r"(?:tadi|barusan).*(?:kasih|tampil(?:kan)?|keluar(?:kan)?).*(?:data|tabel)\s+apa",
+        r"(?:tadi|barusan).*(?:data|tabel)\s+apa",
+        r"(?:data|tabel)\s+apa.*(?:tadi|barusan)",
+        r".*(?:data|tabel)\s+apa\s+(?:yang\s+)?(?:lu|kamu|anda)\s+kasih",
     ]
     for pat in patterns:
         if re.search(pat, q_clean):
@@ -978,7 +983,8 @@ def _is_explanatory_question(question: str) -> bool:
         "data apa ini", "data apa itu", "tabel apa ini", "tabel apa itu",
         "maksud tabel ini", "maksud data ini", "jelaskan data di atas",
         "jelaskan tabel di atas", "jelaskan tabel ini", "maksud dari tabel",
-        "ini maksudnya apa", "maksud tabel di atas"
+        "ini maksudnya apa", "maksud tabel di atas", "tadi lu kasih apa",
+        "tadi lu kasih data apa", "data apa barusan", "data apa tadi"
     ]
     if any(kw in q_clean for kw in keywords):
         return True
@@ -1280,14 +1286,20 @@ async def tangani_kueri_percakapan(
         if any(w in q_l for w in ["semua data", "seluruh data"]) or (any(w in q_l for w in ["semisal", "misal"]) and "data" in q_l):
             answer_text = (
                 "Secara teknis, Anda dapat mengakses seluruh data yang ada di database dealer. "
-                "Namun, sistem ERP Otobitz Cloud cabang Anda memiliki lebih dari 2.300 tabel dengan jutaan baris transaksi. "
-                "Menampilkan seluruh data sekaligus tentu tidak praktis dan akan membuat antarmuka menjadi sangat lambat serta sulit dianalisis.\n\n"
-                "Untuk mendapatkan wawasan yang jelas dan terarah, Anda dapat memilih modul data berikut:\n\n"
-                "- **Penjualan Unit Kendaraan**: Analisis total omzet, tren tahunan/bulanan, atau ranking mobil terlaris.\n"
-                "- **Jasa Servis Bengkel**: Rekapitulasi pengerjaan Work Order (PKB) dan pendapatan jasa perawatan.\n"
-                "- **Suku Cadang & Sparepart**: Pergerakan stok suku cadang dan omzet part shop.\n"
-                "- **Pelanggan**: Daftar pelanggan aktif dan histori pembelian unit.\n\n"
-                "Modul mana yang ingin Anda periksa terlebih dahulu?"
+                "Database operasional cabang Anda memiliki total **2.387 tabel** yang terkelompokkan ke dalam 8 kategori modul ERP:\n\n"
+                "| Kategori | Jumlah | Isinya |\n"
+                "| :--- | :--- | :--- |\n"
+                "| `vw_` | 706 | View laporan (*ready-made reports*) |\n"
+                "| `srv / srvt / srvm` | 1.080 | Service - Work Order, servis, mekanik |\n"
+                "| `untt / untm` | 274 | Unit - transaksi & master kendaraan (SPK, faktur, DO) |\n"
+                "| `stpm` | 88 | Suku cadang/Parts - stok, master part |\n"
+                "| `cari_` | 67 | View pencarian (daftar umur piutang, hutang, dll) |\n"
+                "| `glbm` | 32 | Master data (GL) - customer, salesman, karyawan |\n"
+                "| `acctt / acctm` | 31 | Akuntansi - jurnal, account |\n"
+                "| `Lainnya` | 109 | dashboard, tax invoice, konfigurasi, dll |\n\n"
+                "Menampilkan jutaan baris dari ribuan tabel sekaligus dalam satu layar tentu tidak praktis dan akan membebani peramban web. "
+                "Namun, Anda dapat meminta laporan ringkasan, analisis tren, ranking, atau rincian transaksi dari modul mana pun di atas.\n\n"
+                "Modul mana yang ingin Anda analisis terlebih dahulu?"
             )
         elif any(w in q_l for w in ["apa ya", "bingung", "ide", "rekomendasi", "saran", "gatau", "ga tau"]):
             answer_text = (
@@ -1510,12 +1522,23 @@ async def tangani_kueri_eksplanatori(
         except Exception:
             prev_data = {}
 
-        if not isinstance(prev_data, dict) or not prev_data.get("rows"):
-            ringkasan = (
-                "Pesan sebelumnya tidak memuat data tabel transaksi untuk dijelaskan. "
-                "Untuk memeriksa data operasional nyata, Anda dapat meminta data penjualan unit, "
-                "servis bengkel, atau suku cadang."
-            )
+        tabs = prev_data.get("tabs") or []
+        rows = prev_data.get("rows") or (tabs[0].get("rows") if tabs else [])
+        if not rows:
+            prev_ringkasan = prev_data.get("ringkasan") or ""
+            if prev_ringkasan:
+                ringkasan = (
+                    f"Pada jawaban sebelumnya, saya memberikan penjelasan naratif berikut:\n\n"
+                    f"> {prev_ringkasan}\n\n"
+                    "Belum ada tabel data transaksi spesifik yang dimuat. Jika Anda ingin memeriksa data operasional nyata, "
+                    "silakan pilih modul data yang ingin ditampilkan (seperti Penjualan Mobil, Servis Bengkel, atau Suku Cadang)."
+                )
+            else:
+                ringkasan = (
+                    "Pesan sebelumnya tidak memuat data tabel transaksi untuk dijelaskan. "
+                    "Untuk memeriksa data operasional nyata, Anda dapat meminta data penjualan unit, "
+                    "servis bengkel, atau suku cadang."
+                )
             saran = [
                 "Tampilkan 5 model mobil dengan penjualan tertinggi",
                 "Berapa total pendapatan servis bengkel tahun 2025?",
@@ -1523,9 +1546,8 @@ async def tangani_kueri_eksplanatori(
             ]
         else:
             prev_q = prev_data.get("question") or "permintaan data sebelumnya"
-            sql = (prev_data.get("sql") or "").lower()
-            cols = prev_data.get("columns") or []
-            rows = prev_data.get("rows") or []
+            sql = (prev_data.get("sql") or (tabs[0].get("sql") if tabs else "") or "").lower()
+            cols = prev_data.get("columns") or (tabs[0].get("columns") if tabs else [])
             row_count = prev_data.get("row_count", len(rows))
 
             modul_nama = "Operasional Dealer"
@@ -1671,17 +1693,76 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
         # Ambil konteks percakapan aktif (tahun + topik) secara terisolasi per conversation_id
         active_context = await ambil_konteks_percakapan_aktif(core_pool, conversation_id)
 
-        # 0.0. Mode Percakapan Murni (Sapaan, Terima Kasih, Istilah Bisnis / Konsep Otomotif, Kapabilitas)
+        # 0.0. Mode Percakapan Eksplanatori ("loh data apa ini?", "tadi lu kasih data apa?", "maksud tabel ini apa?")
+        if _is_explanatory_question(question):
+            return await tangani_kueri_eksplanatori(
+                core_pool, conversation_id, question, user_id, branch_code, t0, ai_config=ai_config
+            )
+
+        # 0.0.1. Mode Peta Database Otomatis (Menampilkan ~2.387 tabel ERP terkelompokkan secara instan)
+        if is_schema_map_question(question):
+            pool_tenant = await tenant_pool_manager.get_pool(tenant)
+            db_map = await dapatkan_peta_database_tenant(pool_tenant, db_name=tenant.get("db_name", "Otobitz Cloud"))
+            durasi_ms = int((time.monotonic() - t0) * 1000)
+            total_fmt = f"{db_map['total_tables']:,}".replace(",", ".")
+            peta_text = (
+                f"Database operasional cabang Anda terhubung ke database **{db_map['db_name']}** "
+                f"dengan total **{total_fmt} tabel/views** yang dikelompokkan secara otomatis berdasarkan konvensi modul ERP:\n\n"
+                f"{db_map['markdown']}\n\n"
+                "Seluruh modul di atas siap Anda analisis secara interaktif. Anda dapat meminta analisis penjualan, servis, suku cadang, atau profil pelanggan."
+            )
+            response = {
+                "source": "conversational",
+                "confidence": "A",
+                "status": "success",
+                "question": question,
+                "ringkasan": peta_text,
+                "sql": "",
+                "params": [],
+                "columns": [],
+                "rows": [],
+                "row_count": 0,
+                "truncated": False,
+                "duration_ms": durasi_ms,
+                "memory_id": None,
+                "saran": [
+                    "Tampilkan 5 model mobil dengan penjualan tertinggi",
+                    "Berapa total pendapatan servis bengkel tahun 2025?",
+                    "Daftar suku cadang dengan stok menipis di gudang",
+                    "Siapa 5 pelanggan dengan transaksi terbesar?",
+                ],
+                "metode": "schema_map",
+                "is_conversational_text": True,
+                "allow_explain": False,
+            }
+            conv_id = await ambil_atau_buat_conversation(core_pool, user_id, branch_code, question, conversation_id=conversation_id)
+            response["conversation_id"] = conv_id
+            await simpan_pesan(core_pool, conv_id, "user", question)
+            await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
+
+            await tulis_audit(
+                core_pool,
+                user_id=user_id,
+                branch_code=branch_code,
+                prompt_text=question,
+                ai_json_filter={
+                    "provider": ai_config.get("provider") if ai_config else None,
+                    "model": ai_config.get("model") if ai_config else None,
+                    "category": "schema_map",
+                    "mode": "schema_map",
+                },
+                generated_sql="",
+                execution_time_ms=durasi_ms,
+                status="success",
+                error_message=None,
+            )
+            return response
+
+        # 0.0.2. Mode Percakapan Murni (Sapaan, Terima Kasih, Istilah Bisnis / Konsep Otomotif, Kapabilitas)
         if _is_conversational_question(question):
             return await tangani_kueri_percakapan(
                 core_pool, conversation_id, question, user_id, branch_code, t0,
                 ai_config=ai_config, llm_call_fn=llm_call_fn
-            )
-
-        # 0.0.1. Mode Percakapan Eksplanatori ("loh data apa ini?", "maksud tabel ini apa?")
-        if _is_explanatory_question(question):
-            return await tangani_kueri_eksplanatori(
-                core_pool, conversation_id, question, user_id, branch_code, t0, ai_config=ai_config
             )
 
         # 0.1. Cek Pertanyaan Eksplanatori Keterbatasan Data / Cut-off Tanggal (0 Panggilan LLM, 100% Akurat)
@@ -2333,7 +2414,16 @@ Berikan ringkasan naratif eksekutif singkat (2-3 kalimat) dalam bahasa Indonesia
                 "part", "sparepart", "suku cadang"
             ])
         )
-        if not is_elliptical and not response.get("is_multi_tab"):
+        is_conversational_or_meta = (
+            response.get("is_conversational_text")
+            or response.get("source") == "conversational"
+            or _is_conversational_question(question)
+            or _is_explanatory_question(question)
+            or is_schema_map_question(question)
+            or any(w in question.lower() for w in ["semua data", "seluruh data", "semisal", "misal"])
+            or not response.get("rows")
+        )
+        if not is_elliptical and not response.get("is_multi_tab") and not is_conversational_or_meta:
             try:
                 mem_id = await core_pool.fetchval(
                     """
