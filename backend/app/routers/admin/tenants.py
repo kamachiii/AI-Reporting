@@ -163,22 +163,34 @@ async def update_tenant(branch_code: str, payload: TenantCreate, user: dict = De
     """Ganti database yang ditunjuk cabang."""
     try:
         pool = await get_core_pool()
+        new_conn = payload.db_connection_id
+        conn_ok = await pool.fetchval(
+            "SELECT is_active FROM db_connections WHERE id = $1", new_conn)
+        if conn_ok is None:
+            raise HTTPException(status_code=404,
+                detail=f"Database dengan ID {new_conn} tidak ada di registry.")
+        if not conn_ok:
+            raise HTTPException(status_code=400,
+                detail="Database tujuan sedang dinonaktifkan di registry.")
+
         existing = await pool.fetchrow(
             "SELECT db_connection_id FROM tenants WHERE branch_code = $1", branch_code)
         if not existing:
-            raise HTTPException(status_code=404, detail="Tenant tidak ditemukan")
+            # Upsert fallback: jika relasi tenant belum ada, hubungkan langsung
+            await pool.execute("""
+                INSERT INTO tenants (branch_code, db_connection_id, schema_config_json, is_active, updated_at)
+                VALUES ($1, $2, '{}'::jsonb, TRUE, CURRENT_TIMESTAMP)
+            """, branch_code, new_conn)
+            try:
+                await asyncio.wait_for(_introspect_dan_simpan(pool, branch_code), timeout=4.0)
+            except asyncio.TimeoutError:
+                logger.info("Auto-introspeksi cabang %s memakan waktu >4 detik, dilanjutkan di background task...", branch_code)
+                asyncio.create_task(_introspect_dan_simpan(pool, branch_code))
+            except Exception as e_intro:
+                logger.warning("Auto-introspeksi cabang %s gagal: %s", branch_code, e_intro)
+            return {"message": f"Database berhasil dihubungkan ke cabang {branch_code}"}
 
-        new_conn = payload.db_connection_id
         if new_conn != existing["db_connection_id"]:
-            conn_ok = await pool.fetchval(
-                "SELECT is_active FROM db_connections WHERE id = $1", new_conn)
-            if conn_ok is None:
-                raise HTTPException(status_code=404,
-                    detail=f"Database dengan ID {new_conn} tidak ada di registry.")
-            if not conn_ok:
-                raise HTTPException(status_code=400,
-                    detail="Database tujuan sedang dinonaktifkan di registry.")
-
             await pool.execute("""
                 UPDATE tenants SET db_connection_id = $1, updated_at = CURRENT_TIMESTAMP
                 WHERE branch_code = $2

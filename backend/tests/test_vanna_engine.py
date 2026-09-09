@@ -674,63 +674,61 @@ def test_zero_cross_session_bleed():
 
 
 @pytest.mark.integration
-def test_zero_cross_session_bleed_real_db():
+@pytest.mark.anyio
+async def test_zero_cross_session_bleed_real_db():
     """Integrasi Database Nyata: Membuktikan WHERE conversation_id = $1
     menjamin zero cross-session bleed secara nyata di PostgreSQL.
     """
     import asyncio
     import pytest
-    from app.core.database import get_core_pool, close_core_pool
+    from app.core.database import get_core_pool
     from app.services.vanna_engine import ambil_konteks_percakapan_aktif, deteksi_topik_riwayat_percakapan
 
-    async def _run():
-        try:
-            pool = await get_core_pool()
-        except Exception:
-            pytest.skip("PostgreSQL Core Docker (port 5433) tidak aktif, lewati integrasi DB.")
-            return
+    try:
+        pool = await get_core_pool()
+    except Exception:
+        pytest.skip("PostgreSQL Core Docker (port 5433) tidak aktif, lewati integrasi DB.")
+        return
 
-        # 1. Buat 2 sesi percakapan nyata di database core
-        c1 = await pool.fetchval(
-            "INSERT INTO conversations (user_id, branch_code, title) VALUES (1, 'TST_01', 'Test Sesi Servis Integrasi') RETURNING id"
+    # 1. Buat 2 sesi percakapan nyata di database core
+    c1 = await pool.fetchval(
+        "INSERT INTO conversations (user_id, branch_code, title) VALUES (1, 'TST_01', 'Test Sesi Servis Integrasi') RETURNING id"
+    )
+    c2 = await pool.fetchval(
+        "INSERT INTO conversations (user_id, branch_code, title) VALUES (1, 'TST_01', 'Test Sesi Penjualan Integrasi') RETURNING id"
+    )
+
+    try:
+        # 2. Masukkan pesan terpisah
+        await pool.execute(
+            "INSERT INTO messages (conversation_id, role, content) VALUES ($1, 'user', 'Berapa total servis dan wo bengkel tahun 2023?')",
+            c1
         )
-        c2 = await pool.fetchval(
-            "INSERT INTO conversations (user_id, branch_code, title) VALUES (1, 'TST_01', 'Test Sesi Penjualan Integrasi') RETURNING id"
+        await pool.execute(
+            "INSERT INTO messages (conversation_id, role, content) VALUES ($1, 'user', 'Berapa omzet penjualan mobil tahun 2024?')",
+            c2
         )
 
-        try:
-            # 2. Masukkan pesan terpisah
-            await pool.execute(
-                "INSERT INTO messages (conversation_id, role, content) VALUES ($1, 'user', 'Berapa total servis dan wo bengkel tahun 2023?')",
-                c1
-            )
-            await pool.execute(
-                "INSERT INTO messages (conversation_id, role, content) VALUES ($1, 'user', 'Berapa omzet penjualan mobil tahun 2024?')",
-                c2
-            )
+        # 3. Eksekusi paralel membaca dari PostgreSQL nyata
+        r1_ctx, r2_ctx, r1_topik, r2_topik = await asyncio.gather(
+            ambil_konteks_percakapan_aktif(pool, c1),
+            ambil_konteks_percakapan_aktif(pool, c2),
+            deteksi_topik_riwayat_percakapan(pool, c1),
+            deteksi_topik_riwayat_percakapan(pool, c2),
+        )
 
-            # 3. Eksekusi paralel membaca dari PostgreSQL nyata
-            r1_ctx, r2_ctx, r1_topik, r2_topik = await asyncio.gather(
-                ambil_konteks_percakapan_aktif(pool, c1),
-                ambil_konteks_percakapan_aktif(pool, c2),
-                deteksi_topik_riwayat_percakapan(pool, c1),
-                deteksi_topik_riwayat_percakapan(pool, c2),
-            )
+        # 4. Verifikasi isolasi mutlak
+        assert r1_topik == "servis"
+        assert r2_topik == "penjualan"
+        assert r1_ctx["topic"] == "servis"
+        assert r2_ctx["topic"] == "penjualan"
+        assert r1_ctx["year"] == 2023
+        assert r2_ctx["year"] == 2024
 
-            # 4. Verifikasi isolasi mutlak
-            assert r1_topik == "servis"
-            assert r2_topik == "penjualan"
-            assert r1_ctx["topic"] == "servis"
-            assert r2_ctx["topic"] == "penjualan"
-            assert r1_ctx["year"] == 2023
-            assert r2_ctx["year"] == 2024
-
-        finally:
-            # 5. Pembersihan data uji (cleanup)
-            await pool.execute("DELETE FROM messages WHERE conversation_id IN ($1, $2)", c1, c2)
-            await pool.execute("DELETE FROM conversations WHERE id IN ($1, $2)", c1, c2)
-
-    asyncio.run(_run())
+    finally:
+        # 5. Pembersihan data uji (cleanup)
+        await pool.execute("DELETE FROM messages WHERE conversation_id IN ($1, $2)", c1, c2)
+        await pool.execute("DELETE FROM conversations WHERE id IN ($1, $2)", c1, c2)
 
 
 

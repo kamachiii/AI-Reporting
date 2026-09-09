@@ -11,7 +11,12 @@ redis_client = None
 
 async def get_core_pool():
     global core_pool
-    if core_pool is None:
+    is_stale = False
+    if core_pool is not None:
+        loop = getattr(core_pool, "_loop", None)
+        if getattr(core_pool, "_closed", False) or (loop and loop.is_closed()):
+            is_stale = True
+    if core_pool is None or is_stale:
         dsn = f"postgresql://{settings.core_db_user}:{settings.core_db_password}@{settings.core_db_host}:{settings.core_db_port}/{settings.core_db_name}"
         try:
             core_pool = await asyncpg.create_pool(dsn, min_size=1, max_size=10)

@@ -234,6 +234,8 @@ export default function TenantsTab() {
     setConfirmState({
       title: 'Putuskan Koneksi?',
       message: `Koneksi antara cabang ${t.branch_code} dan database "${t.db_name_label}" akan diputus. Data tidak hilang — bisa dihubungkan lagi kapan pun.`,
+      confirmText: 'Putuskan',
+      confirmVariant: 'danger',
       onConfirm: async () => {
         setProcessingKey(t.branch_code);
         try {
@@ -404,7 +406,11 @@ export default function TenantsTab() {
           isOpen
           title={confirmState.title}
           message={confirmState.message}
+          confirmText={confirmState.confirmText || 'Hapus'}
+          confirmVariant={confirmState.confirmVariant || 'danger'}
+          isLoading={!!processingKey}
           onConfirm={confirmState.onConfirm}
+          onClose={() => setConfirmState(null)}
           onCancel={() => setConfirmState(null)}
         />
       )}

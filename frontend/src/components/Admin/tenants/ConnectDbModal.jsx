@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
-  X, Loader2, Database, Check, Plus, Server
+  X, Loader2, Database, Check, Plus, Server, Unlink
 } from 'lucide-react';
 import { api } from '../../../services/api';
 import { notify } from '../../../utils/notification';
@@ -17,7 +17,9 @@ import DbConnectionModal from './DbConnectionModal';
  */
 const PAGE_SIZE = 6;
 
-export default function ConnectDbModal({ isOpen, onClose, branchCode, branches = null, currentConnId, onSaved }) {
+export default function ConnectDbModal({
+  isOpen, onClose, branchCode, branches = null, currentConnId, onSaved, onDisconnect
+}) {
   const pickBranch = !branchCode && Array.isArray(branches);
   const [selectedBranch, setSelectedBranch] = useState('');
   const activeBranch = branchCode || selectedBranch;
@@ -194,19 +196,33 @@ export default function ConnectDbModal({ isOpen, onClose, branchCode, branches =
             </>
           )}
 
-          {/* FOOTER: tambah + batal + hubungkan */}
-          <div className="flex items-center justify-between mt-5 pt-4 border-t border-hairline">
-            <button type="button" onClick={() => setShowAddModal(true)}
-              className="flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary-active transition-colors">
-              <Plus size={14} /> Tambah Database
-            </button>
+          {/* FOOTER: tambah / putuskan + batal + hubungkan */}
+          <div className="flex items-center justify-between mt-5 pt-4 border-t border-hairline gap-2 flex-wrap">
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={() => setShowAddModal(true)}
+                className="flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary-active transition-colors">
+                <Plus size={14} /> Tambah Database
+              </button>
+              {isChange && onDisconnect && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onDisconnect(activeBranch);
+                  }}
+                  className="flex items-center gap-1.5 text-xs font-medium text-error hover:opacity-80 transition-colors cursor-pointer"
+                >
+                  <Unlink size={13} /> Putuskan Koneksi
+                </button>
+              )}
+            </div>
             <div className="flex gap-2">
               <button type="button" onClick={onClose}
                 className="px-4 py-2 border border-hairline rounded-md text-sm hover:bg-surface-soft">Batal</button>
               <button type="button" onClick={handleConnect} disabled={!activeBranch || !selectedId || saving}
                 className="px-4 py-2 bg-primary text-white rounded-md text-sm hover:bg-primary-active disabled:opacity-50 flex items-center gap-2">
                 {saving && <Loader2 size={14} className="animate-spin" />}
-                Hubungkan
+                {isChange ? 'Simpan Perubahan' : 'Hubungkan'}
               </button>
             </div>
           </div>

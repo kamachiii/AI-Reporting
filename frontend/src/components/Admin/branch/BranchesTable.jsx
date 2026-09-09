@@ -2,7 +2,7 @@ import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import {
   CheckCircle, XCircle, Loader2, Trash2, Pencil,
-  Link, MoreVertical, Database, Wifi, Eye, Power
+  Link, MoreVertical, Database, Wifi, Eye, Power, Unlink
 } from 'lucide-react';
 import { notify } from '../../../utils/notification';
 import EmptyState from '../common/EmptyState';
@@ -21,7 +21,7 @@ export default function BranchesTable({
   page, totalPages, onPageChange, pageSize,
   sortConfig, onSort,
   processingCode, tableContainerRef,
-  onTestConnection, onConnectDb,
+  onTestConnection, onConnectDb, onDisconnectDb,
   onViewDetail, onEditBranch, onDeleteBranch,
   onToggleStatusRequest,
   dropdownOpen, setDropdownOpen, dropdownPos, setDropdownPos,
@@ -138,12 +138,23 @@ export default function BranchesTable({
                               <button
                                 onClick={() => onConnectDb(b)}
                                 disabled={isProcessing}
-                                className="p-1.5 text-muted hover:text-primary hover:bg-surface-soft rounded-md transition-colors disabled:opacity-50"
+                                className="p-1.5 text-muted hover:text-primary hover:bg-surface-soft rounded-md transition-colors disabled:opacity-50 cursor-pointer"
                                 title="Ganti Database"
                                 aria-label={`Ganti database ${b.code}`}
                               >
                                 <Database size={16} />
                               </button>
+                              {onDisconnectDb && (
+                                <button
+                                  onClick={() => onDisconnectDb(b)}
+                                  disabled={isProcessing}
+                                  className="p-1.5 text-muted hover:text-error hover:bg-error/5 rounded-md transition-colors disabled:opacity-50 cursor-pointer"
+                                  title="Putuskan Koneksi Database"
+                                  aria-label={`Putuskan koneksi database ${b.code}`}
+                                >
+                                  <Unlink size={16} />
+                                </button>
+                              )}
                             </>
                           )}
 
@@ -159,7 +170,7 @@ export default function BranchesTable({
                                 });
                                 toggleDropdown();
                               }}
-                              className="dropdown-trigger p-1.5 text-muted hover:text-ink hover:bg-surface-soft rounded-md transition-colors"
+                              className="dropdown-trigger p-1.5 text-muted hover:text-ink hover:bg-surface-soft rounded-md transition-colors cursor-pointer"
                               title="Aksi Lainnya"
                               aria-label={`Aksi lainnya untuk ${b.code}`}
                             >
@@ -177,7 +188,7 @@ export default function BranchesTable({
                                     setDropdownOpen(null);
                                     setTimeout(() => onViewDetail(b), 50);
                                   }}
-                                  className="flex items-center gap-2 w-full px-4 py-2 text-xs text-ink hover:bg-surface-soft transition-colors text-left"
+                                  className="flex items-center gap-2 w-full px-4 py-2 text-xs text-ink hover:bg-surface-soft transition-colors text-left cursor-pointer"
                                 >
                                   <Eye size={14} /> Lihat Detail
                                 </button>
@@ -188,7 +199,7 @@ export default function BranchesTable({
                                     setDropdownOpen(null);
                                     setTimeout(() => onEditBranch(b), 50);
                                   }}
-                                  className="flex items-center gap-2 w-full px-4 py-2 text-xs text-ink hover:bg-surface-soft transition-colors text-left"
+                                  className="flex items-center gap-2 w-full px-4 py-2 text-xs text-ink hover:bg-surface-soft transition-colors text-left cursor-pointer"
                                 >
                                   <Pencil size={14} /> Edit Cabang
                                 </button>
@@ -199,7 +210,7 @@ export default function BranchesTable({
                                     setDropdownOpen(null);
                                     setTimeout(() => onToggleStatusRequest(b), 50);
                                   }}
-                                  className="flex items-center gap-2 w-full px-4 py-2 text-xs hover:bg-surface-soft transition-colors text-left"
+                                  className="flex items-center gap-2 w-full px-4 py-2 text-xs hover:bg-surface-soft transition-colors text-left cursor-pointer"
                                 >
                                   <Power size={14} className={b.is_active ? 'text-error' : 'text-success'} />
                                   {b.is_active
@@ -207,13 +218,26 @@ export default function BranchesTable({
                                     : <span className="text-success">Aktifkan Cabang…</span>}
                                 </button>
 
+                                {tenant && onDisconnectDb && (
+                                  <button
+                                    onMouseDown={(e) => {
+                                      e.preventDefault();
+                                      setDropdownOpen(null);
+                                      setTimeout(() => onDisconnectDb(b), 50);
+                                    }}
+                                    className="flex items-center gap-2 w-full px-4 py-2 text-xs text-error hover:bg-error/5 transition-colors text-left cursor-pointer"
+                                  >
+                                    <Unlink size={14} /> Putuskan Koneksi DB…
+                                  </button>
+                                )}
+
                                 <button
                                   onMouseDown={(e) => {
                                     e.preventDefault();
                                     setDropdownOpen(null);
                                     setTimeout(() => onDeleteBranch(b.code), 50);
                                   }}
-                                  className="flex items-center gap-2 w-full px-4 py-2 text-xs text-error hover:bg-error/5 transition-colors text-left"
+                                  className="flex items-center gap-2 w-full px-4 py-2 text-xs text-error hover:bg-error/5 transition-colors text-left cursor-pointer"
                                 >
                                   <Trash2 size={14} /> Hapus Cabang…
                                 </button>

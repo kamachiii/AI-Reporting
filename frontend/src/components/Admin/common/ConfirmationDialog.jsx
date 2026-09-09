@@ -14,11 +14,16 @@ import { AlertTriangle, Loader2 } from 'lucide-react';
 export default function ConfirmationDialog({
   isOpen,
   onClose,
+  onCancel,
   onConfirm,
   title,
   message,
+  confirmText = 'Hapus',
+  confirmVariant = 'danger',
   isLoading = false,
 }) {
+  const handleClose = onClose || onCancel;
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -28,7 +33,7 @@ export default function ConfirmationDialog({
           exit={{ opacity: 0 }}
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4"
           onClick={(e) => {
-            if (e.target === e.currentTarget && !isLoading) onClose();
+            if (e.target === e.currentTarget && !isLoading && handleClose) handleClose();
           }}
         >
           <motion.div
@@ -48,7 +53,7 @@ export default function ConfirmationDialog({
             <div className="flex justify-end gap-2">
               <button
                 type="button"
-                onClick={onClose}
+                onClick={handleClose}
                 disabled={isLoading}
                 className="px-4 py-2 border border-hairline rounded-md text-sm hover:bg-surface-soft disabled:opacity-50 transition-colors"
               >
@@ -58,10 +63,16 @@ export default function ConfirmationDialog({
                 type="button"
                 onClick={onConfirm}
                 disabled={isLoading}
-                className="flex items-center gap-2 px-4 py-2 bg-error text-white rounded-md text-sm hover:opacity-90 disabled:opacity-60 transition-opacity"
+                className={`flex items-center gap-2 px-4 py-2 text-white rounded-md text-sm hover:opacity-90 disabled:opacity-60 transition-opacity ${
+                  confirmVariant === 'warning'
+                    ? 'bg-amber-600'
+                    : confirmVariant === 'primary'
+                    ? 'bg-primary'
+                    : 'bg-error'
+                }`}
               >
                 {isLoading && <Loader2 size={14} className="animate-spin" />}
-                Hapus
+                {confirmText}
               </button>
             </div>
           </motion.div>

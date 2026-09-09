@@ -232,8 +232,32 @@ export default function CompanyBranchesTab() {
     }
   };
 
+  const handleDisconnectTenant = (branch) => {
+    const code = typeof branch === 'string' ? branch : branch.code;
+    const branchName = typeof branch === 'object' ? branch.name : (data.branches?.find(b => b.code === code)?.name || code);
+    const dbLabel = tenantData[code]?.db_name_label || 'database';
 
-
+    setConfirmState({
+      title: 'Putuskan Koneksi Database?',
+      message: `Koneksi antara cabang ${code} (${branchName}) dan "${dbLabel}" akan diputus. Cabang tidak lagi terhubung ke database ini. Tindakan ini aman dan database dapat dihubungkan kembali kapan saja.`,
+      confirmText: 'Putuskan',
+      confirmVariant: 'danger',
+      onConfirm: async () => {
+        setProcessingCode(code);
+        try {
+          await api.deleteTenant(code);
+          notify.success(`Koneksi database cabang ${code} berhasil diputus`);
+          setConnectDbBranch(null);
+          await fetchData();
+        } catch (e) {
+          notify.error(e.response?.data?.detail || 'Gagal memutuskan koneksi database');
+        } finally {
+          setProcessingCode(null);
+          setConfirmState(null);
+        }
+      },
+    });
+  };
 
   const handleToggleBranchStatus = (b) => {
     setConfirmState({
@@ -344,6 +368,7 @@ export default function CompanyBranchesTab() {
           tableContainerRef={tableContainerRef}
           onTestConnection={handleTestTenant}
           onConnectDb={(b) => setConnectDbBranch(b.code)}
+          onDisconnectDb={handleDisconnectTenant}
           onViewDetail={(b) => setDetailBranch(b)}
           onToggleStatusRequest={handleToggleBranchStatus}
           dbConnectionsById={dbConnectionsById}
@@ -388,6 +413,7 @@ export default function CompanyBranchesTab() {
           branchCode={connectDbBranch}
           currentConnId={tenantData[connectDbBranch]?.db_connection_id}
           onSaved={handleSaveConnectDb}
+          onDisconnect={handleDisconnectTenant}
         />
       )}
 
@@ -420,6 +446,8 @@ export default function CompanyBranchesTab() {
           onConfirm={confirmState.onConfirm}
           title={confirmState.title}
           message={confirmState.message}
+          confirmText={confirmState.confirmText || 'Hapus'}
+          confirmVariant={confirmState.confirmVariant || 'danger'}
           isLoading={!!processingCode}
         />
       )}
