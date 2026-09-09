@@ -661,6 +661,7 @@ export default function AssistantAnswerCard({
   const [tablePage, setTablePage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [isCopied, setIsCopied] = useState(false);
+  const [showExportExcel] = useState(false); // Fitur ekspor Excel di-hold sementara sesuai arahan user
 
   // Filter hanya tab yang memiliki data nyata (>0 baris)
   const validTabs = useMemo(() => {
@@ -1207,21 +1208,23 @@ export default function AssistantAnswerCard({
                 </div>
               )}
 
-              {/* Tombol Unduh Excel Format Akuntansi */}
-              <button
-                type="button"
-                onClick={handleExportExcel}
-                disabled={isExporting}
-                title="Unduh Spreadsheet Excel (.xlsx) Lengkap dengan Format Akuntansi & Grafik Asli"
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-canvas hover:bg-surface-soft text-ink border border-hairline transition-colors shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-50"
-              >
-                {isExporting ? (
-                  <Loader2 size={12} className="animate-spin text-primary" />
-                ) : (
-                  <FileSpreadsheet size={13} className="text-primary" />
-                )}
-                <span>{isExporting ? 'Mengekspor...' : 'Unduh Excel'}</span>
-              </button>
+              {/* Tombol Unduh Excel Format Akuntansi (Fitur di-hold sementara sesuai arahan user) */}
+              {showExportExcel && (
+                <button
+                  type="button"
+                  onClick={handleExportExcel}
+                  disabled={isExporting}
+                  title="Unduh Spreadsheet Excel (.xlsx) Lengkap dengan Format Akuntansi & Grafik Asli"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-canvas hover:bg-surface-soft text-ink border border-hairline transition-colors shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-50"
+                >
+                  {isExporting ? (
+                    <Loader2 size={12} className="animate-spin text-primary" />
+                  ) : (
+                    <FileSpreadsheet size={13} className="text-primary" />
+                  )}
+                  <span>{isExporting ? 'Mengekspor...' : 'Unduh Excel'}</span>
+                </button>
+              )}
 
               {/* Tombol Salin Tabel ke Clipboard */}
               <button
