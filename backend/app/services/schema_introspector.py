@@ -117,16 +117,20 @@ async def introspect_schema(conn: asyncpg.Connection) -> dict:
                 "references_column": r["ref_column"],
             })
 
-    # sample rows: 2 baris per tabel, nilai JSON-safe
-    for t, info in tables.items():
-        try:
-            rows = await conn.fetch(f'SELECT * FROM "{t}" LIMIT {_SAMPLE_ROWS}')
-            info["sample_rows"] = [
-                {k: _json_safe(v) for k, v in dict(row).items()} for row in rows
-            ]
-        except Exception as e:
-            logger.warning(f"Sample rows tabel '{t}' gagal: {e}")
-            info["sample_rows"] = []
+    # sample rows: 2 baris per tabel, nilai JSON-safe.
+    # PENTING: Untuk skema besar (>50 tabel seperti ERP Otobitz 2.387 tabel),
+    # sampling ribuan tabel/views secara sekuensial menghabiskan waktu menit di jaringan WAN/remote
+    # dan tidak dibutuhkan oleh query planner. Hanya ambil sample rows bila total tabel <= 50.
+    if len(tables) <= 50:
+        for t, info in tables.items():
+            try:
+                rows = await conn.fetch(f'SELECT * FROM "{t}" LIMIT {_SAMPLE_ROWS}', timeout=1.0)
+                info["sample_rows"] = [
+                    {k: _json_safe(v) for k, v in dict(row).items()} for row in rows
+                ]
+            except Exception as e:
+                logger.debug(f"Sample rows tabel '{t}' dilewati: {e}")
+                info["sample_rows"] = []
 
     return {
         "introspected_at": datetime.now(timezone.utc).isoformat(),

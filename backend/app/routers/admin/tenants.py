@@ -4,6 +4,7 @@ Model baru: tenants TIDAK menyimpan kredensial. Satu baris tenant
 = penunjuk satu cabang ke satu entri di db_connections.
 Satu cabang = satu database; satu database boleh dipakai banyak cabang.
 """
+import asyncio
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -130,7 +131,18 @@ async def create_tenant(payload: TenantCreate, user: dict = Depends(require_admi
             INSERT INTO tenants (branch_code, db_connection_id)
             VALUES ($1, $2)
         """, payload.branch_code, payload.db_connection_id)
-        n_tabel = await _introspect_dan_simpan(pool, payload.branch_code)
+
+        # Introspeksi skema: tunggu maksimal 4 detik agar respons HTTP segera kembali ke pengguna.
+        # Jika DB remote/WAN butuh waktu lebih lama, lanjutkan di background task tanpa membuat modal macet/loading terus.
+        n_tabel = None
+        try:
+            n_tabel = await asyncio.wait_for(_introspect_dan_simpan(pool, payload.branch_code), timeout=4.0)
+        except asyncio.TimeoutError:
+            logger.info("Auto-introspeksi cabang %s memakan waktu >4 detik, dilanjutkan di background task...", payload.branch_code)
+            asyncio.create_task(_introspect_dan_simpan(pool, payload.branch_code))
+        except Exception as e_intro:
+            logger.warning("Auto-introspeksi cabang %s gagal: %s", payload.branch_code, e_intro)
+
         pesan = f"Database berhasil dihubungkan ke cabang {payload.branch_code}"
         if n_tabel is not None:
             pesan += f" (skema: {n_tabel} tabel)"
@@ -171,7 +183,13 @@ async def update_tenant(branch_code: str, payload: TenantCreate, user: dict = De
                 UPDATE tenants SET db_connection_id = $1, updated_at = CURRENT_TIMESTAMP
                 WHERE branch_code = $2
             """, new_conn, branch_code)
-            await _introspect_dan_simpan(pool, branch_code)
+            try:
+                await asyncio.wait_for(_introspect_dan_simpan(pool, branch_code), timeout=4.0)
+            except asyncio.TimeoutError:
+                logger.info("Auto-introspeksi cabang %s memakan waktu >4 detik, dilanjutkan di background task...", branch_code)
+                asyncio.create_task(_introspect_dan_simpan(pool, branch_code))
+            except Exception as e_intro:
+                logger.warning("Auto-introspeksi cabang %s gagal: %s", branch_code, e_intro)
         return {"message": f"Database cabang {branch_code} berhasil diganti"}
     except HTTPException:
         raise
