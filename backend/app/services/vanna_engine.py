@@ -1853,15 +1853,28 @@ async def tangani_kueri_eksplanatori(
 
         tabs = prev_data.get("tabs") or []
         rows = prev_data.get("rows") or (tabs[0].get("rows") if tabs else [])
-        if not rows:
-            is_graphic_inquiry = any(w in question.lower() for w in ["grafik", "chart", "diagram"])
-            prev_ringkasan = prev_data.get("ringkasan") or ""
-            if is_graphic_inquiry:
+        is_graphic_inquiry = any(w in question.lower() for w in ["grafik", "chart", "diagram"])
+
+        if is_graphic_inquiry:
+            if rows:
+                prev_q = prev_data.get("question") or "laporan data transaksi"
+                ringkasan = (
+                    f"Visualisasi grafik interaktif untuk **\"{prev_q}\"** sudah tersedia langsung pada kartu laporan di atas.\n\n"
+                    "Untuk melihat tampilan visualnya, silakan klik tombol toggle tab **Grafik** (ikon diagram batang) "
+                    "yang berada di pojok kanan atas kartu laporan data tersebut, tepat di sebelah tombol **Tabel**.\n\n"
+                    "Sistem menyediakan opsi **Grafik Batang (Bar Chart)** dan **Grafik Garis (Line Chart)**. "
+                    "Anda dapat mengarahkan kursor (hover) ke setiap batang atau titik garis untuk melihat angka nominal secara mendetail."
+                )
+                saran = [
+                    "Bandingkan performa tiap divisi dalam tiap tahunnya",
+                    "Tampilkan tren bulanan penjualan unit tahun 2024",
+                    "Berapa total pendapatan servis bengkel tahun 2025?",
+                ]
+            else:
                 ringkasan = (
                     "Visualisasi grafik interaktif (Line Chart dan Bar Chart) otomatis aktif di panel atas "
-                    "begitu kueri data berhasil dieksekusi dari database.\n\n"
-                    "Pada percakapan sebelumnya, kita baru membahas modul dan opsi data, sehingga kueri SQL belum dieksekusi "
-                    "dan belum ada baris data transaksi nyata yang ditarik.\n\n"
+                    "begitu kueri data berhasil dieksekusi dari database cabang.\n\n"
+                    "Pada percakapan sebelumnya, data transaksi nyata belum ditarik ke layar sehingga belum ada titik data untuk divisualisasikan.\n\n"
                     "Silakan klik salah satu kueri data di bawah ini untuk langsung mengeksekusi database dan memunculkan grafik interaktifnya:"
                 )
                 pending_p = prev_data.get("pending_proposal")
@@ -1869,34 +1882,31 @@ async def tangani_kueri_eksplanatori(
                     saran = [opt["query"] for opt in pending_p["options"][:4]]
                 else:
                     saran = [
-                        "Tampilkan total pembayaran kasir per bulan tahun 2025 beserta grafik trennya",
+                        "Tampilkan tren penjualan unit dan total omzet per bulan tahun 2025",
                         "Tampilkan 5 model mobil dengan penjualan tertinggi",
                         "Berapa total pendapatan servis bengkel tahun 2025?",
                         "Tren volume transaksi servis bulanan sepanjang tahun 2024",
                     ]
-            elif prev_ringkasan:
+        elif not rows:
+            prev_ringkasan = prev_data.get("ringkasan") or ""
+            if prev_ringkasan:
                 ringkasan = (
                     f"Pada jawaban sebelumnya, saya memberikan penjelasan naratif berikut:\n\n"
                     f"> {prev_ringkasan}\n\n"
                     "Belum ada tabel data transaksi spesifik yang dimuat. Jika Anda ingin memeriksa data operasional nyata, "
                     "silakan pilih modul data yang ingin ditampilkan (seperti Penjualan Mobil, Servis Bengkel, atau Suku Cadang)."
                 )
-                saran = [
-                    "Tampilkan 5 model mobil dengan penjualan tertinggi",
-                    "Berapa total pendapatan servis bengkel tahun 2025?",
-                    "Tren volume transaksi servis bulanan sepanjang tahun 2024",
-                ]
             else:
                 ringkasan = (
                     "Pesan sebelumnya tidak memuat data tabel transaksi untuk dijelaskan. "
                     "Untuk memeriksa data operasional nyata, Anda dapat meminta data penjualan unit, "
                     "servis bengkel, atau suku cadang."
                 )
-                saran = [
-                    "Tampilkan 5 model mobil dengan penjualan tertinggi",
-                    "Berapa total pendapatan servis bengkel tahun 2025?",
-                    "Tren volume transaksi servis bulanan sepanjang tahun 2024",
-                ]
+            saran = [
+                "Tampilkan 5 model mobil dengan penjualan tertinggi",
+                "Berapa total pendapatan servis bengkel tahun 2025?",
+                "Tren volume transaksi servis bulanan sepanjang tahun 2024",
+            ]
         else:
             prev_q = prev_data.get("question") or "permintaan data sebelumnya"
             sql = (prev_data.get("sql") or (tabs[0].get("sql") if tabs else "") or "").lower()

@@ -1932,17 +1932,19 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
      - Jika teks menjadi kosong akibat pembersihan, sistem menyajikan fallback jujur bahwa sistem perlu mengeksekusi kueri ke database cabang nyata.
   4. **Penanganan Eksplanatori Grafik Jujur**:
      - `_is_explanatory_question` mendeteksi pertanyaan user mengenai grafik yang belum tampil (*"loh grafiknya mana?"*, *"mana grafiknya"*).
-     - Asisten menjelaskan secara transparan bahwa grafik otomatis aktif di panel atas begitu kueri SQL dieksekusi dari database, dan memberikan tombol rekomendasi kueri nyata.
+     - `_is_explanatory_question` mendeteksi pertanyaan user mengenai visualisasi grafik (*"loh grafiknya mana?"*, *"mana grafiknya"*).
+     - **Saat data tabel sudah dimuat (`rows > 0`)**: Asisten tidak lagi salah mengira sebagai permintaan rincian tabel kolom, melainkan langsung memandu pengguna ke tombol toggle tab **Grafik** (ikon chart batang) di pojok kanan atas kartu laporan data tersebut, serta menjelaskan opsi grafik batang & garis.
+     - **Saat data belum dimuat**: Asisten menjelaskan secara transparan bahwa grafik otomatis aktif begitu kueri dieksekusi, dan menyediakan tombol pilihan kueri nyata.
 
 - **Verifikasi & Bukti Nyata**:
-  - Unit Test Baru: `backend/tests/test_dialogue_state_tracking.py` (**7 passed in 1.39s**).
-  - Rangkaian Pengujian Penuh Backend: `pytest tests/ -q` (**590 passed in 39.93s**, 0 failed).
+  - Unit Test Baru: `backend/tests/test_dialogue_state_tracking.py` (**8 passed in 1.09s**).
+  - Rangkaian Pengujian Penuh Backend: `pytest tests/ -q` (**591 passed in 41.27s**, 0 failed).
   - Frontend Lint: `npm run lint` (**0 error**, 100% lulus).
   - Frontend Build: `npm run build` (**exit 0**, built in 1.54s).
-  - Live End-to-End Simulation Replay (`scratch/test_live_dst_replay.py`):
+  - Live End-to-End Simulation Replay:
     - Turn 1: User meminta data keuangan -> Assistant memberikan pending proposal modul keuangan tervalidasi.
-    - Turn 2: User mengetik *"hmm yaudah atur aja.."* -> Query di-resolve ke *"Tampilkan tren penjualan unit dan total omzet per bulan tahun 2025"*, mengeksekusi database operasional dealer, menghasilkan **11 baris data transaksi nyata**, query SQL riil, dan grafik tren otomatis aktif!
-    - Turn 3: User bertanya *"loh grafiknya mana?"* -> Dijawab akurat dan jujur mengenai data modul penjualan unit.
+    - Turn 2: User mengetik *"hmm yaudah atur aja.."* -> Query di-resolve ke *"Tampilkan tren penjualan unit dan total omzet per bulan tahun 2025"*, mengeksekusi database operasional dealer, menghasilkan **11 baris data transaksi nyata**, query SQL riil, dan visualisasi grafik interaktif siap diakses!
+    - Turn 3: User bertanya *"loh grafiknya mana?"* -> Dijawab tepat sasaran membimbing pengguna membuka toggle tab **Grafik** di kartu laporan atas.
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 

@@ -171,8 +171,41 @@ async def test_tangani_kueri_eksplanatori_graphic_inquiry():
     assert res["status"] == "success"
     # Penjelasan harus jujur bahwa grafik aktif setelah kueri SQL dieksekusi
     assert "Visualisasi grafik interaktif" in res["ringkasan"]
-    assert "belum dieksekusi" in res["ringkasan"]
+    assert "belum ditarik" in res["ringkasan"]
     assert "Tampilkan pembayaran kasir 2025" in res["saran"]
+
+
+@pytest.mark.anyio
+async def test_tangani_kueri_eksplanatori_graphic_inquiry_when_rows_exist():
+    mock_pool = AsyncMock()
+    # Mock percakapan sebelumnya SUDAH MEMILIKI 11 baris data transaksi nyata
+    mock_row = {
+        "content": json.dumps({
+            "source": "vanna",
+            "question": "Tampilkan tren penjualan unit dan total omzet per bulan tahun 2025",
+            "columns": ["bulan", "unit_terjual", "total_omzet"],
+            "rows": [["2025-01", 12, 100000000], ["2025-02", 15, 120000000]],
+            "row_count": 2,
+        })
+    }
+    mock_pool.fetchrow.return_value = mock_row
+    mock_pool.fetchval.return_value = 83
+
+    res = await tangani_kueri_eksplanatori(
+        core_pool=mock_pool,
+        conversation_id=83,
+        question="loh grafiknya mana?",
+        user_id=1,
+        branch_code="TST_01",
+        t0=0.0
+    )
+
+    assert res["status"] == "success"
+    # Penjelasan HARUS memandu user ke toggle tab Grafik pada kartu laporan di atas,
+    # BUKAN menjelaskan fungsi kolom tabel!
+    assert "sudah tersedia langsung pada kartu laporan di atas" in res["ringkasan"]
+    assert "toggle tab **Grafik**" in res["ringkasan"]
+    assert "Tabel di atas menampilkan" not in res["ringkasan"]
 
 
 @pytest.mark.anyio
