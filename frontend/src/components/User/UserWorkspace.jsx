@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
-  Check, Loader2, LogOut, Send, Bot, RotateCcw,
+  Loader2, LogOut, Send, Bot, RotateCcw,
   PanelLeftOpen, MessageSquarePlus,
   Car, Wrench, Package, BarChart3, ShieldCheck, ArrowRight,
 } from 'lucide-react';
@@ -15,18 +15,6 @@ import { api } from '../../services/api';
 // Cabang aktif = penugasan PERTAMA user (App.jsx: user.allowed_branches =
 // list kode cabang dari login). Dropdown multi-cabang: nanti, tidak di F4.
 const cabangPertama = (u) => (u?.allowed_branches || [])[0] || null;
-
-// Tahapan pipeline yang dianimasikan selama menunggu respons (label jujur —
-// urutan nyata pipeline backend: normalisasi -> planner LLM -> verifier ->
-// executor). Animasi berjalan sinkron dengan durasi request nyata: maju
-// berkala, berhenti di tahap terakhir sampai jawaban/error datang.
-const PIPELINE_STAGES = [
-  { key: 'understand', label: 'Memvalidasi konteks kueri bisnis & skema cabang…' },
-  { key: 'plan', label: 'Menyusun rencana SQL deterministik / Text2SQL…' },
-  { key: 'verify', label: 'Memeriksa verifier 6-gerbang keamanan AST & budget…' },
-  { key: 'fetch', label: 'Mengeksekusi database read-only & agregasi baris…' },
-];
-const STAGE_INTERVAL_MS = 1100;
 
 // Rekomendasi kueri analitik awal (Executive Command Deck)
 const PROMPT_SUGGESTIONS = [
@@ -137,45 +125,18 @@ function pesanDariHistory(m, idx, allMsgs = []) {
 }
 
 /**
- * Indikator bertahap pipeline AI selama request berjalan.
- * Telemetri tenang, berkelas teknis, tanpa gimmick berlebih.
+ * Indikator berpikir cerdas AI selama menunggu respons.
+ * Gaya editorial, tenang, berkelas tanpa checklist eksekusi database kaku.
  */
-function PipelineIndicator({ stageIndex }) {
+function ThinkingIndicator() {
   return (
-    <div className="space-y-2 py-1 select-none" aria-live="polite">
-      <div className="text-[11px] font-mono text-muted uppercase tracking-wider flex items-center gap-1.5 pb-1 border-b border-hairline/60">
-        <span className="w-2 h-2 rounded-full bg-primary animate-ping" />
-        <span>Eksekusi Pipeline Intelijen Data</span>
+    <div className="flex items-center gap-3 py-1 px-1.5 text-xs select-none" aria-live="polite">
+      <div className="flex items-center gap-1.5">
+        <span className="w-2 h-2 rounded-full bg-primary/80 animate-pulse" style={{ animationDuration: '1.2s' }} />
+        <span className="w-2 h-2 rounded-full bg-primary/60 animate-pulse" style={{ animationDuration: '1.2s', animationDelay: '0.2s' }} />
+        <span className="w-2 h-2 rounded-full bg-primary/40 animate-pulse" style={{ animationDuration: '1.2s', animationDelay: '0.4s' }} />
       </div>
-      <div className="space-y-1.5">
-        {PIPELINE_STAGES.map((stage, i) => {
-          const isDone = i < stageIndex;
-          const isActive = i === stageIndex;
-          return (
-            <div
-              key={stage.key}
-              className={`flex items-center gap-2.5 text-xs transition-colors ${
-                isActive ? 'text-ink font-medium' : isDone ? 'text-body/80' : 'text-muted/40'
-              }`}
-            >
-              {isDone ? (
-                <div className="w-4 h-4 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 border border-emerald-200">
-                  <Check size={11} />
-                </div>
-              ) : isActive ? (
-                <div className="w-4 h-4 flex items-center justify-center shrink-0">
-                  <Loader2 size={13} className="animate-spin text-primary" />
-                </div>
-              ) : (
-                <span className="w-4 h-4 rounded-full border border-hairline/80 flex items-center justify-center text-[10px] text-muted/50 font-mono">
-                  {i + 1}
-                </span>
-              )}
-              <span className="leading-snug">{stage.label}</span>
-            </div>
-          );
-        })}
-      </div>
+      <span className="text-body font-sans text-xs">Menganalisis pertanyaan dan menyiapkan jawaban…</span>
     </div>
   );
 }
@@ -231,8 +192,8 @@ function MessageBubble({
       </div>
 
       {message.status === 'processing' ? (
-        <div className="bg-canvas border border-hairline rounded-lg p-4 shadow-2xs max-w-md">
-          <PipelineIndicator stageIndex={message.stageIndex} />
+        <div className="bg-canvas border border-hairline rounded-lg p-3 shadow-2xs max-w-sm">
+          <ThinkingIndicator />
         </div>
       ) : message.status === 'error' ? (
         <div className="max-w-2xl bg-rose-50/80 border border-rose-200 rounded-lg px-4 py-3.5 shadow-2xs text-xs text-rose-900 leading-relaxed space-y-2">
@@ -437,18 +398,8 @@ export default function UserWorkspace({ user, onLogout }) {
     setMessages((prev) => [
       ...prev,
       { id: nextMessageId(), role: 'user', text: trimmed },
-      { id: assistantId, role: 'assistant', status: 'processing', stageIndex: 0 },
+      { id: assistantId, role: 'assistant', status: 'processing' },
     ]);
-
-    // Animasi tahap maju berkala; berhenti di tahap terakhir sampai respons.
-    const timer = setInterval(() => {
-      setMessages((prev) => prev.map((m) => (
-        m.id === assistantId && m.status === 'processing'
-          && m.stageIndex < PIPELINE_STAGES.length - 1
-          ? { ...m, stageIndex: m.stageIndex + 1 }
-          : m
-      )));
-    }, STAGE_INTERVAL_MS);
 
     try {
       const answer = await api.askAssistant(branchCode, trimmed, activeConversationId);
@@ -469,7 +420,6 @@ export default function UserWorkspace({ user, onLogout }) {
           : m
       )));
     } finally {
-      clearInterval(timer);
       setIsProcessing(false);
     }
   };
