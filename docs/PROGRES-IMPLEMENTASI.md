@@ -2018,6 +2018,11 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   4. **Pilar 4: Transparansi UI di Tab Badge & Paginasi (`AssistantAnswerCard.jsx`)**:
      - Badge tab menampilkan perbandingan pratinjau vs total riil: `50 / 1.032`.
      - Keterangan paginasi di bawah tabel menginformasikan secara gamblang: `Menampilkan 1–10 dari 50 data (Total: 1.032 transaksi)`.
+  5. **Pilar 5: Eliminasi Total Semu pada Mode Buku Transaksi Satuan (Ledger Mode) (`AssistantAnswerCard.jsx`)**:
+     - Menerapkan arsitektur enterprise Opsi 2: mendeteksi `isRincianTransaksi` (tabel berisi nomor transaksi/faktur perorangan atau berstatus sampel).
+     - Menyembunyikan kartu `KpiMetricBanner` 3-kolom pada tabel rincian transaksi sehingga pengguna tidak akan pernah lagi melihat kotak *"TOTAL: Rp 8,25 Miliar"* yang menyusut dan menyesatkan.
+     - Menggantinya dengan **Header Buku Transaksi** yang bersih dan profesional: `[Table2] Buku Transaksi (Rincian Tahun 2023) | Menampilkan 50 faktur sampel dari total 1.032 transaksi`.
+     - Menghindari render grafik barcode yang padat untuk puluhan nomor faktur, dan langsung menyajikan tabel data murni dengan pencarian dan paginasi.
 
 - **Verifikasi & Bukti Nyata**:
   - Backend compileall: **exit 0**.

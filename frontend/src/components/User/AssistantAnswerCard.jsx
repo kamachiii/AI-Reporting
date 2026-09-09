@@ -944,9 +944,25 @@ export default function AssistantAnswerCard({
   const terverifikasi = answer.source === 'memory' || memoryStatus === 'confirmed';
   const ditolak = memoryStatus === 'rejected';
 
+  // Mode Buku Rincian Transaksi (Ledger): Tiap baris adalah faktur/transaksi perorangan
+  // Pada mode ini, KPI Metric Banner disembunyikan agar tidak memicu ilusi optik "total mengecil"
+  const isRincianTransaksi = useMemo(() => {
+    const title = String(currentTab.title || currentTab.label || '').toLowerCase();
+    if (title.includes('rincian') || title.includes('detail')) {
+      return true;
+    }
+    if (currentTab.total_full_count && currentTab.total_full_count > activeRows.length) {
+      return true;
+    }
+    const colStr = activeColumns.map((c) => String(c).toLowerCase()).join(' ');
+    const hasTxIdentifier = /nomor|norangka|nopolisi|invoice|nomor_pesanan|nomor_wo/.test(colStr);
+    const hasNoAggregateCol = !activeColumns.some((c) => /total_|jumlah_|rata_|kontribusi/.test(String(c).toLowerCase()));
+    return hasTxIdentifier && hasNoAggregateCol;
+  }, [currentTab.title, currentTab.label, currentTab.total_full_count, activeRows.length, activeColumns]);
+
   const smartInsights = useMemo(
-    () => hitungSmartInsights(activeColumns, activeRows),
-    [activeColumns, activeRows]
+    () => (isRincianTransaksi ? null : hitungSmartInsights(activeColumns, activeRows)),
+    [isRincianTransaksi, activeColumns, activeRows]
   );
 
   const smartSaran = useMemo(() => {
@@ -991,8 +1007,8 @@ export default function AssistantAnswerCard({
   }, [smartSaran, breakdownSaran]);
 
   const grafikConfig = useMemo(
-    () => deteksiKecocokanGrafik(activeColumns, activeRows),
-    [activeColumns, activeRows]
+    () => (isRincianTransaksi ? { cocok: false, shouldDefaultChart: false } : deteksiKecocokanGrafik(activeColumns, activeRows)),
+    [isRincianTransaksi, activeColumns, activeRows]
   );
 
   const activeTab = useMemo(() => {
@@ -1352,8 +1368,21 @@ export default function AssistantAnswerCard({
           </div>
         )}
 
-        {/* Executive KPI Metric Banner */}
-        <KpiMetricBanner smartInsights={smartInsights} />
+        {/* Executive KPI Metric Banner — Eksklusif untuk mode ringkasan/komparasi data agregat */}
+        {!isRincianTransaksi && <KpiMetricBanner smartInsights={smartInsights} />}
+
+        {/* Transaction Ledger Header — Untuk tabel rincian transaksi mentah */}
+        {isRincianTransaksi && currentTab.total_full_count && (
+          <div className="flex items-center justify-between text-xs px-3 py-2 bg-surface-card/60 border border-hairline rounded-md text-muted shadow-2xs">
+            <span className="flex items-center gap-1.5 font-medium text-ink">
+              <Table2 size={13} className="text-primary" />
+              <span>Buku Transaksi ({currentTab.title || 'Rincian Transaksi'})</span>
+            </span>
+            <span className="font-mono text-[11px] text-muted">
+              Menampilkan {activeRows.length} faktur sampel dari total {currentTab.total_full_count.toLocaleString('id-ID')} transaksi
+            </span>
+          </div>
+        )}
 
         {/* Switcher Tab & Toolbar Aksi: Kombinasi vs Grafik vs Tabel Data */}
         {activeRows.length > 0 && (
