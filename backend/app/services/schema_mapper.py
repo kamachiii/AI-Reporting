@@ -111,7 +111,8 @@ async def dapatkan_peta_database_tenant(tenant_pool, db_name: str = "Otobitz Clo
 
         # Susun Markdown Table elegan
         md_lines = [
-            f"### Peta Database {db_name} ({total_tables:,} tabel)\n".replace(",", "."),
+            f"### Peta Database {db_name} ({total_tables:,} tabel)".replace(",", "."),
+            "",
             "| Kategori | Jumlah | Isinya |",
             "| :--- | :--- | :--- |",
         ]

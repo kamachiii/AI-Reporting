@@ -1873,12 +1873,35 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
    - **Backend (`vanna_engine.py`)**:
      - **Unified Prompting**: Prompt SQL diperluas dengan instruksi dwifungsi: jika kueri data -> hasilkan blok ```sql ... ```; jika percakapan / sapaan / konsep umum -> jawab langsung dengan bahasa Indonesia naratif tanpa blok SQL.
      - **Graceful Conversational Fallback**: Jika respon LLM tidak memuat query `SELECT`/`WITH` dengan klausa `FROM`, backend tidak lagi melempar `ValueError`, melainkan mengemasnya sebagai respon percakapan naratif murni (`source: "conversational"`, `is_conversational_text: True`).
-     - **Database-Agnostic Context**: Menghapus hardcode pengurutan tabel Otobitz (`untt_`, `srvt_`, `prtt_`) di `ambil_konteks_vanna`, beralih ke preferensi tabel fisik atas view (`vw_`) dan DDL terpadu.
-   - **Pengujian & Verifikasi**:
-     - Unit test suite baru `backend/tests/test_conversational_unified_flow.py` (6 test baru mencakup variasi sapaan, eksplanatori, unified prompt, ekstraksi SQL, number check, dan zero emoji cleaner).
-     - Full backend test suite: **583 passed in 32.10s**.
-     - Frontend test suite: `npm run lint` **0 error**, `npm run build` **exit 0**.
-     - Live E2E test script (`test_live_bot_scenarios.py`): 6/6 skenario live lulus sempurna ("p", "aloww", "apa itu PKB?", "ada data apa saja?", "tampilkan 5 mobil terlaris").
+### 3ay. Parser Editorial Markdown Table & Heading, Eliminasi Pipa Teks Mentah (2026-09-09)
+
+- **Latar Belakang & Masalah yang Dilaporkan User**:
+  - Pengguna mengunggah tangkapan layar respon chatbot saat menampilkan katalog Peta Database (`backup_demo_otobitzcloud` dengan 2.387 tabel).
+  - Teks tabel markdown (`| Kategori | Jumlah | Isinya | ...`) mencuat keluar sebagai raw text dengan baris-baris pipa (`|`) bertumpuk menjadi satu paragraf tak beraturan, serta tag heading `###` tampil sebagai teks biasa dengan tanda pagar.
+  - *Akar masalah*: Komponen `MarkdownNarrativeContent` dan `FormattedExecutiveAnalysis` di `AssistantAnswerCard.jsx` sebelumnya hanya memecah teks per `\n\n+` dan mengenali bullet list (`•`, `-`), namun belum memiliki parser blok untuk Tabel Markdown (`| col | col |` dengan separator `| --- |`) dan Heading Markdown (`#`, `##`, `###`).
+
+- **Solusi & Implementasi Teknis**:
+  1. **Parser Blok Markdown Terpadu (`parseMarkdownBlocks`)**:
+     - Ditambahkan ke `AssistantAnswerCard.jsx` untuk menganalisis teks secara struktural:
+       - **Tabel Markdown**: Mendeteksi baris berpola `| ... |` dengan baris separator `| :--- | :--- |`, memecah sel, mendeteksi alignment (`left`, `center`, `right`), serta merendernya sebagai tabel HTML murni dengan styling editorial Vercel/Claude (`border-hairline`, thead `bg-surface-card`, hover row `bg-surface-soft/40`, dan sel numerik otomatis berformat `font-mono tabular-nums text-right`).
+       - **Heading Markdown**: Mendeteksi `#`, `##`, `###` dan merendernya sebagai elemen judul proporsional dengan aksen baris vertikal halus warna `bg-primary`.
+       - **Daftar Berbutir & Bernomor**: Mendeteksi `•`, `-`, `*`, atau `1.` dengan indentasi dan bullet bulat halus.
+       - **Blok Rekomendasi Strategis**: Menjaga kartu rekomendasi ber-ikon kompas tetap tampil elegan jika terdapat awalan `Rekomendasi:`.
+  2. **Penyelarasan Format Output Backend (`schema_mapper.py`)**:
+     - Memperbaiki baris judul markdown agar dipisahkan oleh baris baru bersih sebelum tabel dimulai.
+  3. **Penyelarasan `FormattedExecutiveAnalysis`**:
+     - Dibuat mendelegasikan parsing ke `MarkdownNarrativeContent` sehingga seluruh drawer analisis eksekutif mendapatkan kemampuan rendering tabel dan heading yang identik.
+
+- **Verifikasi & Bukti Nyata**:
+  - Backend compileall: **exit 0**.
+  - Backend pytest: **583 passed in 39.61s** (0 failed).
+  - Frontend lint: `npm run lint` **0 error** (100% lulus, 0 warning baru).
+  - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 1.26s).
+  - Live Browser Viewport Test via Chrome DevTools MCP:
+    - Kueri `"ada data apa saja?"` pada browser riil (`http://localhost:5173`) login `tester01`:
+    - Header judul tampil sebagai `PETA DATABASE BACKUP_DEMO_OTOBITZCLOUD (2.387 TABEL)`.
+    - Tabel 8 kategori ERP (`vw_`, `srv`, `untt`, `stpm`, `cari_`, `glbm`, `acctt`, `Lainnya`) ter-render sebagai tabel HTML arsitektural yang presisi, angka rata kanan berfont monospace tabular, dan badge kode rapi.
+    - Zero emoji & zero pipe leaks terverifikasi visual.
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
@@ -1954,6 +1977,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Eliminasi Bocoran Teknis Database Sisi User & Audit Log Telemetri AI Terstruktur (Provider, Model, Kategori, Diagnosa Error)** — SELESAI (lihat §3av).
 - [x] **Resolusi Kueri Mobil Terlaris, Anti-Loop Greeting Fanout, Textarea Auto-Resize, Smart Scroll & Pembersihan Total UI Pengguna** — SELESAI (lihat §3aw).
 - [x] **Transformasi Conversational AI Murni, Eliminasi Fake Stepper, Penahanan Ekspor Excel, dan Skema Agnostik** — SELESAI (lihat §3ax).
+- [x] **Parser Editorial Markdown Table & Heading, Eliminasi Pipa Teks Mentah** — SELESAI (lihat §3ay).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. *Dedicated Executive Dashboard Page*: Ditutup/dibatalkan atas arahan pengguna untuk mempertahankan identitas murni Conversational AI Assistant.
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.

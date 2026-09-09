@@ -493,111 +493,265 @@ function renderMarkdownInline(str) {
 }
 
 /**
+ * Parse teks markdown menjadi blok-blok terstruktur (paragraf, judul, tabel, daftar, rekomendasi).
+ */
+function parseMarkdownBlocks(text) {
+  if (!text || typeof text !== 'string') return [];
+
+  // Jika teks padat berbaris tanpa baris baru, pecah berdasarkan kalimat transisi
+  let normalized = text;
+  if (!normalized.includes('\n') && normalized.length > 160) {
+    const splitRegex = /(?=\b(?:Namun,|Jika angka nol|Jika hanya masalah|Jika benar tidak|Langkah pertama|Rekomendasi:)\b)/g;
+    const parts = normalized.split(splitRegex).map((p) => p.trim()).filter(Boolean);
+    if (parts.length > 1) {
+      normalized = parts.join('\n\n');
+    }
+  }
+
+  const rawLines = normalized.replace(/\r\n/g, '\n').split('\n');
+  const blocks = [];
+  let i = 0;
+
+  while (i < rawLines.length) {
+    const line = rawLines[i];
+    const trimmed = line.trim();
+
+    // 1. Lewati baris kosong
+    if (!trimmed) {
+      i++;
+      continue;
+    }
+
+    // 2. Blok Rekomendasi Strategis
+    if (/^Rekomendasi:/i.test(trimmed)) {
+      let rawContent = trimmed.replace(/^Rekomendasi:\s*/i, '');
+      i++;
+      const bulletItems = [];
+      if (rawContent && (rawContent.startsWith('•') || rawContent.startsWith('-') || rawContent.startsWith('*'))) {
+        bulletItems.push(rawContent.replace(/^[•\-*]\s*/, '').trim());
+        rawContent = '';
+      }
+      while (i < rawLines.length) {
+        const rLine = rawLines[i].trim();
+        if (!rLine) break;
+        if (/^[•\-*]|\d+\.\s/.test(rLine)) {
+          bulletItems.push(rLine.replace(/^[•\-*]\s*|\d+\.\s*/, '').trim());
+          i++;
+        } else if (!rawContent && bulletItems.length === 0) {
+          rawContent = rLine;
+          i++;
+        } else {
+          break;
+        }
+      }
+      blocks.push({
+        type: 'rekomendasi',
+        rawContent,
+        bulletItems,
+      });
+      continue;
+    }
+
+    // 3. Heading Markdown: #, ##, ###
+    const headingMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
+    if (headingMatch) {
+      blocks.push({
+        type: 'heading',
+        level: headingMatch[1].length,
+        text: headingMatch[2].trim(),
+      });
+      i++;
+      continue;
+    }
+
+    // 4. Tabel Markdown: baris awal dengan pipa '|' dan baris kedua pemisah '| --- |'
+    if (trimmed.startsWith('|') && trimmed.endsWith('|') && i + 1 < rawLines.length) {
+      const nextTrimmed = rawLines[i + 1].trim();
+      const isSeparator = /^\|?(\s*:?-{2,}:?\s*\|)+\s*:?-{2,}:?\s*\|?$/.test(nextTrimmed);
+      if (isSeparator) {
+        const parseRow = (rowStr) => {
+          const clean = rowStr.trim().replace(/^\|/, '').replace(/\|$/, '');
+          return clean.split('|').map((c) => c.trim());
+        };
+
+        const headers = parseRow(trimmed);
+        const sepCols = parseRow(nextTrimmed);
+        const alignments = sepCols.map((c) => {
+          const left = c.startsWith(':');
+          const right = c.endsWith(':');
+          if (left && right) return 'center';
+          if (right) return 'right';
+          return 'left';
+        });
+
+        i += 2;
+        const rows = [];
+        while (i < rawLines.length && rawLines[i].trim().startsWith('|')) {
+          rows.push(parseRow(rawLines[i].trim()));
+          i++;
+        }
+
+        blocks.push({
+          type: 'table',
+          headers,
+          alignments,
+          rows,
+        });
+        continue;
+      }
+    }
+
+    // 5. Daftar Berbutir / Bernomor: •, -, *, atau 1.
+    const isList = /^[•\-*]\s+|^\d+\.\s+/.test(trimmed);
+    if (isList) {
+      const items = [];
+      while (i < rawLines.length) {
+        const itemLine = rawLines[i].trim();
+        if (!itemLine) break;
+        if (/^[•\-*]\s+|^\d+\.\s+/.test(itemLine)) {
+          const isNumbered = /^\d+\.\s+/.test(itemLine);
+          const cleanText = itemLine.replace(/^[•\-*]\s+|^\d+\.\s+/, '');
+          items.push({ isNumbered, text: cleanText });
+          i++;
+        } else if (items.length > 0 && !itemLine.startsWith('#') && !itemLine.startsWith('|')) {
+          items[items.length - 1].text += ` ${itemLine}`;
+          i++;
+        } else {
+          break;
+        }
+      }
+      blocks.push({
+        type: 'list',
+        items,
+      });
+      continue;
+    }
+
+    // 6. Paragraf Biasa: kumpulkan baris hingga baris kosong atau blok baru
+    const paraLines = [];
+    while (i < rawLines.length) {
+      const pLine = rawLines[i].trim();
+      if (!pLine) break;
+      if (/^Rekomendasi:/i.test(pLine)) break;
+      if (pLine.startsWith('#')) break;
+      if (
+        pLine.startsWith('|') &&
+        pLine.endsWith('|') &&
+        i + 1 < rawLines.length &&
+        /^\|?(\s*:?-{2,}:?\s*\|)+\s*:?-{2,}:?\s*\|?$/.test(rawLines[i + 1].trim())
+      ) {
+        break;
+      }
+      if (/^[•\-*]\s+|^\d+\.\s+/.test(pLine)) break;
+
+      paraLines.push(pLine);
+      i++;
+    }
+
+    if (paraLines.length > 0) {
+      blocks.push({
+        type: 'paragraph',
+        text: paraLines.join(' '),
+      });
+    }
+  }
+
+  return blocks;
+}
+
+/**
  * Komponen Markdown Content dengan hierarki tipografi editorial,
- * mendukung paragraf mengalir, daftar berbutir (bullet list), dan daftar bernomor.
+ * mendukung paragraf mengalir, heading, tabel Markdown berstandar tinggi, dan daftar.
  */
 function MarkdownNarrativeContent({ content }) {
   if (!content) return null;
-  const rawParagraphs = content.split(/\n\n+/).filter(Boolean);
+  const blocks = parseMarkdownBlocks(content);
 
   return (
     <div className="space-y-3 font-sans text-sm sm:text-[14.5px] leading-relaxed text-ink">
-      {rawParagraphs.map((para, idx) => {
-        const lines = para.split('\n').filter(Boolean);
-        const hasListItems = lines.some((l) => /^[•\-*]|\d+\.\s/.test(l.trim()));
-
-        if (hasListItems) {
-          const header = lines.length > 1 && !/^[•\-*]|\d+\.\s/.test(lines[0].trim()) ? lines[0] : null;
-          const listLines = header ? lines.slice(1) : lines;
-
+      {blocks.map((block, idx) => {
+        if (block.type === 'heading') {
+          if (block.level <= 2) {
+            return (
+              <h2 key={idx} className="font-semibold text-ink text-base sm:text-[16px] mt-4 mb-1.5 tracking-tight flex items-center gap-2">
+                <span className="w-1 h-4 bg-primary rounded-full inline-block shrink-0" />
+                <span>{renderMarkdownInline(block.text)}</span>
+              </h2>
+            );
+          }
           return (
-            <div key={idx} className="space-y-1.5 pt-0.5">
-              {header && (
-                <p className="font-medium text-ink leading-relaxed">
-                  {renderMarkdownInline(header)}
-                </p>
-              )}
-              <ul className="space-y-1.5 pl-1 text-body text-xs sm:text-[13.5px]">
-                {listLines.map((line, lIdx) => {
-                  const trimmed = line.trim();
-                  const isNumbered = /^\d+\.\s*/.test(trimmed);
-                  const isBullet = /^[•\-*]\s*/.test(trimmed);
-                  const clean = isNumbered
-                    ? trimmed.replace(/^\d+\.\s*/, '')
-                    : isBullet
-                    ? trimmed.replace(/^[•\-*]\s*/, '')
-                    : trimmed;
+            <h3 key={idx} className="font-semibold text-ink text-xs sm:text-[13.5px] uppercase tracking-wider mt-3 mb-1.5 flex items-center gap-2 text-muted">
+              <span className="w-1 h-3 bg-primary/80 rounded-full inline-block shrink-0" />
+              <span className="text-ink font-medium">{renderMarkdownInline(block.text)}</span>
+            </h3>
+          );
+        }
 
-                  return (
-                    <li key={lIdx} className="flex items-start gap-2 leading-relaxed">
-                      <span className="text-primary/70 shrink-0 select-none mt-1 font-mono text-[11px]">
-                        {isNumbered ? `${lIdx + 1}.` : '•'}
-                      </span>
-                      <span className="text-body flex-1">
-                        {renderMarkdownInline(clean)}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
+        if (block.type === 'table') {
+          return (
+            <div key={idx} className="overflow-x-auto rounded-lg border border-hairline my-3.5 bg-canvas shadow-2xs">
+              <table className="w-full text-left text-xs sm:text-[13px] border-collapse">
+                <thead className="bg-surface-card border-b border-hairline text-ink font-semibold">
+                  <tr>
+                    {block.headers.map((h, i) => {
+                      const isRight = block.alignments[i] === 'right';
+                      const isCenter = block.alignments[i] === 'center';
+                      return (
+                        <th
+                          key={i}
+                          className={`py-2.5 px-3.5 text-xs font-semibold uppercase tracking-wider text-muted ${
+                            isRight ? 'text-right' : isCenter ? 'text-center' : 'text-left'
+                          }`}
+                        >
+                          {renderMarkdownInline(h)}
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-hairline/60 text-body">
+                  {block.rows.map((row, rIdx) => (
+                    <tr key={rIdx} className="hover:bg-surface-soft/40 transition-colors">
+                      {row.map((cell, cIdx) => {
+                        const isNumeric = /^-?\d[\d.,]*%?$/.test(cell.trim());
+                        const isRight = block.alignments[cIdx] === 'right' || isNumeric;
+                        const isCenter = block.alignments[cIdx] === 'center';
+                        return (
+                          <td
+                            key={cIdx}
+                            className={`py-2.5 px-3.5 ${
+                              isRight
+                                ? 'text-right font-mono tabular-nums text-ink font-medium'
+                                : isCenter
+                                ? 'text-center'
+                                : 'text-left'
+                            }`}
+                          >
+                            {renderMarkdownInline(cell)}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           );
         }
 
-        return (
-          <p key={idx} className="text-body leading-relaxed">
-            {renderMarkdownInline(para.trim())}
-          </p>
-        );
-      })}
-    </div>
-  );
-}
-
-/** Format narasi analisis eksekutif agar terstruktur rapi, tidak menjadi semut berbaris. */
-function FormattedExecutiveAnalysis({ text }) {
-  if (!text) return null;
-
-  // Pisahkan teks berdasarkan baris baru ganda bila ada
-  let paragraphs = text
-    .split(/\n\n+/)
-    .map((p) => p.trim())
-    .filter(Boolean);
-
-  // Jika AI mengembalikan 1 paragraf panjang tanpa \n\n (teks padat berbaris):
-  if (paragraphs.length === 1 && paragraphs[0].length > 160) {
-    const splitRegex = /(?=\b(?:Namun,|Jika angka nol|Jika hanya masalah|Jika benar tidak|Langkah pertama|Rekomendasi:)\b)/g;
-    const parts = paragraphs[0].split(splitRegex).map((p) => p.trim()).filter(Boolean);
-    if (parts.length > 1) {
-      paragraphs = parts;
-    }
-  }
-
-  return (
-    <div className="space-y-3 text-sm text-body leading-relaxed font-sans">
-      {paragraphs.map((para, idx) => {
-        const isRekomendasi = /^Rekomendasi:/i.test(para);
-        const isList = para.split('\n').some((l) => /^[•\-*]|\d+\.\s/.test(l.trim()));
-
-        if (isRekomendasi) {
-          const rawContent = para.replace(/^Rekomendasi:\s*/i, '');
-          const bulletItems = rawContent
-            .split(/(?:\r?\n|(?<=[^\s])\s*•|\s+•\s+)/)
-            .map((b) => b.replace(/^[•\-*]\s*/, '').trim())
-            .filter(Boolean);
-
+        if (block.type === 'rekomendasi') {
           return (
             <div
               key={idx}
-              className="p-4 rounded-md bg-primary/5 border-l-2 border-primary border-y border-r border-hairline/60 space-y-2.5 mt-2"
+              className="p-4 rounded-md bg-primary/5 border-l-2 border-primary border-y border-r border-hairline/60 space-y-2.5 my-2.5"
             >
               <div className="text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-1.5">
                 <Compass size={13} />
                 <span>Rekomendasi Tindakan Strategis</span>
               </div>
-              {bulletItems.length > 1 ? (
+              {block.bulletItems.length > 0 ? (
                 <ul className="space-y-1.5 pl-0.5">
-                  {bulletItems.map((item, bIdx) => (
+                  {block.bulletItems.map((item, bIdx) => (
                     <li key={bIdx} className="flex items-start gap-2 text-sm text-ink">
                       <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0 mt-2" />
                       <span className="leading-relaxed">{renderMarkdownInline(item)}</span>
@@ -605,37 +759,43 @@ function FormattedExecutiveAnalysis({ text }) {
                   ))}
                 </ul>
               ) : (
-                <p className="text-ink text-sm leading-relaxed">{renderMarkdownInline(rawContent)}</p>
+                <p className="text-ink text-sm leading-relaxed">{renderMarkdownInline(block.rawContent)}</p>
               )}
             </div>
           );
         }
 
-        if (isList) {
-          const lines = para.split('\n').map((l) => l.trim()).filter(Boolean);
+        if (block.type === 'list') {
           return (
-            <ul key={idx} className="space-y-1.5 pl-1">
-              {lines.map((line, lIdx) => {
-                const cleaned = line.replace(/^[•\-*]\s*|\d+\.\s*/, '');
-                return (
-                  <li key={lIdx} className="flex items-start gap-2 text-sm text-body">
-                    <span className="w-1.5 h-1.5 rounded-full bg-primary/70 shrink-0 mt-2" />
-                    <span>{renderMarkdownInline(cleaned)}</span>
-                  </li>
-                );
-              })}
+            <ul key={idx} className="space-y-1.5 pl-1 text-body text-xs sm:text-[13.5px] my-2">
+              {block.items.map((item, lIdx) => (
+                <li key={lIdx} className="flex items-start gap-2 leading-relaxed">
+                  <span className="text-primary/70 shrink-0 select-none mt-0.5 font-mono text-[11px]">
+                    {item.isNumbered ? `${lIdx + 1}.` : '•'}
+                  </span>
+                  <span className="text-body flex-1">
+                    {renderMarkdownInline(item.text)}
+                  </span>
+                </li>
+              ))}
             </ul>
           );
         }
 
         return (
           <p key={idx} className="text-body leading-relaxed">
-            {renderMarkdownInline(para)}
+            {renderMarkdownInline(block.text)}
           </p>
         );
       })}
     </div>
   );
+}
+
+/** Format narasi analisis eksekutif agar terstruktur rapi menggunakan parser editorial terpadu. */
+function FormattedExecutiveAnalysis({ text }) {
+  if (!text) return null;
+  return <MarkdownNarrativeContent content={text} />;
 }
 
 export default function AssistantAnswerCard({
