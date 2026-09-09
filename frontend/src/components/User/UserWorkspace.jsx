@@ -121,7 +121,7 @@ function pesanDariHistory(m, idx, allMsgs = []) {
   let answer = null;
   try {
     const parsed = JSON.parse(m.content);
-    if (parsed && (Array.isArray(parsed.rows) || parsed.source === 'clarification' || parsed.status === 'clarification_needed' || parsed.is_conversational_text)) {
+    if (parsed && (Array.isArray(parsed.rows) || parsed.source === 'clarification' || parsed.status === 'clarification_needed' || parsed.is_conversational_text || parsed.source === 'conversational')) {
       answer = parsed;
     }
   } catch {

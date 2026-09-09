@@ -28,6 +28,7 @@ from app.services.automotive_thesaurus import deteksi_konteks_domain, susun_inst
 from app.services.clarification_engine import cek_ambiguitas_pertanyaan
 from app.services.fanout_engine import (
     cek_apakah_perlu_fanout,
+    cek_apakah_minta_multi_query,
     susun_multi_sql_prompt,
     ekstrak_multi_sql,
     susun_ringkasan_eksekutif_multi,
@@ -1078,6 +1079,211 @@ async def tangani_kueri_panduan_umum(
     return response
 
 
+def _is_conversational_question(question: str) -> bool:
+    """Deteksi apakah pertanyaan pengguna merupakan percakapan murni, sapaan, kapabilitas,
+    atau pertanyaan istilah / konsep otomotif (yang harus dijawab dengan teks naratif tanpa SQL)."""
+    if not question:
+        return False
+    q = question.strip().lower()
+    q_clean = re.sub(r'[?!.,;:\'"]+', ' ', q).strip()
+    q_clean = re.sub(r'\s+', ' ', q_clean)
+
+    # 1. Cek general guide & greetings
+    if _is_general_guide_question(question):
+        return True
+
+    # 2. Pola pertanyaan istilah, konsep, definisi, perbedaan
+    concept_patterns = [
+        r"^(?:apa\s+(?:sih\s+)?(?:itu|arti|artinya|maksud|maksudnya|kepanjangan|kepanjangannya|definisi|pengertian)\s+)(.+)",
+        r"^(.+?)\s+(?:itu\s+apa|artinya\s+apa|maksudnya\s+apa|kepanjangannya\s+apa)\??$",
+        r"^(?:apa\s+)?(?:bedanya|perbedaan(?:\s+antara)?)\s+(.+)",
+        r"^jelaskan\s+(?:tentang\s+|mengenai\s+|apa\s+itu\s+|konsep\s+|istilah\s+)(.+)",
+        r"^(?:apa\s+yang\s+dimaksud(?:\s+dengan)?)\s+(.+)",
+        r"^(?:apa\s+fungsi|apa\s+kegunaan|fungsi\s+dari|kegunaan\s+dari)\s+(.+)",
+    ]
+    for pat in concept_patterns:
+        if re.search(pat, q_clean):
+            return True
+
+    # 3. Kata penutup / respon apresiasi santai
+    closing_words = {
+        "terima kasih", "makasih", "makasih banyak", "terima kasih banyak",
+        "thanks", "thank you", "thx", "tq", "mantap", "mantap jiwa", "keren", "keren banget",
+        "ok", "oke", "oke sip", "siap", "siap laksanakan", "bagus", "good", "nice", "sip"
+    }
+    if q_clean in closing_words:
+        return True
+
+    return False
+
+
+async def tangani_kueri_percakapan(
+    core_pool,
+    conversation_id: int | None,
+    question: str,
+    user_id: int,
+    branch_code: str,
+    t0: float,
+    ai_config: dict | None = None,
+    llm_call_fn=None,
+) -> dict:
+    """Mode Percakapan Murni: Menjawab sapaan, kapabilitas, atau konsep otomotif dealer secara luwes dan naratif (0 SQL, 0 Table)."""
+    durasi_ms = int((time.monotonic() - t0) * 1000)
+    answer_text = ""
+
+    # Coba panggil LLM untuk jawaban percakapan yang cerdas dan luwes
+    panggil_fn = llm_call_fn or panggil_llm_default
+    if ai_config:
+        try:
+            system_msg = (
+                "Anda adalah Asisten AI Dealer Otomotif yang cerdas, profesional, dan ramah. "
+                "Anda mendampingi staf dan manajemen dealer dalam memahami data operasional dan istilah bisnis dealer otomotif. "
+                "Tugas Anda: "
+                "1. Jika pengguna menyapa, memuji, atau berterima kasih: tanggapi dengan sopan, hangat, dan profesional. "
+                "2. Jika pengguna menanyakan kapabilitas atau fitur: jelaskan secara ringkas modul data apa saja yang bisa dianalisis "
+                "(Penjualan Unit Kendaraan, Jasa Servis Bengkel, Suku Cadang & Sparepart, Profil Pelanggan). "
+                "3. Jika pengguna menanyakan istilah, konsep, atau singkatan bisnis otomotif (seperti PKB/Perintah Kerja Bengkel, "
+                "SPK/Surat Pesanan Kendaraan, VIN/Nomor Rangka, Faktur, COGS/HPP, DPP, OTR, dll.): berikan penjelasan yang ringkas, akurat, "
+                "dan mudah dipahami dalam konteks operasional dealer otomotif. "
+                "Aturan penulisan: "
+                "- Gunakan bahasa Indonesia yang baik, santun, dan profesional. "
+                "- Format teks secara rapi menggunakan paragraf singkat atau poin-poin jika perlu. "
+                "- Jawab langsung dalam teks biasa atau markdown naratif. JANGAN membungkus jawaban dalam format JSON. "
+                "- JANGAN mengarang data angka transaksi spesifik cabang. "
+                "- JANGAN gunakan emoji apapun (Zero Emoji Policy)."
+            )
+            raw_output = await panggil_fn(system_msg, f"Pertanyaan pengguna: {question}", ai_config)
+            if raw_output and len(raw_output.strip()) > 10:
+                cleaned_text = raw_output.strip()
+                # Jika LLM membungkus respons dalam JSON, ekstrak nilainya
+                try:
+                    m_json = re.search(r"\{[\s\S]*\}", cleaned_text)
+                    if m_json:
+                        parsed = json.loads(m_json.group(0))
+                        if isinstance(parsed, dict):
+                            for key in ["jawaban", "reply", "response", "message", "text", "penjelasan", "ringkasan", "answer"]:
+                                if key in parsed and isinstance(parsed[key], str) and len(parsed[key]) > 5:
+                                    cleaned_text = parsed[key]
+                                    break
+                            else:
+                                first_str = next((v for v in parsed.values() if isinstance(v, str) and len(v) > 5), None)
+                                if first_str:
+                                    cleaned_text = first_str
+                except Exception:
+                    pass
+                answer_text = _bersihkan_emoji_teks(cleaned_text)
+        except Exception as e_llm:
+            logger.warning("Panggilan LLM percakapan gagal (%s), beralih ke respons deterministik fallback...", e_llm)
+
+    # Fallback cerdas jika LLM tidak tersedia atau gagal
+    if not answer_text:
+        q_l = question.lower()
+        if any(w in q_l for w in ["pkb", "wo", "perintah kerja"]):
+            answer_text = (
+                "PKB (Perintah Kerja Bengkel) atau Work Order (WO) adalah dokumen kerja resmi di bengkel dealer "
+                "yang mencatat instruksi pengerjaan perawatan atau perbaikan kendaraan pelanggan. "
+                "Dokumen ini memuat keluhan kendaraan, estimasi biaya jasa dan suku cadang, nama Service Advisor (SA), "
+                "serta teknisi/mekanik yang ditugaskan."
+            )
+        elif any(w in q_l for w in ["spk", "surat pesanan"]):
+            answer_text = (
+                "SPK (Surat Pesanan Kendaraan) adalah dokumen perikatan pemesanan kendaraan antara pelanggan dan pihak dealer. "
+                "SPK memuat data lengkap pembeli, spesifikasi tipe dan varian mobil, warna, harga on-the-road (OTR), "
+                "metode pembayaran (Cash atau Kredit/Leasing), serta uang muka (DP) yang disetorkan."
+            )
+        elif any(w in q_l for w in ["norangka", "vin", "nopolisi", "no rangka", "no polisi"]):
+            answer_text = (
+                "Nomor Rangka (VIN / Vehicle Identification Number) adalah 17 digit kode unik internasional dari pabrik perakitan "
+                "yang melekat permanen pada sasis kendaraan dan tidak pernah berubah. "
+                "Sementara Nomor Polisi (Plat Nomor) adalah nomor registrasi kendaraan bermotor yang diterbitkan oleh kepolisian/Samsat "
+                "dan dapat berubah apabila terjadi mutasi daerah atau pergantian kepemilikan."
+            )
+        elif any(w in q_l for w in ["faktur"]):
+            answer_text = (
+                "Faktur Penjualan adalah bukti transaksi resmi penjualan unit kendaraan atau jasa servis yang mencatat rincian harga pokok, "
+                "Pajak Pertambahan Nilai (PPN), potongan diskon yang disepakati, serta total tagihan bersih kepada pembeli."
+            )
+        elif any(w in q_l for w in ["otr", "off the road"]):
+            answer_text = (
+                "Harga On The Road (OTR) adalah harga jual kendaraan yang sudah termasuk seluruh biaya pengurusan dokumen legalitas jalan "
+                "(STNK, BPKB, dan Pajak Kendaraan Bermotor). Sedangkan Off The Road adalah harga murni unit kendaraan tanpa biaya legalitas jalan."
+            )
+        elif any(w in q_l for w in ["terima kasih", "makasih", "thanks", "tq", "mantap", "keren"]):
+            answer_text = (
+                "Sama-sama. Senang dapat membantu Anda. Jika Anda membutuhkan analisis data penjualan, servis bengkel, "
+                "suku cadang, atau profil pelanggan cabang Anda, silakan tanyakan kapan saja."
+            )
+        elif any(w in q_l for w in ["bisa apa", "fitur", "bantu apa", "kapabilitas"]):
+            answer_text = (
+                "Sebagai Asisten AI Database Dealer, saya siap membantu Anda menganalisis data operasional cabang:\n\n"
+                "1. Penjualan Unit Kendaraan: Volume penjualan, tren omzet bulanan dan tahunan, ranking tipe mobil terlaris, serta performa wiraniaga (sales).\n"
+                "2. Jasa Servis Bengkel: Volume pengerjaan Work Order (PKB), pendapatan jasa perawatan, dan histori servis kendaraan.\n"
+                "3. Suku Cadang & Sparepart: Ketersediaan persediaan suku cadang, barang keluar-masuk, dan nilai penjualan counter part.\n"
+                "4. Pelanggan: Profil pelanggan setia dan persebaran transaksi konsumen.\n\n"
+                "Silakan ajukan pertanyaan spesifik mengenai data yang ingin Anda periksa."
+            )
+        else:
+            answer_text = (
+                "Halo. Selamat datang di Asisten AI Database Dealer. Saya terhubung langsung ke database operasional cabang Anda "
+                "dan siap membantu menyajikan laporan dan analitik penjualan unit, jasa servis bengkel, suku cadang, serta pelanggan. "
+                "Apa yang ingin Anda analisis hari ini?"
+            )
+
+    saran = [
+        "Tampilkan 5 model mobil dengan penjualan tertinggi",
+        "Berapa total pendapatan servis bengkel tahun 2025?",
+        "Daftar 10 customer dengan transaksi pembelian unit terbesar",
+        "Berapa sisa stok mobil saat ini?",
+    ]
+
+    response = {
+        "source": "conversational",
+        "confidence": "A",
+        "status": "success",
+        "question": question,
+        "ringkasan": answer_text,
+        "sql": "",
+        "params": [],
+        "columns": [],
+        "rows": [],
+        "row_count": 0,
+        "truncated": False,
+        "duration_ms": durasi_ms,
+        "memory_id": None,
+        "saran": saran,
+        "metode": "conversational",
+        "is_conversational_text": True,
+        "allow_explain": False,
+    }
+
+    conv_id = await ambil_atau_buat_conversation(
+        core_pool, user_id, branch_code, question, conversation_id=conversation_id
+    )
+    response["conversation_id"] = conv_id
+    await simpan_pesan(core_pool, conv_id, "user", question)
+    await simpan_pesan(core_pool, conv_id, "assistant", json.dumps(response, default=str))
+
+    ai_provider = ai_config.get("provider") if ai_config else None
+    ai_model = ai_config.get("model") if ai_config else None
+    await tulis_audit(
+        core_pool,
+        user_id=user_id,
+        branch_code=branch_code,
+        prompt_text=question,
+        ai_json_filter={
+            "provider": ai_provider,
+            "model": ai_model,
+            "category": "conversational",
+            "mode": "conversational",
+        },
+        generated_sql="",
+        execution_time_ms=durasi_ms,
+        status="success",
+        error_message=None,
+    )
+    return response
+
+
 async def tangani_kueri_eksplanatori(
     core_pool,
     conversation_id: int | None,
@@ -1310,15 +1516,16 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
         # Ambil konteks percakapan aktif (tahun + topik) secara terisolasi per conversation_id
         active_context = await ambil_konteks_percakapan_aktif(core_pool, conversation_id)
 
-        # 0.0. Mode Percakapan Eksplanatori ("loh data apa ini?", "maksud tabel ini apa?")
-        if _is_explanatory_question(question):
-            return await tangani_kueri_eksplanatori(
-                core_pool, conversation_id, question, user_id, branch_code, t0, ai_config=ai_config
+        # 0.0. Mode Percakapan Murni (Sapaan, Terima Kasih, Istilah Bisnis / Konsep Otomotif, Kapabilitas)
+        if _is_conversational_question(question):
+            return await tangani_kueri_percakapan(
+                core_pool, conversation_id, question, user_id, branch_code, t0,
+                ai_config=ai_config, llm_call_fn=llm_call_fn
             )
 
-        # 0.0.1. Mode Panduan Orientasi Modul Dealer ("kasih aku dong data data", "ada data apa aja", "halo")
-        if _is_general_guide_question(question):
-            return await tangani_kueri_panduan_umum(
+        # 0.0.1. Mode Percakapan Eksplanatori ("loh data apa ini?", "maksud tabel ini apa?")
+        if _is_explanatory_question(question):
+            return await tangani_kueri_eksplanatori(
                 core_pool, conversation_id, question, user_id, branch_code, t0, ai_config=ai_config
             )
 
@@ -1559,8 +1766,8 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                 except Exception as e_mem:
                     logger.warning("Replay SQL memory gagal (%s), lanjut ke LLM...", e_mem)
 
-        # 0.4. Cek Kueri Rincian Terpisah (Gaya 2) atau Kueri Makro Dealer Multi-Tab
-        fanout_info = cek_apakah_minta_rincian_terpisah(question, inherited_topic=inherited_topic) or cek_apakah_perlu_fanout(question)
+        # 0.4. Cek Kueri Rincian Terpisah (Gaya 2) atau Kueri Multi-Laporan Dinamis
+        fanout_info = cek_apakah_minta_rincian_terpisah(question, inherited_topic=inherited_topic) or cek_apakah_minta_multi_query(question)
         if fanout_info:
             ai_config = await resolve_ai_config(core_pool, user.get("username", ""), branch_code)
             async with VANNA_SEMAPHORE:
@@ -1734,8 +1941,8 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                 )
                 return response
 
-        # 0.5. Cek Ambiguitas Domain Dealer (Interactive Clarification Loop)
-        ambiguitas = cek_ambiguitas_pertanyaan(question)
+        # 0.5. Cek Ambiguitas Domain Dealer (Bypassed: langsung eksekusi kueri analitik tanpa membajak alur)
+        ambiguitas = None
         if ambiguitas:
             durasi_ms = int((time.monotonic() - t0) * 1000)
             response = {

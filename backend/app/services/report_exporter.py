@@ -197,9 +197,9 @@ def generate_excel_report(
     ws['A2'] = f"Kueri: {question}"
     ws['A2'].font = Font(name="Segoe UI", size=10, italic=True, color="475569")
 
-    divisi_text = f" · Divisi: {tab_name}" if tab_name else ""
+    kategori_text = f" · Kategori: {tab_name}" if tab_name else ""
     tgl_cetak = datetime.now().strftime("%d %B %Y, %H:%M WIB")
-    ws['A3'] = f"Cabang: {branch_code}{divisi_text} · Dicetak: {tgl_cetak}"
+    ws['A3'] = f"Cabang: {branch_code}{kategori_text} · Dicetak: {tgl_cetak}"
     ws['A3'].font = Font(name="Segoe UI", size=9, color="64748B")
 
     # Batasi bila kolom kosong

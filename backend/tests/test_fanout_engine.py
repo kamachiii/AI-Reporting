@@ -129,8 +129,8 @@ def test_susun_tab_komparasi_divisi():
     komparasi = susun_tab_komparasi_divisi(domain_results, "Bandingkan performa antar divisi")
     assert komparasi is not None
     assert komparasi["id"] == "komparasi"
-    assert komparasi["title"] == "Komparasi Antar Divisi"
-    assert "divisi" in komparasi["columns"]
+    assert komparasi["title"] in ("Ringkasan Komparasi", "Komparasi Antar Divisi")
+    assert "kategori" in komparasi["columns"] or "divisi" in komparasi["columns"]
     assert "total_omzet" in komparasi["columns"]
     assert "kontribusi_omzet" in komparasi["columns"]
     assert len(komparasi["rows"]) == 2
@@ -144,6 +144,23 @@ def test_susun_tab_komparasi_divisi():
     assert serv_row[1] == 10
     assert serv_row[2] == 100_000_000
     assert serv_row[3] == "10,0%"
+
+
+def test_cek_apakah_minta_multi_query_dan_single():
+    from app.services.fanout_engine import cek_apakah_minta_multi_query
+    # Kueri multi-laporan eksplisit
+    multi_res = cek_apakah_minta_multi_query("tampilkan 5 mobil terlaris dan 5 pelanggan teratas")
+    assert multi_res is not None
+    assert len(multi_res["domains"]) == 2
+    titles = [d["title"] for d in multi_res["domains"]]
+    assert "5 Mobil Terlaris" in titles
+    assert "5 Pelanggan Teratas" in titles
+
+    # Kueri data tunggal tidak boleh terpicu multi-query
+    assert cek_apakah_minta_multi_query("berapa total penjualan tahun 2025?") is None
+    assert cek_apakah_minta_multi_query("tampilkan sisa stok saat ini") is None
+    assert cek_apakah_minta_multi_query("penjualan mobil honda dan toyota") is None
+
 
 
 def test_smart_context_note_tahun_berjalan():

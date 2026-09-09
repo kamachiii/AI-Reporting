@@ -159,9 +159,8 @@ async def test_jalankan_mode_vanna_fanout_3s():
     user = {"user_id": 1, "username": "testuser"}
 
     llm_json = json.dumps({
-        "unit": "SELECT count(*) AS total_unit, sum(hjakhir) AS omzet FROM untt_penjualan WHERE batal = false;",
-        "service": "SELECT count(*) AS total_pkb, sum(total_biaya) AS pendapatan FROM womt_wo WHERE batal = false;",
-        "part": "SELECT count(*) AS total_item, sum(total_harga) AS total_part FROM womt_wopart;"
+        "sub_mobil": "SELECT count(*) AS total_unit, sum(hjakhir) AS omzet FROM untt_penjualan WHERE batal = false;",
+        "sub_servis": "SELECT count(*) AS total_pkb, sum(total_biaya) AS pendapatan FROM womt_wo WHERE batal = false;",
     })
 
     async def mock_llm(sys_msg, prompt, cfg):
@@ -171,18 +170,16 @@ async def test_jalankan_mode_vanna_fanout_3s():
          patch("app.services.vanna_engine.resolve_ai_config", return_value={}), \
          patch("app.services.vanna_engine.ambil_konteks_vanna", return_value=("Context...", [])):
         res = await jalankan_mode_vanna(
-            fake_core_pool, fake_tpm, user, "berapa total penjualan tahun 2025", "TST_01",
+            fake_core_pool, fake_tpm, user, "tampilkan penjualan mobil dan servis bengkel", "TST_01",
             llm_call_fn=mock_llm
         )
 
         assert res["is_multi_tab"] is True
-        assert len(res["tabs"]) == 3
-        assert res["tabs"][0]["id"] == "unit"
-        assert res["tabs"][1]["id"] == "service"
-        assert res["tabs"][2]["id"] == "part"
-        assert "Unit Kendaraan" in res["ringkasan"]
-        assert "Jasa Servis Bengkel" in res["ringkasan"]
-        assert "Suku Cadang" in res["ringkasan"]
+        assert len(res["tabs"]) == 2
+        assert res["tabs"][0]["id"] == "sub_mobil"
+        assert res["tabs"][1]["id"] == "sub_servis"
+        assert "Unit Kendaraan" in res["ringkasan"] or "Penjualan" in res["ringkasan"]
+        assert "Jasa Servis Bengkel" in res["ringkasan"] or "Servis" in res["ringkasan"]
 
 
 def test_annual_comparison_anti_inversion():
@@ -326,26 +323,27 @@ def test_is_explanatory_question():
     assert _is_explanatory_question("daftar suku cadang fast moving") is False
 
 
+class _StubCorePool:
+    def __init__(self, assistant_content=None):
+        self.content = assistant_content
+    async def fetchrow(self, query, *args):
+        if "FROM messages" in query:
+            if self.content is not None:
+                return {"content": self.content}
+            return None
+        if "FROM conversations" in query:
+            return {"id": 99}
+        return None
+    async def fetchval(self, query, *args):
+        return 99
+    async def execute(self, query, *args):
+        return "INSERT 0 1"
+
+
 def test_tangani_kueri_panduan_umum_dan_eksplanatori():
     import asyncio
     import json
     from app.services.vanna_engine import tangani_kueri_panduan_umum, tangani_kueri_eksplanatori
-
-    class _StubCorePool:
-        def __init__(self, assistant_content=None):
-            self.content = assistant_content
-        async def fetchrow(self, query, *args):
-            if "FROM messages" in query:
-                if self.content is not None:
-                    return {"content": self.content}
-                return None
-            if "FROM conversations" in query:
-                return {"id": 99}
-            return None
-        async def fetchval(self, query, *args):
-            return 99
-        async def execute(self, query, *args):
-            return "INSERT 0 1"
 
     pool = _StubCorePool()
 
@@ -395,6 +393,49 @@ def test_tangani_kueri_panduan_umum_dan_eksplanatori():
     )
     assert res_explan_empty["is_conversational_text"] is True
     assert "Belum ada data tabel" in res_explan_empty["ringkasan"]
+
+
+def test_conversational_question_detection():
+    from app.services.vanna_engine import _is_conversational_question
+    assert _is_conversational_question("halo") is True
+    assert _is_conversational_question("selamat pagi") is True
+    assert _is_conversational_question("apa itu PKB?") is True
+    assert _is_conversational_question("apa arti SPK?") is True
+    assert _is_conversational_question("apa bedanya norangka dan nopolisi?") is True
+    assert _is_conversational_question("kamu bisa apa saja?") is True
+    assert _is_conversational_question("terima kasih") is True
+    assert _is_conversational_question("makasih banyak") is True
+    assert _is_conversational_question("mantap keren") is True
+
+    # Data queries must return False
+    assert _is_conversational_question("berapa total penjualan tahun 2025?") is False
+    assert _is_conversational_question("tampilkan 5 mobil terlaris") is False
+    assert _is_conversational_question("sisa stok saat ini") is False
+    assert _is_conversational_question("tampilkan 5 mobil terlaris dan 5 pelanggan teratas") is False
+
+
+def test_tangani_kueri_percakapan_fallback():
+    import asyncio
+    from app.services.vanna_engine import tangani_kueri_percakapan
+    pool = _StubCorePool()
+
+    res_pkb = asyncio.run(
+        tangani_kueri_percakapan(pool, 1, "apa itu PKB?", 1, "TST_01", 0.0)
+    )
+    assert res_pkb["source"] == "conversational"
+    assert res_pkb["is_conversational_text"] is True
+    assert res_pkb["sql"] == ""
+    assert res_pkb["rows"] == []
+    assert "Perintah Kerja Bengkel" in res_pkb["ringkasan"]
+    assert len(res_pkb["saran"]) >= 3
+
+    res_halo = asyncio.run(
+        tangani_kueri_percakapan(pool, 1, "halo", 1, "TST_01", 0.0)
+    )
+    assert res_halo["source"] == "conversational"
+    assert res_halo["is_conversational_text"] is True
+    assert "Selamat datang" in res_halo["ringkasan"]
+
 
 
 

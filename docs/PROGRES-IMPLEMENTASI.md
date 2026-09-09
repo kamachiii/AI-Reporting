@@ -74,6 +74,7 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **Penyempurnaan Tipografi Sidebar, Arsip Percakapan & Polish UI/UX** | selesai | `a196fad` | Pembesaran font Arsip Percakapan (text-[15px] font-medium font-serif), mempertahankan font-normal khusus "Riwayat Chat" pada floating handle, restorasi font-medium/semibold pada aksi & active item, scrollbar ramping editorial di index.css, shortcut keyboard Ctrl+B / Cmd+B, dan animasi aktif tactile |
 | **Eliminasi Badge Visual Ctrl+B & Perluasan Trigger Fan-Out Tiap Divisi** | selesai | `a25c07b` | Menghapus badge teks visual Ctrl+B dari floating handle (informasi tetap via hover title), menghapus cache memory tunggal #67, dan memperluas trigger regex fanout_engine untuk menangani typo 'peforma' & frasa 'tiap divisi' sehingga perbandingan performa antar divisi per tahun sukses terpecah ke 4 tab (Komparasi, Unit, Servis, Sparepart) |
 | **Progressive Comparison (Gaya 1 -> Gaya 2) & Zero Emoji** | selesai | LIVE | Deteksi kueri periode (Gaya 1 tabel terpadu default + chart); ProactiveBreakdownOffer interaktif ke Gaya 2 (multi-tab rincian terpisah per periode tanpa jargon 3S); Penegakan 100% Zero-Emoji (SVG Lucide SplitSquareVertical, Calendar, Table2); 562 test backend lulus, lint 0 error, build 0 error |
+| **Arsitektur Chatbot Percakapan Murni & Dynamic Multi-Query** | selesai | LIVE | Mode Percakapan Murni (0 SQL, 0 Table untuk salam, konsep bisnis dealer PKB/SPK/VIN, kapabilitas); Eliminasi pola 3S fan-out divisi & tombol ambiguitas pembajak kueri; Kueri analitik tunggal 1 tabel presisi; Dynamic Multi-Query berbasis permintaan nyata (tab judul kustom); 577 test lulus, lint 0 error, build 0 error |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -1714,6 +1715,42 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Live E2E Database Test (`test_e2e_user_queries.py`):
     - Kueri *"tampilkan 5 mobil terlaris"* berhasil dieksekusi 100% akurat terhadap database dealer riil: New Brio Satya E CVT (2.392 unit, Rp 477,2 M), New Brio Satya E MT (1.606 unit, Rp 320,3 M), New Jazz RS CVT (617 unit), New Brio RS CVT (615 unit), HR-V E CVT (605 unit).
     - Kueri lanjutan *"gw mau semua data"* dan *"semua"* sukses merespons Fan-Out 3S (Unit Kendaraan: 24 baris, Jasa Servis Bengkel: 24 baris, Suku Cadang & Sparepart: 24 baris) dengan 0 loop greeting.
+
+### 3ax. Arsitektur Chatbot Percakapan Murni, Eliminasi Pola 3S Divisi, dan Dynamic Multi-Query Planning (commit: HEAD)
+
+- **Latar Belakang & Masukan Pengguna**:
+  1. *Keluhan Pengguna Mengenai Pola 3S & Divisi*: Pengguna mengkritisi penggunaan pola Fan-Out 3S statis yang selalu memecah pertanyaan tunggal (misal *"berapa total penjualan tahun 2025?"*) ke dalam domain buatan "Unit Kendaraan", "Jasa Servis Bengkel", "Suku Cadang & Sparepart", lengkap dengan tab komparasi fiktif "Komparasi Antar Divisi" dan kolom buatan `divisi`. Dealer otomotif nyata tidak memerlukan pembagian divisi yang dipaksakan.
+  2. *Keinginan Chatbot AI Sejati*: Pengguna menginginkan asisten cerdas yang:
+     - Jika pengguna bertanya sapaan (*"halo"*, *"selamat pagi"*), kapabilitas (*"kamu bisa apa?"*), atau konsep bisnis dealer (*"apa itu PKB?"*, *"apa bedanya norangka dan nopolisi?"*), AI merespons murni dengan percakapan naratif yang ramah dan berwawasan (0 SQL, 0 Table) tanpa kartu tabel kosong atau box "Tidak ada data".
+     - Jika pengguna meminta 1 analitik data (*"berapa total penjualan tahun 2025?"*, *"tampilkan 5 mobil terlaris"*), asisten menyajikan **1 tabel tunggal yang tepat** (tanpa tab switcher dan tanpa memaksakan 3S).
+     - Jika pengguna memang meminta beberapa hal sekaligus (*"tampilkan 5 mobil terlaris dan 5 pelanggan teratas"*), asisten merencanakan sub-kueri dinamis dan menampilkan tab dengan judul asli sesuai permintaan pengguna (misal Tab 1: *"5 Mobil Terlaris"*, Tab 2: *"5 Pelanggan Teratas"*), **bukan istilah fiktif "divisi"**.
+
+- **Solusi & Rekayasa Arsitektur**:
+  1. **Mode Percakapan Murni (`_is_conversational_question` & `tangani_kueri_percakapan` di `vanna_engine.py`)**:
+     - Deteksi komprehensif untuk sapaan, ucapan terima kasih, pertanyaan kapabilitas, dan istilah konsep otomotif (PKB/WO, SPK, VIN/No Rangka, No Polisi, OTR, Faktur, dll.).
+     - AI merespons dengan teks naratif bahasa Indonesia yang profesional (0 SQL, 0 rows) + 4 chip saran kontekstual. Dilengkapi mekanisme ekstraksi JSON ke prosa jika LLM membungkus respons dalam JSON, serta fallback cerdas deterministik bila provider eksternal mengalami kendala.
+     - Penulisan pesan ke history dan audit log dengan kategori `conversational`.
+  2. **Bypass Ambiguitas Pembajak Kueri (`clarification_engine.py`)**:
+     - Mem-bypass `cek_ambiguitas_pertanyaan` pada alur kueri data sehingga pertanyaan seperti *"berapa total penjualan tahun 2025?"* tidak lagi diinterupsi oleh kartu pertanyaan "divisi bisnis mana yang ingin dianalisis", melainkan langsung dieksekusi menghasilkan 1 tabel total penjualan riil.
+  3. **Dynamic Multi-Query Planning (`cek_apakah_minta_multi_query` di `fanout_engine.py`)**:
+     - Taksonomi entitas dealer (`ENTITY_TAXONOMY`: mobil, customer, servis, sparepart, stok, pembelian, sales).
+     - Deteksi konjungsi multi-laporan (*"dan"*, *"serta"*, *"sekaligus"*) yang menghubungkan entitas bisnis berbeda, secara otomatis menetapkan judul tab spesifik sesuai permintaan pengguna (*"5 Mobil Terlaris"*, *"5 Pelanggan Teratas"*).
+     - Kueri tunggal (*"berapa total penjualan tahun 2025?"*, *"sisa stok saat ini"*) otomatis dieksekusi sebagai single-query table (`is_multi_tab: False`).
+  4. **Pembersihan Kosakata "Divisi" (`fanout_engine.py`)**:
+     - Mengubah kolom `divisi` menjadi `kategori` dan tab "Komparasi Antar Divisi" menjadi "Ringkasan Komparasi" pada `susun_tab_komparasi_divisi`.
+     - Menghapus penyebutan kata "divisi" pada narasi `susun_ringkasan_eksekutif_multi`.
+  5. **Presentasi Adaptif Sisi Klien (`AssistantAnswerCard.jsx`)**:
+     - Kartu percakapan murni (`is_conversational_text: True` atau `source: 'conversational'`) menyembunyikan box "Tidak ada data", badge "Hasil Basis Data Terverifikasi", dan tombol "Apakah jawaban ini benar?", menyajikan tipografi editorial bersih dan chip rekomendasi eksplorasi data.
+
+- **Hasil Verifikasi**:
+  - Backend compile: `compileall app` lolos 100% (exit code 0).
+  - Backend test suite: `pytest tests/ -q` lolos 100% (**577 passed in 33.69s**).
+  - Frontend lint: `npm run lint` lolos (**0 errors**).
+  - Frontend build: `npm run build` lolos (exit code 0, 1.18s).
+  - Live E2E Database Test (`test_live_all_modes.py`):
+    - *Percakapan Murni*: *"halo selamat sore"*, *"apa itu PKB?"*, *"apa bedanya norangka dan nopolisi?"*, *"kamu bisa apa saja?"*, *"terima kasih banyak"* lolos 100% dengan respons naratif Indonesia luwes, 0 SQL, 0 tabel.
+    - *Kueri Tunggal*: *"berapa total penjualan tahun 2025?"* (1 baris: `total_penjualan_2025: Rp 69,83 Miliar`, 187 ms), *"tampilkan 5 mobil terlaris"* (5 baris, 125 ms) lolos 100% tabel tunggal tanpa pola 3S atau kata divisi.
+    - *Multi-Tabel Dinamis*: *"tampilkan 5 mobil terlaris dan 5 pelanggan teratas"* lolos 100% dengan 2 tab dinamis: Tab 1 *"5 Mobil Terlaris"* dan Tab 2 *"5 Pelanggan Teratas"*.
 
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 

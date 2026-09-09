@@ -153,6 +153,151 @@ def cek_apakah_perlu_fanout(question: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+
+ENTITY_TAXONOMY: Dict[str, Dict[str, Any]] = {
+    "mobil": {
+        "patterns": [r"\b(?:mobil|unit|kendaraan|chassis|norangka|tipe\s+mobil|model\s+mobil)\b"],
+        "title_default": "Unit Kendaraan",
+        "icon": "Car",
+        "hint": "Gunakan tabel 'untt_penjualan' (filter untt_penjualan.batal = false AND untt_penjualan.retur = false). Nilai omzet = SUM(hjakhir), jumlah unit = COUNT(*)."
+    },
+    "customer": {
+        "patterns": [r"\b(?:customer|pelanggan|konsumen|pembeli|klien)\b"],
+        "title_default": "Data Pelanggan",
+        "icon": "Users",
+        "hint": "Tampilkan data pelanggan dari kolom 'customer' atau 'untt_customer'. GROUP BY customer."
+    },
+    "servis": {
+        "patterns": [r"\b(?:servis|service|bengkel|pkb|wo|perawatan|mekanik|pekerjaan)\b"],
+        "title_default": "Jasa Servis Bengkel",
+        "icon": "Wrench",
+        "hint": "Gunakan tabel 'srvt_wo' (filter srvt_wo.batal = false). Total pendapatan jasa = COALESCE(SUM(totalestimasibiaya), 0), jumlah PKB/WO = COUNT(nomor)."
+    },
+    "sparepart": {
+        "patterns": [r"\b(?:part|parts|sparepart|suku\s+cadang|aksesoris|oli|ban)\b"],
+        "title_default": "Suku Cadang & Sparepart",
+        "icon": "Package",
+        "hint": "Gunakan tabel 'srvt_wodetail' (filter part > 0) atau 'prtt_penjualan'."
+    },
+    "stok": {
+        "patterns": [r"\b(?:stok|stock|persediaan|gudang|inventory)\b"],
+        "title_default": "Persediaan & Stok",
+        "icon": "Layers",
+        "hint": "Gunakan tabel 'untt_datakendaraan' untuk unit atau 'srvt_stockparts' untuk sparepart."
+    },
+    "pembelian": {
+        "patterns": [r"\b(?:pembelian|pengadaan|kulakan|beli\s+unit|beli\s+part|supplier|vendor)\b"],
+        "title_default": "Pembelian Unit",
+        "icon": "ShoppingBag",
+        "hint": "Gunakan tabel 'untt_pembelian' (filter untt_pembelian.batal = false)."
+    },
+    "sales": {
+        "patterns": [r"\b(?:sales|salesman|wiraniaga|tenaga\s+penjual)\b"],
+        "title_default": "Performa Salesman",
+        "icon": "TrendingUp",
+        "hint": "Gunakan kolom 'salesman' pada untt_penjualan."
+    }
+}
+
+
+def cek_apakah_minta_multi_query(question: str) -> Optional[Dict[str, Any]]:
+    """Deteksi apakah pengguna secara eksplisit meminta beberapa laporan berbeda dalam satu kueri (Dynamic Multi-Query).
+    
+    Hanya aktif jika pengguna meminta lebih dari satu topik/entitas data operasional yang berbeda.
+    Contoh:
+    - 'tampilkan 5 mobil terlaris dan 5 pelanggan teratas' -> Multi-Query (2 Tab)
+    - 'tampilkan penjualan mobil dan servis bengkel' -> Multi-Query (2 Tab)
+    - 'berapa total penjualan tahun 2025?' -> None (Single Query normal!)
+    """
+    q_lower = (question or "").strip().lower()
+    if not q_lower or len(q_lower) < 5:
+        return None
+
+    # Jika perbandingan antar periode tanpa kata terpisah, itu komparasi temporal single query
+    if _ekstrak_dua_periode(question) is not None:
+        if not re.search(r"\b(?:terpisah|pisahkan|dipisah|pisah|pecah|masing-masing\s+tabel|tiap\s+tabel|per\s+tabel)\b", q_lower):
+            return None
+
+    # Deteksi kata hubung konjungsi yang menghubungkan 2 permintaan
+    conjunction_pat = r"\b(?:dan|serta|sekaligus)\b"
+    if not re.search(conjunction_pat, q_lower):
+        return None
+
+    parts = re.split(conjunction_pat, q_lower, maxsplit=1)
+    if len(parts) < 2:
+        return None
+
+    part_a, part_b = parts[0].strip(), parts[1].strip()
+
+    # Identifikasi entitas di part A dan part B
+    matched_a = None
+    for ent, data in ENTITY_TAXONOMY.items():
+        if any(re.search(p, part_a) for p in data["patterns"]):
+            matched_a = ent
+            break
+
+    matched_b = None
+    for ent, data in ENTITY_TAXONOMY.items():
+        if any(re.search(p, part_b) for p in data["patterns"]):
+            matched_b = ent
+            break
+
+    # Hanya picu multi-query jika part A dan part B merujuk pada 2 entitas BISNIS BERBEDA
+    if not matched_a or not matched_b or matched_a == matched_b:
+        return None
+
+    def _tentukan_judul(part_text: str, ent_key: str) -> str:
+        ent_info = ENTITY_TAXONOMY[ent_key]
+        num_match = re.search(r"\b(\d+)\b", part_text)
+        num_prefix = f"{num_match.group(1)} " if num_match else ""
+
+        if ent_key == "mobil":
+            if "terlaris" in part_text or "terbanyak" in part_text:
+                return f"{num_prefix}Mobil Terlaris".strip()
+            elif "stok" in part_text:
+                return "Stok Unit Mobil"
+            return f"{num_prefix}Penjualan Mobil".strip() if num_prefix else ent_info["title_default"]
+        elif ent_key == "customer":
+            if "teratas" in part_text or "terbesar" in part_text or "terbanyak" in part_text or "loyal" in part_text:
+                return f"{num_prefix}Pelanggan Teratas".strip()
+            return f"{num_prefix}Data Pelanggan".strip() if num_prefix else ent_info["title_default"]
+        elif ent_key == "servis":
+            if "pendapatan" in part_text or "omzet" in part_text:
+                return "Pendapatan Servis Bengkel"
+            return ent_info["title_default"]
+        elif ent_key == "sparepart":
+            if "stok" in part_text:
+                return "Stok Suku Cadang"
+            return ent_info["title_default"]
+        elif ent_key == "sales":
+            return f"{num_prefix}Top Salesman".strip() if num_prefix else ent_info["title_default"]
+        return ent_info["title_default"]
+
+    title_a = _tentukan_judul(part_a, matched_a)
+    title_b = _tentukan_judul(part_b, matched_b)
+
+    return {
+        "category": "multi_request",
+        "mode": "dynamic_multi",
+        "domains": [
+            {
+                "id": f"sub_{matched_a}",
+                "title": title_a,
+                "icon": ENTITY_TAXONOMY[matched_a]["icon"],
+                "focus": f"Analisis data {title_a} berdasarkan permintaan: '{part_a}'",
+                "hint": ENTITY_TAXONOMY[matched_a]["hint"],
+            },
+            {
+                "id": f"sub_{matched_b}",
+                "title": title_b,
+                "icon": ENTITY_TAXONOMY[matched_b]["icon"],
+                "focus": f"Analisis data {title_b} berdasarkan permintaan: '{part_b}'",
+                "hint": ENTITY_TAXONOMY[matched_b]["hint"],
+            },
+        ]
+    }
+
+
 def susun_multi_sql_prompt(question: str, fanout_info: Dict[str, Any], context_text: str) -> str:
     """Menyusun 1 prompt tunggal ke LLM untuk menghasilkan SQL semua sub-domain dalam bentuk JSON."""
     domains = fanout_info["domains"]
@@ -177,6 +322,11 @@ def susun_multi_sql_prompt(question: str, fanout_info: Dict[str, Any], context_t
         intro = (
             f'The user requested detailed transaction breakdowns separated by period: "{question}"\n\n'
             "Generate an independent, valid PostgreSQL SELECT query for each requested period:\n"
+        )
+    elif fanout_info.get("category") == "multi_request":
+        intro = (
+            f'The user requested multiple specific reports in a single query: "{question}"\n\n'
+            "Generate an independent, valid PostgreSQL SELECT query for each requested report below:\n"
         )
     else:
         intro = (
@@ -438,18 +588,18 @@ def _is_column_money(col_name: str) -> bool:
 
 
 def susun_tab_komparasi_divisi(domain_results: List[Dict[str, Any]], question: str) -> Optional[Dict[str, Any]]:
-    """Menyusun tab tabel komparasi sejajar antar divisi (Sales, Service, Sparepart)."""
+    """Menyusun tab tabel komparasi sejajar antar kategori laporan."""
     valid_items = [d for d in domain_results if (d.get("row_count", 0) > 0 or d.get("rows")) and not d.get("error") and d.get("id") != "komparasi"]
     if len(valid_items) <= 1:
-        # Komparasi antar divisi hanya valid jika ada minimal 2 divisi berbeda
+        # Komparasi hanya valid jika ada minimal 2 kategori berbeda
         return None
 
-    # Hitung total volume dan total omzet per divisi
+    # Hitung total volume dan total omzet per kategori
     summary_rows = []
     total_all_omzet = 0.0
 
     for item in valid_items:
-        title = item.get("title", "Divisi")
+        title = item.get("title", "Kategori")
         rows = item.get("rows", [])
         columns = [str(c).lower() for c in item.get("columns", [])]
         raw_records = item.get("raw_records", [])
@@ -497,7 +647,7 @@ def susun_tab_komparasi_divisi(domain_results: List[Dict[str, Any]], question: s
 
         total_all_omzet += div_omzet
         summary_rows.append({
-            "divisi": title,
+            "kategori": title,
             "total_transaksi": div_volume,
             "total_omzet": div_omzet,
         })
@@ -508,29 +658,30 @@ def susun_tab_komparasi_divisi(domain_results: List[Dict[str, Any]], question: s
     for s in summary_rows:
         pct = (s["total_omzet"] / total_all_omzet * 100.0) if total_all_omzet > 0 else 0.0
         table_rows.append([
-            s["divisi"],
+            s["kategori"],
             s["total_transaksi"],
             s["total_omzet"],
             f"{pct:.1f}%".replace(".", ",")
         ])
         raw_recs.append({
-            "divisi": s["divisi"],
+            "kategori": s["kategori"],
+            "divisi": s["kategori"],  # Dukungan kompatibilitas backward
             "total_transaksi": s["total_transaksi"],
             "total_omzet": s["total_omzet"],
             "kontribusi_omzet": f"{pct:.1f}%".replace(".", ",")
         })
 
-    combined_sql = "-- Ringkasan Komparasi Multi-Divisi\n" + "\n\n".join(
-        f"-- Divisi {t['title']}:\n{t.get('sql', '')}" for t in valid_items if t.get("sql")
+    combined_sql = "-- Ringkasan Komparasi\n" + "\n\n".join(
+        f"-- {t['title']}:\n{t.get('sql', '')}" for t in valid_items if t.get("sql")
     )
 
     return {
         "id": "komparasi",
-        "title": "Komparasi Antar Divisi",
-        "label": "Komparasi Antar Divisi",
+        "title": "Ringkasan Komparasi",
+        "label": "Ringkasan Komparasi",
         "icon": "BarChart3",
         "sql": combined_sql,
-        "columns": ["divisi", "total_transaksi", "total_omzet", "kontribusi_omzet"],
+        "columns": ["kategori", "total_transaksi", "total_omzet", "kontribusi_omzet"],
         "rows": table_rows,
         "row_count": len(table_rows),
         "raw_records": raw_recs,
@@ -549,7 +700,7 @@ def susun_ringkasan_eksekutif_multi(domain_results: List[Dict[str, Any]], questi
         target_items = domain_results
     
     for item in target_items:
-        title = item.get("title", "Divisi")
+        title = item.get("title", "Kategori")
         rows = item.get("raw_records", []) or item.get("rows", [])
         columns = item.get("columns", [])
         if not rows:

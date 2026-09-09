@@ -41,7 +41,8 @@ const COLUMN_LABEL_DICT = {
   retur: 'Retur',
   tahun: 'Tahun',
   bulan: 'Bulan',
-  divisi: 'Divisi Operasional',
+  kategori: 'Kategori',
+  divisi: 'Kategori',
   total_transaksi: 'Total Transaksi',
   total_omzet: 'Total Omzet',
   total_pembelian: 'Total Pembelian',
@@ -791,6 +792,8 @@ export default function AssistantAnswerCard({
 
   const isConversational = Boolean(
     answer?.is_conversational_text ||
+    answer?.source === 'conversational' ||
+    answer?.metode === 'conversational' ||
     answer?.metode === 'conversational_explanation' ||
     answer?.metode === 'conversational_guide' ||
     isDummySqlResponse
@@ -829,10 +832,10 @@ export default function AssistantAnswerCard({
           <div className="flex items-center gap-2 flex-wrap">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-surface-card border border-hairline text-ink text-xs font-medium">
               <Compass size={13} className="text-primary" />
-              <span>Asisten Dealer</span>
+              <span>Asisten Dealer AI</span>
             </span>
             <span className="text-[11px] text-muted font-mono bg-surface-card px-2 py-0.5 rounded-md border border-hairline">
-              {isGuide ? 'Panduan Modul' : 'Penjelasan Konteks'}
+              {answer?.metode === 'conversational_explanation' ? 'Penjelasan Konteks' : 'Percakapan'}
             </span>
           </div>
 
