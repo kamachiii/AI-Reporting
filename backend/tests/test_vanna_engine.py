@@ -437,6 +437,25 @@ def test_tangani_kueri_percakapan_fallback():
     assert "Selamat datang" in res_halo["ringkasan"]
 
 
+def test_vanna_cek_apakah_minta_rincian_terpisah_window_sql():
+    from app.services.vanna_engine import cek_apakah_minta_rincian_terpisah
+    res = cek_apakah_minta_rincian_terpisah("tampilkan rincian transaksi 2023 dan 2024 terpisah", inherited_topic="penjualan")
+    assert res is not None
+    assert res["category"] == "rincian_terpisah"
+    assert len(res["domains"]) == 2
+    sql_1 = res["domains"][0]["sql"]
+    sql_2 = res["domains"][1]["sql"]
+
+    # Verifikasi keberadaan SQL Window Functions
+    assert "COUNT(*) OVER() AS total_transaksi_tahun" in sql_1
+    assert "SUM(hjakhir) OVER() AS total_omzet_tahun" in sql_1
+    assert "LIMIT 50" in sql_1
+    assert "COUNT(*) OVER() AS total_transaksi_tahun" in sql_2
+    assert "SUM(hjakhir) OVER() AS total_omzet_tahun" in sql_2
+    assert "LIMIT 50" in sql_2
+
+
+
 
 
 

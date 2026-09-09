@@ -710,6 +710,9 @@ def susun_ringkasan_eksekutif_multi(domain_results: List[Dict[str, Any]], questi
         # Cek apakah item ini tab rincian detail transaksi (banyak baris tanpa kolom total)
         is_rincian_item = "Rincian" in str(title) or (len(rows) > 1 and not any("total" in str(c).lower() for c in columns))
         if is_rincian_item:
+            full_count = item.get("total_full_count")
+            full_money = item.get("total_full_money")
+
             uang_col = next((c for c in columns if any(u in c.lower() for u in ["hpunit", "hpdpp", "hpppn", "hppbm", "hjunit", "hjakhir", "harga", "nilai", "omzet", "biaya", "total"])), None)
             total_nominal = 0.0
             if uang_col:
@@ -720,7 +723,21 @@ def susun_ringkasan_eksekutif_multi(domain_results: List[Dict[str, Any]], questi
                             total_nominal += float(rv)
                         except (ValueError, TypeError):
                             pass
-            if total_nominal > 0:
+
+            uang_display = full_money if (full_money is not None and full_money > 0) else total_nominal
+            formatted_count = f"{int(full_count):,}".replace(",", ".") if full_count is not None else ""
+
+            if full_count is not None and full_count > len(rows):
+                if uang_display > 0:
+                    parts.append(f"{title}: Menampilkan pratinjau {len(rows)} transaksi terbaru dari total {formatted_count} transaksi (Total Omzet: {_format_rupiah_singkat(uang_display)})")
+                else:
+                    parts.append(f"{title}: Menampilkan pratinjau {len(rows)} transaksi terbaru dari total {formatted_count} transaksi")
+            elif full_count is not None and full_count > 0:
+                if uang_display > 0:
+                    parts.append(f"{title}: {formatted_count} transaksi (total {_format_rupiah_singkat(uang_display)})")
+                else:
+                    parts.append(f"{title}: {formatted_count} transaksi")
+            elif total_nominal > 0:
                 parts.append(f"{title}: {len(rows)} transaksi (total {_format_rupiah_singkat(total_nominal)})")
             else:
                 parts.append(f"{title}: {len(rows)} transaksi")

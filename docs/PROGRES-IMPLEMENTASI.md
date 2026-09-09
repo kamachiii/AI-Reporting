@@ -1983,6 +1983,52 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Frontend Build: `npm run build` (**exit 0**, built in 1.24s).
   - Backend Test Suite: `pytest tests/ -q` (**591 passed in 45.04s**, 0 failed).
 
+### 3bb. SQL Window Aggregation Rincian Terpisah, Eliminasi Disinformasi Sampel & Penyelarasan Multiturn (2026-09-09)
+
+- **Latar Belakang & Investigasi Masalah User (`tester02`, Conversation ID 84)**:
+  - Pada Turn #4, user menanyakan komparasi penjualan 2023 vs 2024. Sistem merespons dengan data agregat akurat: 2023 membukukan **1.032 transaksi (Rp 205,88 Miliar)** dan 2024 membukukan **952 transaksi (Rp 189,92 Miliar)**.
+  - Pada Turn #5, user meminta: *"coba tampilin rincian transaksi 2023 dan 2024 terpisah"*.
+  - Sistem mengeksekusi multi-tab rincian transaksi (`LIMIT 50`), namun teks ringkasan keliru berbunyi: *"Rincian Tahun 2023: 10 transaksi (total Rp 1,65 Miliar) • Rincian Tahun 2024: 10 transaksi (total Rp 1,75 Miliar)"*.
+  - User kaget dan bertanya: *"loh tapi kan konteks sebelumnya gimana.. kenapa dikasihnya 10 dulu.. engga langsung semua? planning dulu"*.
+  - *Akar Masalah Teknis*:
+    1. Di `backend/app/services/vanna_engine.py`, terdapat hardcoded slicing `raw_records: [dict(r) for r in records[:10]]`.
+    2. Di `backend/app/services/fanout_engine.py`, fungsi `susun_ringkasan_eksekutif_multi` memprioritaskan `raw_records` sehingga hanya menjumlahkan 10 baris pertama sampel (10 × ~165 jt = 1,65 Miliar).
+    3. Timbul disinformasi fatal: tabel browser memuat 50 baris data, teks menyebut "10 transaksi Rp 1,65 Miliar", sementara total tahunan riil di turn sebelumnya adalah 1.032 transaksi Rp 205,88 Miliar.
+
+- **Solusi & Arsitektur Teknis**:
+  1. **Pilar 1: SQL Window Aggregation (`COUNT(*) OVER()`, `SUM(...) OVER()`)**:
+     - Pada `cek_apakah_minta_rincian_terpisah` di `vanna_engine.py`, kueri SQL rincian diperkaya window function:
+       ```sql
+       SELECT nomor, tanggal, nomor_pesanan, norangka, hjunit, diskon, hjakhir,
+              COUNT(*) OVER() AS total_transaksi_tahun,
+              SUM(hjakhir) OVER() AS total_omzet_tahun
+       FROM untt_penjualan
+       WHERE EXTRACT(YEAR FROM tanggal) = 2023 AND NOT COALESCE(batal, FALSE) AND NOT COALESCE(retur, FALSE)
+       ORDER BY tanggal DESC LIMIT 50;
+       ```
+     - Kueri ini mengeksekusi dalam **15 ms** pada database tenant riil (0 overhead) dan langsung mengembalikan 50 baris sampel teratas SEKALIGUS menghitung akumulasi total tahun penuh (`total_transaksi_tahun = 1032`, `total_omzet_tahun = 205.884.000.000`).
+  2. **Pilar 2: Metadata Extraction & UI Column Sanitization (`vanna_engine.py`)**:
+     - Di `_eksekusi_subdomain`, kolom window disaring keluar dari `columns` dan `rows` tabel UI agar tidak mengotori tabel dengan 2 kolom berulang.
+     - Nilai diekstrak ke metadata: `total_full_count` dan `total_full_money`.
+     - Pemotongan artifisial `records[:10]` dihapus total; `raw_records` memuat seluruh 50 data sampel.
+  3. **Pilar 3: Penyusun Ringkasan Transparan & Zero Contradiction (`fanout_engine.py`)**:
+     - Di `susun_ringkasan_eksekutif_multi`, jika terdeteksi metadata window function dengan `total_full_count > len(rows)`, narasi disusun secara jujur dan transparan:
+       `"Rincian transaksi per periode: Rincian Tahun 2023: Menampilkan pratinjau 50 transaksi terbaru dari total 1.032 transaksi (Total Omzet: Rp 205,88 Miliar) • Rincian Tahun 2024: Menampilkan pratinjau 50 transaksi terbaru dari total 952 transaksi (Total Omzet: Rp 189,92 Miliar)."`
+     - Format angka menggunakan pemisah ribuan titik Indonesia tanpa merusak format desimal rupiah.
+  4. **Pilar 4: Transparansi UI di Tab Badge & Paginasi (`AssistantAnswerCard.jsx`)**:
+     - Badge tab menampilkan perbandingan pratinjau vs total riil: `50 / 1.032`.
+     - Keterangan paginasi di bawah tabel menginformasikan secara gamblang: `Menampilkan 1–10 dari 50 data (Total: 1.032 transaksi)`.
+
+- **Verifikasi & Bukti Nyata**:
+  - Backend compileall: **exit 0**.
+  - Backend test suite: `pytest tests/ -q` (**593 passed in 50.10s**, 0 failed).
+  - Frontend lint: `npm run lint` (**0 error, 0 warning baru**).
+  - Frontend build: `npm run build` exit code 0 (**100% lulus**, built in 2.16s).
+  - Real Database Execution Test against `backup_demo_otobitzcloud`:
+    - Tab 2023: 50 rows | Full Count: 1.032 | Full Money: Rp 205,88 Miliar.
+    - Tab 2024: 50 rows | Full Count: 952 | Full Money: Rp 189,92 Miliar.
+    - Ringkasan 100% konsisten dengan Turn #4 tanpa kontradiksi angka sedikit pun.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -2060,6 +2106,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Parser Editorial Markdown Table & Heading, Eliminasi Pipa Teks Mentah** — SELESAI (lihat §3ay).
 - [x] **Dialogue State Tracking (DST), Direct Action Policy & Mechanical Output Guard** — SELESAI (lihat §3az).
 - [x] **Executive Dossier Layout, KPI Metric Banner & Quick Operational Deck** — SELESAI (lihat §3ba).
+- [x] **SQL Window Aggregation Rincian Terpisah, Eliminasi Disinformasi Sampel & Penyelarasan Multiturn** — SELESAI (lihat §3bb).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. *Dedicated Executive Dashboard Page*: Ditutup/dibatalkan atas arahan pengguna untuk mempertahankan identitas murni Conversational AI Assistant.
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.

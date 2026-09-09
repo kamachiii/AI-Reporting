@@ -1341,7 +1341,9 @@ export default function AssistantAnswerCard({
                     <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
                       isActive ? 'bg-primary/10 text-primary' : 'bg-surface-card text-muted'
                     }`}>
-                      {tab.row_count ?? tab.rows?.length ?? 0}
+                      {tab.total_full_count && tab.total_full_count > (tab.row_count ?? tab.rows?.length ?? 0)
+                        ? `${tab.row_count ?? tab.rows?.length ?? 0} / ${tab.total_full_count.toLocaleString('id-ID')}`
+                        : (tab.row_count ?? tab.rows?.length ?? 0)}
                     </span>
                   </button>
                 );
@@ -1689,6 +1691,11 @@ export default function AssistantAnswerCard({
                 <span>
                   Menampilkan {Math.min((tablePage - 1) * pageSize + 1, sortedRows.length)}–
                   {Math.min(tablePage * pageSize, sortedRows.length)} dari {sortedRows.length} data
+                  {currentTab.total_full_count && currentTab.total_full_count > activeRows.length && (
+                    <span className="text-primary font-medium ml-1">
+                      (Total: {currentTab.total_full_count.toLocaleString('id-ID')} transaksi)
+                    </span>
+                  )}
                   {filteredRows.length !== activeRows.length && ` (disaring dari ${activeRows.length})`}
                 </span>
                 {totalPages > 1 && (

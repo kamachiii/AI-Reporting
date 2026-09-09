@@ -1002,6 +1002,7 @@ def cek_apakah_minta_rincian_terpisah(question: str, inherited_topic: str | None
         table = "untt_penjualan"
         date_col = "tanggal"
         order_col = "tanggal"
+        money_col = "hjakhir"
         filter_clause = "NOT COALESCE(batal, FALSE) AND NOT COALESCE(retur, FALSE)"
         columns_to_select = "nomor, tanggal, nomor_pesanan, norangka, hjunit, diskon, hjakhir"
 
@@ -1009,23 +1010,27 @@ def cek_apakah_minta_rincian_terpisah(question: str, inherited_topic: str | None
             table = "untt_pembelian"
             date_col = "tglinvoice"
             order_col = "tglinvoice"
+            money_col = "hpunit"
             filter_clause = "1=1"
             columns_to_select = "nomor, tglinvoice, norangka, hpunit, hpdpp, hpppn"
         elif topic == "servis":
             table = "srvt_wo"
             date_col = "tanggal"
             order_col = "tanggal"
+            money_col = "totalestimasibiaya"
             filter_clause = "NOT COALESCE(batal, FALSE)"
             columns_to_select = "nomor, tanggal, nomor_customer, nopolisi, totalestimasibiaya"
         elif topic == "sparepart":
             table = "srvt_wodetail"
             date_col = "tanggal"
             order_col = "nomor"
+            money_col = "part"
             filter_clause = "part > 0"
             columns_to_select = "nomor_wo, part, jenis"
 
-        sql_1 = f"SELECT {columns_to_select} FROM {table} WHERE EXTRACT(YEAR FROM {date_col}) = {p1} AND {filter_clause} ORDER BY {order_col} DESC LIMIT 50;"
-        sql_2 = f"SELECT {columns_to_select} FROM {table} WHERE EXTRACT(YEAR FROM {date_col}) = {p2} AND {filter_clause} ORDER BY {order_col} DESC LIMIT 50;"
+        window_select = f"{columns_to_select}, COUNT(*) OVER() AS total_transaksi_tahun, SUM({money_col}) OVER() AS total_omzet_tahun"
+        sql_1 = f"SELECT {window_select} FROM {table} WHERE EXTRACT(YEAR FROM {date_col}) = {p1} AND {filter_clause} ORDER BY {order_col} DESC LIMIT 50;"
+        sql_2 = f"SELECT {window_select} FROM {table} WHERE EXTRACT(YEAR FROM {date_col}) = {p2} AND {filter_clause} ORDER BY {order_col} DESC LIMIT 50;"
 
         return {
             "category": "rincian_terpisah",
@@ -2407,18 +2412,42 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                         await conn.execute("SET statement_timeout = '15000'")
                         try:
                             records = await conn.fetch(sql_query)
-                            cols = list(records[0].keys()) if records else []
-                            converted = [[_konversi_nilai_vanna(v) for v in r.values()] for r in records[:500]]
+                            hidden_cols = {"total_transaksi_tahun", "total_omzet_tahun"}
+                            total_full_count = None
+                            total_full_money = None
+
+                            if records:
+                                first_rec = records[0]
+                                if "total_transaksi_tahun" in first_rec and first_rec["total_transaksi_tahun"] is not None:
+                                    try:
+                                        total_full_count = int(first_rec["total_transaksi_tahun"])
+                                    except (ValueError, TypeError):
+                                        pass
+                                if "total_omzet_tahun" in first_rec and first_rec["total_omzet_tahun"] is not None:
+                                    try:
+                                        total_full_money = float(first_rec["total_omzet_tahun"])
+                                    except (ValueError, TypeError):
+                                        pass
+                                raw_keys = list(first_rec.keys())
+                                visible_cols = [c for c in raw_keys if c not in hidden_cols]
+                            else:
+                                visible_cols = []
+
+                            converted = [[_konversi_nilai_vanna(r[c]) for c in visible_cols] for r in records[:500]]
+                            raw_recs = [{c: r[c] for c in visible_cols} for r in records]
+
                             return {
                                 "id": domain_def["id"],
                                 "title": domain_def["title"],
                                 "label": domain_def["title"],
                                 "icon": domain_def["icon"],
                                 "sql": sql_query,
-                                "columns": cols,
+                                "columns": visible_cols,
                                 "rows": converted,
                                 "row_count": len(records),
-                                "raw_records": [dict(r) for r in records[:10]],
+                                "total_full_count": total_full_count,
+                                "total_full_money": total_full_money,
+                                "raw_records": raw_recs,
                                 "error": None
                             }
                         except Exception as e:
@@ -2432,6 +2461,8 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                                 "columns": [],
                                 "rows": [],
                                 "row_count": 0,
+                                "total_full_count": None,
+                                "total_full_money": None,
                                 "raw_records": [],
                                 "error": str(e)
                             }
@@ -2511,6 +2542,8 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                     "columns": default_tab["columns"],
                     "rows": default_tab["rows"],
                     "row_count": default_tab["row_count"],
+                    "total_full_count": default_tab.get("total_full_count"),
+                    "total_full_money": default_tab.get("total_full_money"),
                     "truncated": False,
                     "duration_ms": durasi_ms,
                     "memory_id": None,

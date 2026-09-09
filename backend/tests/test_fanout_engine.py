@@ -244,3 +244,35 @@ def test_susun_tab_komparasi_single_domain_rejected():
     assert susun_tab_komparasi_divisi(domain_results, "Bandingkan pembelian tahun 2024 vs 2025") is None
 
 
+def test_susun_ringkasan_rincian_window_aggregation():
+    from app.services.fanout_engine import susun_ringkasan_eksekutif_multi
+    domain_results = [
+        {
+            "id": "thn_2023",
+            "title": "Rincian Tahun 2023",
+            "columns": ["nomor", "tanggal", "nomor_pesanan", "norangka", "hjunit", "diskon", "hjakhir"],
+            "rows": [["INV01", "2023-01-01", "PO01", "FRAME01", 165000000, 0, 165000000]] * 50,
+            "row_count": 50,
+            "total_full_count": 1032,
+            "total_full_money": 205884000000.0,
+            "raw_records": [{"nomor": f"INV{i}", "hjakhir": 165000000} for i in range(50)],
+        },
+        {
+            "id": "thn_2024",
+            "title": "Rincian Tahun 2024",
+            "columns": ["nomor", "tanggal", "nomor_pesanan", "norangka", "hjunit", "diskon", "hjakhir"],
+            "rows": [["INV02", "2024-01-01", "PO02", "FRAME02", 175000000, 0, 175000000]] * 50,
+            "row_count": 50,
+            "total_full_count": 952,
+            "total_full_money": 189920000000.0,
+            "raw_records": [{"nomor": f"INV{i}", "hjakhir": 175000000} for i in range(50)],
+        }
+    ]
+    summary = susun_ringkasan_eksekutif_multi(domain_results, "tampilkan rincian transaksi 2023 dan 2024 terpisah")
+    assert "Menampilkan pratinjau 50 transaksi terbaru dari total 1.032 transaksi" in summary
+    assert "Total Omzet: Rp 205,88 Miliar" in summary
+    assert "Menampilkan pratinjau 50 transaksi terbaru dari total 952 transaksi" in summary
+    assert "Total Omzet: Rp 189,92 Miliar" in summary
+
+
+
