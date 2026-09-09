@@ -38,6 +38,9 @@ from app.services.fanout_engine import (
     _is_column_money,
 )
 from app.services.schema_mapper import is_schema_map_question, dapatkan_peta_database_tenant
+from app.services.sql_guard import SqlGuardError, _has_dangerous_function
+import sqlglot
+from sqlglot import exp
 
 logger = logging.getLogger(__name__)
 
@@ -570,6 +573,62 @@ def _format_ringkasan_otomatis(rows: list, columns: list, question: str = "") ->
     return base_summary
 
 
+def deteksi_topik_eksplisit(question: str) -> str | None:
+    """Mendeteksi domain topik bisnis otomotif eksplisit dari teks pertanyaan pengguna.
+    Kata kunci eksplisit ini memiliki prioritas tertinggi (override) di atas inherited_topic riwayat.
+    """
+    if not question:
+        return None
+    q_lower = question.lower()
+    if any(w in q_lower for w in ["beli", "pembelian", "kulakan", "pengadaan", "hpunit", "tglinvoice"]):
+        return "pembelian"
+    if any(w in q_lower for w in ["servis", "service", "bengkel", "wo", "pkb", "mekanik"]):
+        return "servis"
+    if any(w in q_lower for w in ["sparepart", "suku cadang", "part"]):
+        return "sparepart"
+    if any(w in q_lower for w in ["jual", "penjualan", "omzet", "unit terjual", "spk", "hjakhir"]):
+        return "penjualan"
+    return None
+
+
+def validasi_readonly_ast_vanna(sql: str) -> None:
+    """Gerbang Pengaman AST Vanna: Memastikan query read-only aman (SELECT/WITH tunggal)
+    tanpa mutasi data (INSERT/UPDATE/DELETE/DROP/ALTER/SELECT INTO) dan tanpa fungsi berbahaya.
+    """
+    if not sql or not sql.strip():
+        raise SqlGuardError("Query SQL kosong")
+
+    # Strip komentar SQL
+    sql_clean = re.sub(r'--.*', '', sql).strip()
+
+    try:
+        statements = [s for s in sqlglot.parse(sql_clean, read="postgres") if s is not None]
+    except Exception as e:
+        # Fallback regex jika sqlglot parsing error karena dialek spesifik
+        if not re.match(r"^\s*(select|with)\b", sql_clean, re.IGNORECASE):
+            raise SqlGuardError(f"Hanya query SELECT atau WITH yang diizinkan: {e}")
+        # Cek blacklist kata kunci mutasi berbahaya
+        destructive_words = ["insert ", "update ", "delete ", "drop ", "alter ", "truncate ", "grant ", "revoke "]
+        if any(w in sql_clean.lower() for w in destructive_words):
+            raise SqlGuardError("Kueri memuat kata kunci mutasi yang dilarang")
+        return
+
+    if not statements:
+        raise SqlGuardError("Tidak ada statement SQL yang valid")
+    if len(statements) > 1:
+        raise SqlGuardError("Multi-statement SQL tidak diizinkan")
+
+    tree = statements[0]
+    if not isinstance(tree, (exp.Select, exp.Union)):
+        raise SqlGuardError(f"Hanya statement SELECT/WITH yang diizinkan (ditemukan: {type(tree).__name__})")
+    if getattr(tree, "args", {}).get("into"):
+        raise SqlGuardError("Statement SELECT INTO tidak diizinkan")
+
+    dangerous = _has_dangerous_function(tree)
+    if dangerous:
+        raise SqlGuardError(f"Fungsi PostgreSQL tidak diizinkan: {dangerous}")
+
+
 async def deteksi_topik_riwayat_percakapan(core_pool, conversation_id: int | None) -> str | None:
     """Ambil topik domain dari percakapan sebelumnya (berdasarkan pesan user terdahulu atau title percakapan)."""
     if not conversation_id:
@@ -581,15 +640,9 @@ async def deteksi_topik_riwayat_percakapan(core_pool, conversation_id: int | Non
             conversation_id
         )
         for r in rows:
-            content = (r["content"] or "").lower()
-            if any(w in content for w in ["beli", "pembelian", "kulakan", "pengadaan"]):
-                return "pembelian"
-            if any(w in content for w in ["servis", "service", "bengkel", "pkb", "wo"]):
-                return "servis"
-            if any(w in content for w in ["sparepart", "suku cadang", "part"]):
-                return "sparepart"
-            if any(w in content for w in ["jual", "penjualan", "omzet", "unit terjual"]):
-                return "penjualan"
+            topik = deteksi_topik_eksplisit(r["content"])
+            if topik:
+                return topik
 
         # 2. Cek dari judul percakapan (pertanyaan pertama user saat sesi dibuat)
         title = await core_pool.fetchval(
@@ -597,15 +650,9 @@ async def deteksi_topik_riwayat_percakapan(core_pool, conversation_id: int | Non
             conversation_id
         )
         if title:
-            t_lower = title.lower()
-            if any(w in t_lower for w in ["beli", "pembelian", "kulakan", "pengadaan"]):
-                return "pembelian"
-            if any(w in t_lower for w in ["servis", "service", "bengkel", "pkb", "wo"]):
-                return "servis"
-            if any(w in t_lower for w in ["sparepart", "suku cadang", "part"]):
-                return "sparepart"
-            if any(w in t_lower for w in ["jual", "penjualan", "omzet", "unit terjual"]):
-                return "penjualan"
+            topik = deteksi_topik_eksplisit(title)
+            if topik:
+                return topik
     except Exception as e:
         logger.warning("Gagal deteksi topik percakapan %s: %s", conversation_id, e)
     return None
@@ -972,16 +1019,8 @@ def _deteksi_kueri_komparasi_periode(question: str, inherited_topic: str | None 
     years = re.findall(r'\b(20[12]\d)\b', q_lower)
     is_vs = any(w in q_lower for w in [" vs ", " versus ", "bandingkan", "perbandingan", "komparasi", " beda ", "selisih", "dibandingkan", "dibanding"])
 
-    subject = inherited_topic or "transaksi"
-    if any(w in q_lower for w in ["jual", "penjualan", "omzet", "unit terjual"]):
-        subject = "penjualan"
-    elif any(w in q_lower for w in ["beli", "pembelian", "pengadaan"]):
-        subject = "pembelian"
-    elif any(w in q_lower for w in ["servis", "service", "bengkel", "wo", "pkb"]):
-        subject = "servis"
-    elif any(w in q_lower for w in ["part", "sparepart", "suku cadang"]):
-        subject = "suku cadang"
-
+    explicit_topic = deteksi_topik_eksplisit(question)
+    subject = explicit_topic or inherited_topic or "transaksi"
     frasa_subject = f"transaksi {subject}" if subject != "transaksi" else "data transaksi"
 
     unique_years = sorted(list(dict.fromkeys(years)))
@@ -1027,7 +1066,8 @@ def _deteksi_kueri_komparasi_periode(question: str, inherited_topic: str | None 
     return None
 
 
-def cek_apakah_minta_rincian_terpisah(question: str, inherited_topic: str | None = None) -> dict | None:
+def cek_apakah_minta_rincian_terpisah(question: str, inherited_topic: str | None = None,
+                                      allowed_tables: set[str] | list[str] | None = None) -> dict | None:
     """Deteksi jika user meminta rincian periode terpisah (Gaya 2) untuk N tahun (2, 3, 4, 5+)."""
     q_lower = (question or "").lower()
     is_terpisah = any(w in q_lower for w in ["terpisah", "sendiri-sendiri", "masing-masing", "pisah", "pecah", "tiap tabel", "per tabel"])
@@ -1040,16 +1080,9 @@ def cek_apakah_minta_rincian_terpisah(question: str, inherited_topic: str | None
     if (is_terpisah or is_rincian) and len(unique_years) >= 2:
         p1, p2 = unique_years[0], unique_years[1]
 
-        # Tentukan topik dari kueri eksplisit atau inherited_topic dari percakapan
-        topic = inherited_topic or "penjualan"
-        if any(w in q_lower for w in ["beli", "pembelian", "kulakan", "pengadaan"]):
-            topic = "pembelian"
-        elif any(w in q_lower for w in ["servis", "service", "bengkel", "wo", "pkb"]):
-            topic = "servis"
-        elif any(w in q_lower for w in ["part", "sparepart", "suku cadang"]):
-            topic = "sparepart"
-        elif any(w in q_lower for w in ["jual", "penjualan", "omzet", "unit terjual"]):
-            topic = "penjualan"
+        # Tentukan topik dari kueri eksplisit (override) atau inherited_topic dari percakapan
+        explicit_topic = deteksi_topik_eksplisit(question)
+        topic = explicit_topic or inherited_topic or "penjualan"
 
         # Tentukan tabel target berdasarkan konteks kueri
         table = "untt_penjualan"
@@ -1081,6 +1114,12 @@ def cek_apakah_minta_rincian_terpisah(question: str, inherited_topic: str | None
             filter_clause = "part > 0"
             columns_to_select = "nomor_wo, part, jenis"
 
+        if allowed_tables is not None:
+            allowed_lower = {t.lower() for t in allowed_tables}
+            if table.lower() not in allowed_lower:
+                logger.info("Tabel target '%s' untuk rincian terpisah tidak ditemukan dalam allowed_tables. Fallback ke kueri umum.", table)
+                return None
+
         window_select = f"{columns_to_select}, COUNT(*) OVER() AS total_transaksi_tahun, SUM({money_col}) OVER() AS total_omzet_tahun"
         domains = []
         for yr in unique_years:
@@ -1105,7 +1144,8 @@ def cek_apakah_minta_rincian_terpisah(question: str, inherited_topic: str | None
     return None
 
 
-def susun_kueri_komparasi_deterministik(comp_info: dict | None, question: str) -> str | None:
+def susun_kueri_komparasi_deterministik(comp_info: dict | None, question: str,
+                                        allowed_tables: set[str] | list[str] | None = None) -> str | None:
     """Menyusun kueri SQL komparasi tahunan secara deterministik (0 LLM Token, 0 Halusinasi).
     Aktif jika pertanyaan menuntut komparasi temporal antar tahun pada level modul/agregat,
     bukan rincian atribut khusus (model, warna, dsb).
@@ -1125,6 +1165,24 @@ def susun_kueri_komparasi_deterministik(comp_info: dict | None, question: str) -
     periods = comp_info["periods"]
     years_csv = ", ".join(str(p) for p in periods)
     subject = comp_info.get("subject") or "penjualan"
+
+    target_table_map = {
+        "penjualan": "untt_penjualan",
+        "transaksi": "untt_penjualan",
+        "pembelian": "untt_pembelian",
+        "servis": "srvt_wo",
+        "suku cadang": "srvt_wodetail",
+        "sparepart": "srvt_wodetail",
+    }
+    target_table = target_table_map.get(subject)
+    if not target_table:
+        return None
+
+    if allowed_tables is not None:
+        allowed_lower = {t.lower() for t in allowed_tables}
+        if target_table.lower() not in allowed_lower:
+            logger.info("Tabel target '%s' untuk topik '%s' tidak ditemukan dalam allowed_tables. Fallback deterministik ke LLM.", target_table, subject)
+            return None
 
     if subject == "penjualan" or subject == "transaksi":
         return f"""SELECT 
@@ -2178,9 +2236,24 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
             logger.info("Dialogue State Tracking: Aksi disetujui -> Kueri dialihkan ke kueri operasional: %s", question)
             q_norm = normalisasi_pertanyaan(question)
 
-        # Deteksi topik riwayat percakapan sebelumnya untuk multi-turn chat continuity
-        if inherited_topic is None:
+        # Deteksi topik eksplisit dari pertanyaan aktif (override 100% inherited_topic)
+        explicit_topic = deteksi_topik_eksplisit(question)
+        if explicit_topic:
+            inherited_topic = explicit_topic
+        elif inherited_topic is None:
             inherited_topic = await deteksi_topik_riwayat_percakapan(core_pool, conversation_id)
+
+        # Ambil skema tabel tenant untuk validasi graceful fallback kueri deterministik
+        allowed_tables = None
+        if tenant.get("schema_config_json"):
+            try:
+                sc = tenant["schema_config_json"]
+                if isinstance(sc, str):
+                    sc = json.loads(sc)
+                if isinstance(sc, dict) and "tables" in sc:
+                    allowed_tables = set(sc["tables"].keys())
+            except Exception as e_sc:
+                logger.debug("Gagal parse schema_config_json tenant: %s", e_sc)
 
         # Ambil konteks percakapan aktif (tahun + topik) secara terisolasi per conversation_id
         active_context = await ambil_konteks_percakapan_aktif(core_pool, conversation_id)
@@ -2495,7 +2568,7 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                     logger.warning("Replay SQL memory gagal (%s), lanjut ke LLM...", e_mem)
 
         # 0.4. Cek Kueri Rincian Terpisah (Gaya 2) atau Kueri Multi-Laporan Dinamis
-        fanout_info = cek_apakah_minta_rincian_terpisah(question, inherited_topic=inherited_topic) or cek_apakah_minta_multi_query(question)
+        fanout_info = cek_apakah_minta_rincian_terpisah(question, inherited_topic=inherited_topic, allowed_tables=allowed_tables) or cek_apakah_minta_multi_query(question)
         if fanout_info:
             ai_config = await resolve_ai_config(core_pool, user.get("username", ""), branch_code)
             async with VANNA_SEMAPHORE:
@@ -2761,7 +2834,7 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
 
             # 0.6. Cek Komparasi Temporal Deterministik (0 Halusinasi, 0 Token LLM)
             comp_info = _deteksi_kueri_komparasi_periode(question, inherited_topic=inherited_topic)
-            deterministic_comp_sql = susun_kueri_komparasi_deterministik(comp_info, question) if comp_info else None
+            deterministic_comp_sql = susun_kueri_komparasi_deterministik(comp_info, question, allowed_tables=allowed_tables) if comp_info else None
 
             if deterministic_comp_sql:
                 sql = deterministic_comp_sql
@@ -2864,7 +2937,11 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
             async with pool_tenant.acquire() as conn:
                 await conn.execute("SET statement_timeout = '15000'")
                 try:
+                    validasi_readonly_ast_vanna(sql)
                     db_rows = await conn.fetch(sql)
+                except SqlGuardError as sge:
+                    logger.warning("AST SQL Guard memblokir kueri Vanna: %s", sge)
+                    raise
                 except Exception as sql_err:
                     err_msg = str(sql_err).lower()
                     if "timeout" in err_msg or "canceling statement" in err_msg:
@@ -2885,6 +2962,7 @@ Return ONLY the corrected SQL query in ```sql ... ``` code block."""
                     raw_repair = await panggil_fn(system_msg, repair_prompt, ai_config)
                     repaired_sql = ekstrak_sql(raw_repair)
                     if repaired_sql.lower().startswith("select") or repaired_sql.lower().startswith("with"):
+                        validasi_readonly_ast_vanna(repaired_sql)
                         sql = repaired_sql
                         db_rows = await conn.fetch(sql)
                     else:

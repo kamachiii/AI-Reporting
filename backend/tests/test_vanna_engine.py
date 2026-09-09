@@ -503,6 +503,168 @@ def test_vanna_cek_apakah_minta_rincian_terpisah_window_sql():
     assert "LIMIT 50" in sql_2
 
 
+def test_explicit_keyword_override():
+    from app.services.vanna_engine import (
+        deteksi_topik_eksplisit,
+        _deteksi_kueri_komparasi_periode,
+        cek_apakah_minta_rincian_terpisah,
+    )
+
+    # 1. Deteksi kata kunci eksplisit langsung
+    assert deteksi_topik_eksplisit("Bandingkan servis 2023 vs 2024") == "servis"
+    assert deteksi_topik_eksplisit("Bagaimana pengadaan unit tahun 2024?") == "pembelian"
+    assert deteksi_topik_eksplisit("Penjualan mobil avanza 2024") == "penjualan"
+    assert deteksi_topik_eksplisit("Cek data suku cadang 2025") == "sparepart"
+    assert deteksi_topik_eksplisit("Bagaimana dengan performa tahun 2024?") is None
+
+    # 2. Kata kunci eksplisit mengalahkan (100% override) inherited_topic penjualan
+    comp = _deteksi_kueri_komparasi_periode(
+        "Bandingkan servis tahun 2023 vs 2024", inherited_topic="penjualan"
+    )
+    assert comp is not None
+    assert comp["subject"] == "servis"
+
+    # 3. Kata kunci eksplisit mengalahkan inherited_topic pembelian pada rincian terpisah
+    rincian = cek_apakah_minta_rincian_terpisah(
+        "Tampilkan rincian servis 2023 dan 2024 terpisah", inherited_topic="penjualan"
+    )
+    assert rincian is not None
+    assert rincian["topic"] == "servis"
+    assert rincian["table"] == "srvt_wo"
+
+
+def test_graceful_fallback_allowed_tables():
+    from app.services.vanna_engine import (
+        susun_kueri_komparasi_deterministik,
+        cek_apakah_minta_rincian_terpisah,
+    )
+
+    comp_info = {
+        "periods": [2023, 2024],
+        "subject": "penjualan",
+    }
+
+    # Jika tabel ada di allowed_tables -> query dihasilkan
+    sql_ok = susun_kueri_komparasi_deterministik(
+        comp_info, "bandingkan penjualan 2023 vs 2024",
+        allowed_tables={"untt_penjualan", "other_table"}
+    )
+    assert sql_ok is not None
+    assert "FROM untt_penjualan" in sql_ok
+
+    # Jika tabel TIDAK ADA di allowed_tables -> Graceful fallback ke None (LLM)
+    sql_fallback = susun_kueri_komparasi_deterministik(
+        comp_info, "bandingkan penjualan 2023 vs 2024",
+        allowed_tables={"srvt_wo", "some_custom_table"}
+    )
+    assert sql_fallback is None
+
+    # Begitu pula untuk rincian terpisah
+    rincian_ok = cek_apakah_minta_rincian_terpisah(
+        "tampilkan rincian servis 2023 dan 2024 terpisah",
+        allowed_tables={"srvt_wo"}
+    )
+    assert rincian_ok is not None
+    assert rincian_ok["table"] == "srvt_wo"
+
+    rincian_fallback = cek_apakah_minta_rincian_terpisah(
+        "tampilkan rincian servis 2023 dan 2024 terpisah",
+        allowed_tables={"untt_penjualan"}
+    )
+    assert rincian_fallback is None
+
+
+def test_validasi_readonly_ast_vanna():
+    import pytest
+    from app.services.vanna_engine import validasi_readonly_ast_vanna
+    from app.services.sql_guard import SqlGuardError
+
+    # Query aman SELECT / WITH harus lolos
+    validasi_readonly_ast_vanna("SELECT * FROM untt_penjualan WHERE NOT COALESCE(batal, FALSE)")
+    validasi_readonly_ast_vanna("WITH thn AS (SELECT 2024 AS yr) SELECT * FROM untt_penjualan, thn")
+    validasi_readonly_ast_vanna("SELECT nomor FROM untt_penjualan UNION SELECT nomor FROM untt_pembelian")
+
+    # Dilarang: Operasi manipulasi / DDL berbahaya
+    with pytest.raises(SqlGuardError):
+        validasi_readonly_ast_vanna("DROP TABLE untt_penjualan")
+
+    with pytest.raises(SqlGuardError):
+        validasi_readonly_ast_vanna("DELETE FROM untt_penjualan WHERE id = 1")
+
+    with pytest.raises(SqlGuardError):
+        validasi_readonly_ast_vanna("UPDATE untt_penjualan SET hjakhir = 0")
+
+    with pytest.raises(SqlGuardError):
+        validasi_readonly_ast_vanna("INSERT INTO untt_penjualan (nomor) VALUES ('123')")
+
+    with pytest.raises(SqlGuardError):
+        validasi_readonly_ast_vanna("SELECT * FROM untt_penjualan; DROP TABLE untt_penjualan;")
+
+    with pytest.raises(SqlGuardError):
+        validasi_readonly_ast_vanna("SELECT * INTO new_penjualan FROM untt_penjualan")
+
+    with pytest.raises(SqlGuardError):
+        validasi_readonly_ast_vanna("SELECT pg_sleep(10)")
+
+
+def test_zero_cross_session_bleed():
+    import asyncio
+    from unittest.mock import AsyncMock
+    from app.services.vanna_engine import (
+        ambil_konteks_percakapan_aktif,
+        deteksi_topik_riwayat_percakapan,
+    )
+
+    # Mock database pool dengan data berbeda per conversation_id
+    mock_pool = AsyncMock()
+
+    conv_messages = {
+        101: [
+            {"role": "user", "content": "Berapa total servis dan wo bengkel tahun 2023?"},
+            {"role": "assistant", "content": '{"status": "success", "ringkasan": "Total servis 500 unit"}'},
+        ],
+        202: [
+            {"role": "user", "content": "Berapa omzet penjualan unit tahun 2024?"},
+            {"role": "assistant", "content": '{"status": "success", "ringkasan": "Total penjualan 1.2M"}'},
+        ],
+    }
+
+    async def mock_fetch(sql, *params):
+        conv_id = params[0]
+        return conv_messages.get(conv_id, [])
+
+    async def mock_fetchval(sql, *params):
+        conv_id = params[0]
+        if conv_id == 101:
+            return "Performa Servis Bengkel"
+        elif conv_id == 202:
+            return "Performa Penjualan Dealer"
+        return None
+
+    mock_pool.fetch.side_effect = mock_fetch
+    mock_pool.fetchval.side_effect = mock_fetchval
+
+    async def run_parallel_sessions():
+        # Eksekusi sesi 101 dan 202 secara paralel bersamaan
+        res_101_ctx, res_202_ctx, res_101_topik, res_202_topik = await asyncio.gather(
+            ambil_konteks_percakapan_aktif(mock_pool, 101),
+            ambil_konteks_percakapan_aktif(mock_pool, 202),
+            deteksi_topik_riwayat_percakapan(mock_pool, 101),
+            deteksi_topik_riwayat_percakapan(mock_pool, 202),
+        )
+        return res_101_ctx, res_202_ctx, res_101_topik, res_202_topik
+
+    res_101_ctx, res_202_ctx, res_101_topik, res_202_topik = asyncio.run(run_parallel_sessions())
+
+    # Verifikasi sesi 101 murni 'servis', sesi 202 murni 'penjualan' — zero bleed
+    assert res_101_topik == "servis"
+    assert res_202_topik == "penjualan"
+    assert res_101_ctx["topic"] == "servis"
+    assert res_202_ctx["topic"] == "penjualan"
+    assert res_101_ctx["year"] == 2023
+    assert res_202_ctx["year"] == 2024
+
+
 
 
 
