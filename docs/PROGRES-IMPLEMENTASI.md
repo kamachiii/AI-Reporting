@@ -2,7 +2,7 @@
 
 > Dokumen kontinuitas: dibaca PERTAMA kali oleh AI/engineer yang melanjutkan kerja.
 > Update dokumen ini SETIAP selesai satu fase. Jangan hapus riwayat — tambahkan.
-> Terakhir diperbarui: 2026-09-07 (Manajemen Riwayat Chat Multi-Sesi, Tabel Pintar Interaktif, & Penyelarasan Skema Bengkel Riil — 558 test passed).
+> Terakhir diperbarui: 2026-09-09 (Transformasi Conversational AI Murni, Eliminasi Fake Stepper, Penahanan Ekspor Excel, dan Skema Agnostik — 583 test passed).
 
 ## 0. Cara cepat paham konteks (5 menit)
 
@@ -77,6 +77,7 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **Arsitektur Chatbot Percakapan Murni & Dynamic Multi-Query** | selesai | LIVE | Mode Percakapan Murni (0 SQL, 0 Table untuk salam, konsep bisnis dealer PKB/SPK/VIN, kapabilitas); Eliminasi pola 3S fan-out divisi & tombol ambiguitas pembajak kueri; Kueri analitik tunggal 1 tabel presisi; Dynamic Multi-Query berbasis permintaan nyata (tab judul kustom); 577 test lulus, lint 0 error, build 0 error |
 | **Conversational AI Standar Gemini-Claude & Inline Markdown** | selesai | LIVE | Penanganan kueri konsultatif/hipotetis ("semisal semua data bisa?") 0 SQL; Multi-turn 5 riwayat percakapan; unforced json LLM streaming; Markdown inline formatter (**bold**, *italic*, code) editorial; 16/16 test skenario E2E lulus; 577 test lulus, lint 0 error, build 0 error |
 | **Peta Database Otomatis (Eliminasi Manual JSON) & Penyelarasan Follow-Up Tester02** | selesai | LIVE | Auto-mapping 2.387 tabel via prefix ERP (vw_, srv, unt, stp, cari, glb, acct); Peta database dinamis; Resolusi amnesia follow-up 'data apa ini?' & 'tadi lu kasih data apa'; Pembersihan racun sql_memory (ID 82, 86, 87); 577 test lulus |
+| **Transformasi Conversational AI Murni & Skema Agnostik** | selesai | LIVE | Eliminasi fake stepper pipeline di UI; Penahanan tombol ekspor Excel; Unified LLM conversational & SQL routing (0 crash ValueError); Database-agnostic schema context; 583 test backend lulus, lint 0 error, build 0 error |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -1854,6 +1855,31 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
   - Frontend lint: `npm run lint` lolos (**0 errors**).
   - Frontend build: `npm run build` lolos (**exit code 0, 1.01s**).
 
+### 3ax. Transformasi Conversational AI Murni, Eliminasi Fake Stepper, Penahanan Ekspor Excel, dan Skema Agnostik (2026-09-09)
+
+1. **Latar Belakang & Masukan Pengguna**:
+   - Pengguna mengamati anomali antarmuka: ketika mengetik "p", UI menampilkan checklist eksekusi database kaku (*"Memvalidasi skema... Menyusun SQL... Memeriksa verifier 6-gerbang... Mengeksekusi database read-only..."*).
+   - Pengguna mempertanyakan: mengapa menggunakan puluhan regex manual yang rapuh untuk mendeteksi obrolan manusia alih-alih membiarkan AI provider (LLM) sendiri yang menentukan arahnya secara alami?
+   - Pengguna menginginkan auto-discovery skema dan relasi Foreign Keys langsung terisi dari database tanpa konfigurasi JSON manual.
+   - Pengguna mengarahkan agar fitur ekspor Excel di-hold terlebih dahulu, dan kode SQL disembunyikan dari sisi user biasa agar UI tetap bersih dan berorientasi data bisnis.
+
+2. **Perubahan Arsitektur & Implementasi**:
+   - **Frontend (`UserWorkspace.jsx`)**:
+     - Menghapus total `PIPELINE_STAGES`, `STAGE_INTERVAL_MS`, dan `PipelineIndicator`.
+     - Menggantikannya dengan `ThinkingIndicator` editorial (tiga titik berdenyut lembut + label *"Menganalisis pertanyaan dan menyiapkan jawaban…"*) tanpa kebohongan status database.
+     - Menyederhanakan `handleSend` menjadi asynchronous fetch murni tanpa interval timer tiruan.
+   - **Frontend (`AssistantAnswerCard.jsx`)**:
+     - Menyembunyikan tombol *"Unduh Excel"* (`showExportExcel = false`) sesuai instruksi penahanan fitur.
+   - **Backend (`vanna_engine.py`)**:
+     - **Unified Prompting**: Prompt SQL diperluas dengan instruksi dwifungsi: jika kueri data -> hasilkan blok ```sql ... ```; jika percakapan / sapaan / konsep umum -> jawab langsung dengan bahasa Indonesia naratif tanpa blok SQL.
+     - **Graceful Conversational Fallback**: Jika respon LLM tidak memuat query `SELECT`/`WITH` dengan klausa `FROM`, backend tidak lagi melempar `ValueError`, melainkan mengemasnya sebagai respon percakapan naratif murni (`source: "conversational"`, `is_conversational_text: True`).
+     - **Database-Agnostic Context**: Menghapus hardcode pengurutan tabel Otobitz (`untt_`, `srvt_`, `prtt_`) di `ambil_konteks_vanna`, beralih ke preferensi tabel fisik atas view (`vw_`) dan DDL terpadu.
+   - **Pengujian & Verifikasi**:
+     - Unit test suite baru `backend/tests/test_conversational_unified_flow.py` (6 test baru mencakup variasi sapaan, eksplanatori, unified prompt, ekstraksi SQL, number check, dan zero emoji cleaner).
+     - Full backend test suite: **583 passed in 32.10s**.
+     - Frontend test suite: `npm run lint` **0 error**, `npm run build` **exit 0**.
+     - Live E2E test script (`test_live_bot_scenarios.py`): 6/6 skenario live lulus sempurna ("p", "aloww", "apa itu PKB?", "ada data apa saja?", "tampilkan 5 mobil terlaris").
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -1927,6 +1953,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Arsitektur Multi-Mode Percakapan: Mode Data, Penjelasan Eksplanatori, dan Panduan Orientasi Sistem** — SELESAI (lihat §3at).
 - [x] **Eliminasi Bocoran Teknis Database Sisi User & Audit Log Telemetri AI Terstruktur (Provider, Model, Kategori, Diagnosa Error)** — SELESAI (lihat §3av).
 - [x] **Resolusi Kueri Mobil Terlaris, Anti-Loop Greeting Fanout, Textarea Auto-Resize, Smart Scroll & Pembersihan Total UI Pengguna** — SELESAI (lihat §3aw).
+- [x] **Transformasi Conversational AI Murni, Eliminasi Fake Stepper, Penahanan Ekspor Excel, dan Skema Agnostik** — SELESAI (lihat §3ax).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. *Dedicated Executive Dashboard Page*: Ditutup/dibatalkan atas arahan pengguna untuk mempertahankan identitas murni Conversational AI Assistant.
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.
