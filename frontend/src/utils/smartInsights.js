@@ -90,7 +90,7 @@ function formatAngkaAtauUang(num, colName = '') {
  * Hitung metrik ringkas matematis dari data tabel (Zero-Token).
  */
 export function hitungSmartInsights(columns, rows) {
-  if (!columns || !rows || rows.length < 2) {
+  if (!columns || !rows || rows.length === 0) {
     return { hasInsights: false };
   }
 
@@ -237,19 +237,21 @@ export function hitungSmartInsights(columns, rows) {
     }
   }
 
+  const isMultiRow = parsedData.length > 1;
+
   return {
     hasInsights: true,
     metricName: metricColName.replace(/_/g, ' '),
     totalFormatted: formatAngkaAtauUang(total, metricColName),
-    rataRataFormatted: formatAngkaAtauUang(rataRata, metricColName),
-    tertinggi: {
+    rataRataFormatted: isMultiRow ? formatAngkaAtauUang(rataRata, metricColName) : null,
+    tertinggi: isMultiRow ? {
       label: tertinggi.label,
       nilaiFormatted: formatAngkaAtauUang(tertinggi.value, metricColName),
-    },
-    terendah: {
+    } : null,
+    terendah: isMultiRow ? {
       label: terendah.label,
       nilaiFormatted: formatAngkaAtauUang(terendah.value, metricColName),
-    },
+    } : null,
     deltaPersen,
     arahTren,
     jumlahData: parsedData.length,

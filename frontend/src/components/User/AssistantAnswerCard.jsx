@@ -798,6 +798,96 @@ function FormattedExecutiveAnalysis({ text }) {
   return <MarkdownNarrativeContent content={text} />;
 }
 
+/**
+ * Executive KPI Metric Banner (Zero-Token).
+ * Menyajikan kartu ringkasan eksekutif 3-kolom: Total Akumulasi, Dinamika Tren / Rata-Rata, dan Rekor Puncak.
+ */
+function KpiMetricBanner({ smartInsights }) {
+  if (!smartInsights || !smartInsights.hasInsights) return null;
+
+  const {
+    metricName,
+    totalFormatted,
+    rataRataFormatted,
+    tertinggi,
+    deltaPersen,
+    arahTren,
+    jumlahData,
+  } = smartInsights;
+
+  const hasTren = deltaPersen !== null;
+  const hasMultiple = jumlahData > 1;
+
+  return (
+    <div className="bg-surface-card/60 border border-hairline rounded-lg p-3.5 space-y-2.5 shadow-2xs">
+      <div className="flex items-center justify-between text-muted text-[11px] border-b border-hairline/60 pb-2">
+        <span className="inline-flex items-center gap-1.5 font-medium text-ink tracking-wide">
+          <Award size={13} className="text-primary" />
+          <span>Indikator Kinerja Utama (KPI)</span>
+        </span>
+        <span className="font-mono tabular-nums text-muted">{jumlahData} baris data</span>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-0.5">
+        {/* Card 1: Total Akumulasi */}
+        <div className="bg-canvas border border-hairline rounded-md p-3 flex flex-col justify-between">
+          <div className="text-[10px] font-mono text-muted uppercase tracking-wider">
+            Total {metricName || 'Nilai'}
+          </div>
+          <div className="text-lg sm:text-xl font-medium font-sans text-ink tabular-nums mt-1">
+            {totalFormatted}
+          </div>
+          <div className="text-[11px] text-muted truncate mt-1">
+            {hasMultiple ? `Akumulasi dari ${jumlahData} baris data` : 'Total keseluruhan tercatat'}
+          </div>
+        </div>
+
+        {/* Card 2: Rata-Rata atau Dinamika Tren */}
+        <div className="bg-canvas border border-hairline rounded-md p-3 flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-mono text-muted uppercase tracking-wider">
+              {hasTren ? 'Dinamika Tren' : 'Rata-Rata'}
+            </span>
+            {hasTren && (
+              <span
+                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium font-mono tabular-nums ${
+                  arahTren === 'naik'
+                    ? 'bg-emerald-50/90 text-emerald-800 border border-emerald-200/80'
+                    : arahTren === 'turun'
+                      ? 'bg-rose-50/90 text-rose-800 border border-rose-200/80'
+                      : 'bg-surface-soft text-body border border-hairline'
+                }`}
+              >
+                {arahTren === 'naik' ? <TrendingUp size={10} /> : arahTren === 'turun' ? <TrendingDown size={10} /> : null}
+                <span>{Number(deltaPersen) > 0 ? `+${deltaPersen}%` : `${deltaPersen}%`}</span>
+              </span>
+            )}
+          </div>
+          <div className="text-lg sm:text-xl font-medium font-sans text-ink tabular-nums mt-1">
+            {rataRataFormatted || (hasTren ? `${deltaPersen}%` : totalFormatted)}
+          </div>
+          <div className="text-[11px] text-muted truncate mt-1">
+            {hasTren && rataRataFormatted ? `Rata-rata: ${rataRataFormatted}` : hasMultiple ? 'Rata-rata per periode' : 'Nilai tercatat'}
+          </div>
+        </div>
+
+        {/* Card 3: Puncak Tertinggi / Rekor */}
+        <div className="bg-canvas border border-hairline rounded-md p-3 flex flex-col justify-between">
+          <div className="text-[10px] font-mono text-muted uppercase tracking-wider">
+            {tertinggi ? 'Puncak Tertinggi' : 'Status Performa'}
+          </div>
+          <div className="text-lg sm:text-xl font-medium font-sans text-ink tabular-nums mt-1 truncate">
+            {tertinggi ? tertinggi.nilaiFormatted : 'Optimal'}
+          </div>
+          <div className="text-[11px] text-muted truncate mt-1" title={tertinggi ? tertinggi.label : ''}>
+            {tertinggi ? `Periode: ${tertinggi.label}` : 'Sesuai data operasional'}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AssistantAnswerCard({
   answer,
   question,
@@ -809,7 +899,7 @@ export default function AssistantAnswerCard({
   onConfirm,
   onReject,
 }) {
-  const [userTabPreference, setUserTabPreference] = useState(null); // 'table' | 'chart' | null
+  const [userTabPreference, setUserTabPreference] = useState(null); // 'hybrid' | 'table' | 'chart' | null
   const [chartType, setChartType] = useState('bar'); // 'bar' | 'line'
   const [penjelasan, setPenjelasan] = useState(null);
   const [loadingExplain, setLoadingExplain] = useState(false);
@@ -905,9 +995,16 @@ export default function AssistantAnswerCard({
     [activeColumns, activeRows]
   );
 
-  const activeTab = (userTabPreference !== null)
-    ? (userTabPreference === 'chart' && !grafikConfig.cocok ? 'table' : userTabPreference)
-    : (grafikConfig.shouldDefaultChart ? 'chart' : 'table');
+  const activeTab = useMemo(() => {
+    if (!grafikConfig.cocok) return 'table';
+    if (userTabPreference !== null) {
+      if ((userTabPreference === 'chart' || userTabPreference === 'hybrid') && !grafikConfig.cocok) {
+        return 'table';
+      }
+      return userTabPreference;
+    }
+    return grafikConfig.shouldDefaultChart ? 'hybrid' : 'table';
+  }, [grafikConfig, userTabPreference]);
 
   const handleExplain = async () => {
     if (loadingExplain || !branchCode) return;
@@ -1253,64 +1350,10 @@ export default function AssistantAnswerCard({
           </div>
         )}
 
-        {/* Ringkasan Indikator Statistik Data */}
-        {smartInsights.hasInsights && (
-          <div className="bg-surface-card/60 border border-hairline rounded-lg p-3 space-y-2 text-xs">
-            <div className="flex items-center justify-between text-muted text-[11px]">
-              <span className="inline-flex items-center gap-1.5 font-medium text-ink tracking-wide">
-                <Lightbulb size={13} className="text-primary" />
-                <span>Indikator Statistik Utama</span>
-              </span>
-              <span className="font-mono tabular-nums text-muted">{smartInsights.jumlahData} baris data</span>
-            </div>
+        {/* Executive KPI Metric Banner */}
+        <KpiMetricBanner smartInsights={smartInsights} />
 
-            <div className="flex items-center gap-2 flex-wrap text-xs">
-              {smartInsights.deltaPersen !== null && (
-                <div
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium tabular-nums ${
-                    smartInsights.arahTren === 'naik'
-                      ? 'bg-emerald-50/80 text-emerald-800 border-emerald-200/80'
-                      : smartInsights.arahTren === 'turun'
-                        ? 'bg-rose-50/80 text-rose-800 border-rose-200/80'
-                        : 'bg-canvas text-body border-hairline'
-                  }`}
-                >
-                  {smartInsights.arahTren === 'naik' ? (
-                    <TrendingUp size={12} />
-                  ) : smartInsights.arahTren === 'turun' ? (
-                    <TrendingDown size={12} />
-                  ) : null}
-                  <span>
-                    Tren {Number(smartInsights.deltaPersen) > 0 ? `+${smartInsights.deltaPersen}%` : `${smartInsights.deltaPersen}%`}
-                  </span>
-                </div>
-              )}
-
-              {smartInsights.tertinggi && (
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-canvas border border-hairline text-body">
-                  <Award size={12} className="text-primary shrink-0" />
-                  <span className="truncate max-w-[240px]">
-                    Tertinggi: <strong className="font-semibold text-ink">{smartInsights.tertinggi.label}</strong> (<span className="font-mono tabular-nums">{smartInsights.tertinggi.nilaiFormatted}</span>)
-                  </span>
-                </div>
-              )}
-
-              {smartInsights.totalFormatted && (
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-canvas border border-hairline text-muted">
-                  <span>Total: <strong className="text-ink font-mono tabular-nums">{smartInsights.totalFormatted}</strong></span>
-                </div>
-              )}
-
-              {smartInsights.rataRataFormatted && (
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-canvas border border-hairline text-muted">
-                  <span>Rata-rata: <strong className="text-ink font-mono tabular-nums">{smartInsights.rataRataFormatted}</strong></span>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Switcher Tab & Toolbar Aksi: Tabel Data vs Grafik Otomatis vs Unduh Excel */}
+        {/* Switcher Tab & Toolbar Aksi: Kombinasi vs Grafik vs Tabel Data */}
         {activeRows.length > 0 && (
           <div className="flex items-center justify-between pt-1 flex-wrap gap-2">
             <div className="flex items-center gap-2 flex-wrap">
@@ -1318,32 +1361,45 @@ export default function AssistantAnswerCard({
                 <div className="flex items-center gap-1 bg-surface-card p-0.5 rounded-md border border-hairline">
                   <button
                     type="button"
-                    onClick={() => setUserTabPreference('table')}
+                    onClick={() => setUserTabPreference('hybrid')}
+                    title="Tampilkan grafik visual dan tabel data secara bertingkat"
                     className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                      activeTab === 'table' ? 'bg-canvas shadow-xs text-ink font-medium border border-hairline' : 'text-muted hover:text-ink'
+                      activeTab === 'hybrid' ? 'bg-canvas shadow-xs text-primary font-medium border border-hairline' : 'text-muted hover:text-ink'
                     }`}
                   >
-                    <TableIcon size={12} />
-                    <span>Tabel Data</span>
+                    <Layers size={12} />
+                    <span>Kombinasi</span>
+                    {grafikConfig.shouldDefaultChart && userTabPreference === null && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                    )}
                   </button>
                   <button
                     type="button"
                     onClick={() => setUserTabPreference('chart')}
+                    title="Hanya tampilkan grafik visual"
                     className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
                       activeTab === 'chart' ? 'bg-canvas shadow-xs text-primary font-medium border border-hairline' : 'text-muted hover:text-ink'
                     }`}
                   >
                     <BarChart2 size={12} />
-                    <span>Grafik Visual</span>
-                    {grafikConfig.shouldDefaultChart && userTabPreference === null && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                    )}
+                    <span>Grafik</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUserTabPreference('table')}
+                    title="Hanya tampilkan tabel data"
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                      activeTab === 'table' ? 'bg-canvas shadow-xs text-ink font-medium border border-hairline' : 'text-muted hover:text-ink'
+                    }`}
+                  >
+                    <TableIcon size={12} />
+                    <span>Tabel</span>
                   </button>
                 </div>
               )}
 
-              {/* Sub-toggle tipe chart jika di tab chart */}
-              {grafikConfig.cocok && activeTab === 'chart' && (
+              {/* Sub-toggle tipe chart jika di tab chart atau hybrid */}
+              {grafikConfig.cocok && (activeTab === 'chart' || activeTab === 'hybrid') && (
                 <div className="flex items-center gap-0.5 bg-surface-card p-0.5 rounded-md border border-hairline">
                   <button
                     type="button"
@@ -1414,89 +1470,95 @@ export default function AssistantAnswerCard({
               coba ubah rentang waktu atau filter pertanyaan.
             </p>
           </div>
-        ) : activeTab === 'chart' && grafikConfig.cocok ? (
-          <SilentChartErrorBoundary
-            fallback={(
-              <p className="text-xs text-muted text-center py-4">
-                Grafik tidak dapat ditampilkan. Beralih ke tabel data.
-              </p>
-            )}
-          >
-            <div className="border border-hairline rounded-lg p-3.5 bg-surface-card/30 shadow-2xs space-y-2">
-              <div className="flex items-center justify-between text-xs pb-1 border-b border-hairline">
-                <span className="font-medium text-ink flex items-center gap-1.5 font-sans">
-                  <TrendingUp size={13} className="text-primary" />
-                  {grafikConfig.title}
-                </span>
-                <span className="text-[10px] text-muted font-mono bg-canvas px-1.5 py-0.5 rounded-md border border-hairline">
-                  {grafikConfig.chartData.length} data point
-                </span>
-              </div>
-              <div className="h-64 w-full pt-1">
-                <ResponsiveContainer width="100%" height="100%">
-                  {chartType === 'line' ? (
-                    <LineChart data={grafikConfig.chartData} margin={{ top: 10, right: 15, left: 10, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e6dfd8" />
-                      <XAxis
-                        dataKey={grafikConfig.categoryCol}
-                        tick={{ fontSize: 11, fill: '#6c6a64' }}
-                        tickLine={{ stroke: '#e6dfd8' }}
-                      />
-                      <YAxis
-                        width={85}
-                        tickMargin={6}
-                        tick={{ fontSize: 11, fill: '#6c6a64' }}
-                        tickLine={{ stroke: '#e6dfd8' }}
-                        tickFormatter={(val) => formatCompactAxis(val, grafikConfig.hasCurrencyCol)}
-                      />
-                      <Tooltip content={<CustomChartTooltip />} />
-                      <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-                      {grafikConfig.valueCols.map((col, idx) => (
-                        <Line
-                          key={col}
-                          type="monotone"
-                          dataKey={col}
-                          stroke={BAR_COLORS[idx % BAR_COLORS.length]}
-                          strokeWidth={2.5}
-                          dot={{ r: 3.5, strokeWidth: 1.5, fill: '#faf9f5' }}
-                          activeDot={{ r: 6 }}
-                        />
-                      ))}
-                    </LineChart>
-                  ) : (
-                    <BarChart data={grafikConfig.chartData} margin={{ top: 10, right: 15, left: 10, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e6dfd8" />
-                      <XAxis
-                        dataKey={grafikConfig.categoryCol}
-                        tick={{ fontSize: 11, fill: '#6c6a64' }}
-                        tickLine={{ stroke: '#e6dfd8' }}
-                      />
-                      <YAxis
-                        width={85}
-                        tickMargin={6}
-                        tick={{ fontSize: 11, fill: '#6c6a64' }}
-                        tickLine={{ stroke: '#e6dfd8' }}
-                        tickFormatter={(val) => formatCompactAxis(val, grafikConfig.hasCurrencyCol)}
-                      />
-                      <Tooltip content={<CustomChartTooltip />} />
-                      <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-                      {grafikConfig.valueCols.map((col, idx) => (
-                        <Bar
-                          key={col}
-                          dataKey={col}
-                          fill={BAR_COLORS[idx % BAR_COLORS.length]}
-                          radius={[3, 3, 0, 0]}
-                          maxBarSize={44}
-                        />
-                      ))}
-                    </BarChart>
-                  )}
-                </ResponsiveContainer>
-              </div>
-            </div>
-          </SilentChartErrorBoundary>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-4">
+            {/* Visualisasi Grafik (Tampil jika mode 'hybrid' atau 'chart') */}
+            {grafikConfig.cocok && (activeTab === 'hybrid' || activeTab === 'chart') && (
+              <SilentChartErrorBoundary
+                fallback={(
+                  <p className="text-xs text-muted text-center py-4">
+                    Grafik tidak dapat ditampilkan. Beralih ke tabel data.
+                  </p>
+                )}
+              >
+                <div className="border border-hairline rounded-lg p-3.5 bg-surface-card/30 shadow-2xs space-y-2">
+                  <div className="flex items-center justify-between text-xs pb-1 border-b border-hairline">
+                    <span className="font-medium text-ink flex items-center gap-1.5 font-sans">
+                      <TrendingUp size={13} className="text-primary" />
+                      {grafikConfig.title}
+                    </span>
+                    <span className="text-[10px] text-muted font-mono bg-canvas px-1.5 py-0.5 rounded-md border border-hairline">
+                      {grafikConfig.chartData.length} data point
+                    </span>
+                  </div>
+                  <div className="h-64 w-full pt-1">
+                    <ResponsiveContainer width="100%" height="100%">
+                      {chartType === 'line' ? (
+                        <LineChart data={grafikConfig.chartData} margin={{ top: 10, right: 15, left: 10, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e6dfd8" />
+                          <XAxis
+                            dataKey={grafikConfig.categoryCol}
+                            tick={{ fontSize: 11, fill: '#6c6a64' }}
+                            tickLine={{ stroke: '#e6dfd8' }}
+                          />
+                          <YAxis
+                            width={85}
+                            tickMargin={6}
+                            tick={{ fontSize: 11, fill: '#6c6a64' }}
+                            tickLine={{ stroke: '#e6dfd8' }}
+                            tickFormatter={(val) => formatCompactAxis(val, grafikConfig.hasCurrencyCol)}
+                          />
+                          <Tooltip content={<CustomChartTooltip />} />
+                          <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                          {grafikConfig.valueCols.map((col, idx) => (
+                            <Line
+                              key={col}
+                              type="monotone"
+                              dataKey={col}
+                              stroke={BAR_COLORS[idx % BAR_COLORS.length]}
+                              strokeWidth={2.5}
+                              dot={{ r: 3.5, strokeWidth: 1.5, fill: '#faf9f5' }}
+                              activeDot={{ r: 6 }}
+                            />
+                          ))}
+                        </LineChart>
+                      ) : (
+                        <BarChart data={grafikConfig.chartData} margin={{ top: 10, right: 15, left: 10, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e6dfd8" />
+                          <XAxis
+                            dataKey={grafikConfig.categoryCol}
+                            tick={{ fontSize: 11, fill: '#6c6a64' }}
+                            tickLine={{ stroke: '#e6dfd8' }}
+                          />
+                          <YAxis
+                            width={85}
+                            tickMargin={6}
+                            tick={{ fontSize: 11, fill: '#6c6a64' }}
+                            tickLine={{ stroke: '#e6dfd8' }}
+                            tickFormatter={(val) => formatCompactAxis(val, grafikConfig.hasCurrencyCol)}
+                          />
+                          <Tooltip content={<CustomChartTooltip />} />
+                          <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                          {grafikConfig.valueCols.map((col, idx) => (
+                            <Bar
+                              key={col}
+                              dataKey={col}
+                              fill={BAR_COLORS[idx % BAR_COLORS.length]}
+                              radius={[3, 3, 0, 0]}
+                              maxBarSize={44}
+                            />
+                          ))}
+                        </BarChart>
+                      )}
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </SilentChartErrorBoundary>
+            )}
+
+            {/* Tabel Data (Tampil jika mode 'hybrid' atau 'table') */}
+            {(activeTab === 'hybrid' || activeTab === 'table') && (
+              <div className="space-y-2">
             {/* Filter pencarian cepat & pemilih limit per halaman jika data > 5 baris */}
             {activeRows.length > 5 && (
               <div className="flex items-center justify-between gap-2 pb-0.5 text-xs flex-wrap">
@@ -1658,6 +1720,8 @@ export default function AssistantAnswerCard({
             )}
           </div>
         )}
+      </div>
+    )}
 
         {/* Peringatan hasil terpotong (row cap 500 di executor) */}
         {answer.truncated && (

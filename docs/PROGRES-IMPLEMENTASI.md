@@ -2,7 +2,7 @@
 
 > Dokumen kontinuitas: dibaca PERTAMA kali oleh AI/engineer yang melanjutkan kerja.
 > Update dokumen ini SETIAP selesai satu fase. Jangan hapus riwayat — tambahkan.
-> Terakhir diperbarui: 2026-09-09 (Transformasi Conversational AI Murni, Eliminasi Fake Stepper, Penahanan Ekspor Excel, dan Skema Agnostik — 583 test passed).
+> Terakhir diperbarui: 2026-09-09 (Executive Dossier Layout: Stacked Hybrid View, KPI Metric Banner, Quick Operational Deck & Zero-Token Insights Enhancement — 591 test passed).
 
 ## 0. Cara cepat paham konteks (5 menit)
 
@@ -78,6 +78,8 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **Conversational AI Standar Gemini-Claude & Inline Markdown** | selesai | LIVE | Penanganan kueri konsultatif/hipotetis ("semisal semua data bisa?") 0 SQL; Multi-turn 5 riwayat percakapan; unforced json LLM streaming; Markdown inline formatter (**bold**, *italic*, code) editorial; 16/16 test skenario E2E lulus; 577 test lulus, lint 0 error, build 0 error |
 | **Peta Database Otomatis (Eliminasi Manual JSON) & Penyelarasan Follow-Up Tester02** | selesai | LIVE | Auto-mapping 2.387 tabel via prefix ERP (vw_, srv, unt, stp, cari, glb, acct); Peta database dinamis; Resolusi amnesia follow-up 'data apa ini?' & 'tadi lu kasih data apa'; Pembersihan racun sql_memory (ID 82, 86, 87); 577 test lulus |
 | **Transformasi Conversational AI Murni & Skema Agnostik** | selesai | LIVE | Eliminasi fake stepper pipeline di UI; Penahanan tombol ekspor Excel; Unified LLM conversational & SQL routing (0 crash ValueError); Database-agnostic schema context; 583 test backend lulus, lint 0 error, build 0 error |
+| **Dialogue State Tracking (DST) & Direct Action Policy** | selesai | `a7e4371` | DST evaluasi_state_percakapan, direct action policy (no-stall), mechanical output guard anti-halusinasi tabel fiktif, penanganan kueri eksplanatori grafik jujur; 591 test backend lolos |
+| **Executive Dossier Layout & Quick Operational Deck** | selesai | LIVE | Stacked Hybrid View (Grafik di atas + Tabel data di bawah, eliminasi friksi "loh grafiknya mana?"), 3-card Executive KPI Metric Banner (Total, Tren/Rata-rata, Rekor), Quick Operational Deck 1-klik di atas chat input, support 1-row smart insights; 591 test backend lolos, lint 0 error, build 0 error |
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -1946,6 +1948,41 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
     - Turn 2: User mengetik *"hmm yaudah atur aja.."* -> Query di-resolve ke *"Tampilkan tren penjualan unit dan total omzet per bulan tahun 2025"*, mengeksekusi database operasional dealer, menghasilkan **11 baris data transaksi nyata**, query SQL riil, dan visualisasi grafik interaktif siap diakses!
     - Turn 3: User bertanya *"loh grafiknya mana?"* -> Dijawab tepat sasaran membimbing pengguna membuka toggle tab **Grafik** di kartu laporan atas.
 
+### 3ba. Executive Dossier Layout: Stacked Hybrid View, KPI Metric Banner, Quick Operational Deck & Zero-Token Insights Enhancement (2026-09-09)
+
+- **Latar Belakang & Diagnosa User Experience (UX)**:
+  - Pada pengujian nyata, pengguna (termasuk kasus `tester02`) sering kali bingung saat meminta data visual: sistem sebelumnya menyajikan tabel data di tab terpisah, sehingga pengguna mengira grafik gagal dibuat (*"loh grafiknya mana?"*).
+  - Selain itu, pengguna tingkat eksekutif (Kepala Cabang, Manajer Keuangan) harus membaca baris demi baris tabel untuk mengetahui metrik inti seperti total omzet, rata-rata, atau bulan terbaik karena tidak adanya *Executive KPI Metric Banner*.
+  - Di sisi lain, pengguna pemula sering mengalami *blank input paralysis* (kebingungan merumuskan format kueri yang dipahami sistem).
+
+- **Arsitektur & Solusi yang Diimplementasikan**:
+  1. **Stacked Executive Dossier Layout (`AssistantAnswerCard.jsx`)**:
+     - Mengubah paradigma tampilan eksklusif (hanya grafik ATAU hanya tabel) menjadi **Stacked Hybrid View** bertingkat.
+     - Saat kueri menghasilkan time-series atau komparasi kategori (`grafikConfig.shouldDefaultChart = true`), mode default otomatis adalah `'hybrid'`: grafik visual interaktif langsung tampil gagah di atas tabel rincian data.
+     - Pengguna mendapatkan gambaran makro visual seketika sekaligus dapat memeriksa angka rinci per baris di bawahnya tanpa perlu berpindah tab.
+     - Menyediakan kontrol switcher tab 3-mode elegan: `[Kombinasi]` (`Layers`), `[Grafik]` (`BarChart2`), dan `[Tabel]` (`TableIcon`), lengkap dengan sub-toggle tipe visualisasi Batang / Garis Tren (`BarChart2` / `LineChartIcon`).
+  2. **Executive KPI Metric Banner (`KpiMetricBanner`)**:
+     - Menghitung dan menyajikan 3 kartu metrik ringkasan eksekutif tepat di bawah ringkasan naratif:
+       - **Card 1 (Total Akumulasi)**: Total nilai finansial atau kuantitas agregat dalam format standar Indonesia (`Rp 189,92 Miliar`, `842 Unit`).
+       - **Card 2 (Dinamika Tren / Rata-Rata)**: Perubahan delta % tren temporal (`+24.5%`) dengan badge tren dinamis (hijau/merah) serta nilai rata-rata per periode.
+       - **Card 3 (Puncak Performa / Rekor Tertinggi)**: Periode dan nilai pencapaian tertinggi (`Bulan 12 (Rp 28,14 Miliar)`).
+     - Menggunakan tipografi presisi Web Design Guidelines: label font-mono uppercase tracking-wider, nilai angka `tabular-nums`, dan warna aksen editorial terracotta/primary.
+  3. **Penyempurnaan Engine Insights untuk Agregat 1-Baris (`smartInsights.js`)**:
+     - Memperluas fungsi `hitungSmartInsights(columns, rows)` agar mendukung kueri agregat tunggal (`rows.length === 1`, misal: `SELECT SUM(total) FROM ...`), sehingga metrik finansial instan tetap dapat dipresentasikan dalam kartu KPI.
+  4. **Quick Operational Deck (`UserWorkspace.jsx`)**:
+     - Memasang bilah pill kueri operasional cepat (Quick Operational Dock) tepat di atas form input footer console:
+       - `[Tren Omzet 2025]` -> *"Bandingkan tren penjualan unit per bulan tahun 2025"*
+       - `[5 Model Terlaris]` -> *"Tampilkan 5 model mobil terlaris dengan total penjualan tertinggi"*
+       - `[Pendapatan Bengkel 2025]` -> *"Berapa total pendapatan servis bengkel tahun 2025?"*
+       - `[Suku Cadang Stok Menipis]` -> *"Tampilkan suku cadang dengan stok menipis di gudang"*
+       - `[Komparasi Divisi 3S]` -> *"Bandingkan performa kontribusi omzet antara penjualan unit, servis, dan suku cadang"*
+     - Menghilangkan hambatan mengetik bagi staf dealer dan menyajikan panduan kueri instan 1-klik yang dapat diakses kapan saja.
+
+- **Verifikasi & Bukti Nyata**:
+  - Frontend Lint: `npm run lint` (**0 error**, 100% lolos).
+  - Frontend Build: `npm run build` (**exit 0**, built in 1.24s).
+  - Backend Test Suite: `pytest tests/ -q` (**591 passed in 45.04s**, 0 failed).
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
@@ -2022,6 +2059,7 @@ Konvensi commit: `feat(scope): ...` / `fix(scope): ...` bahasa Indonesia, 1 comm
 - [x] **Transformasi Conversational AI Murni, Eliminasi Fake Stepper, Penahanan Ekspor Excel, dan Skema Agnostik** — SELESAI (lihat §3ax).
 - [x] **Parser Editorial Markdown Table & Heading, Eliminasi Pipa Teks Mentah** — SELESAI (lihat §3ay).
 - [x] **Dialogue State Tracking (DST), Direct Action Policy & Mechanical Output Guard** — SELESAI (lihat §3az).
+- [x] **Executive Dossier Layout, KPI Metric Banner & Quick Operational Deck** — SELESAI (lihat §3ba).
 - [ ] **Roadmap Opsi Pengembangan Lanjutan (Tercatat untuk Eksekusi Berikutnya)**:
   1. *Dedicated Executive Dashboard Page*: Ditutup/dibatalkan atas arahan pengguna untuk mempertahankan identitas murni Conversational AI Assistant.
   2. **Ekspor PDF Siap Cetak**: Mode cetak laporan PDF eksekutif bertandatangan.

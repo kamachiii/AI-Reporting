@@ -5,6 +5,7 @@ import {
   Loader2, LogOut, Send, Bot, RotateCcw,
   PanelLeftOpen, MessageSquarePlus,
   Car, Wrench, Package, BarChart3, ShieldCheck, ArrowRight,
+  TrendingUp, Compass,
 } from 'lucide-react';
 
 import AssistantAnswerCard from './AssistantAnswerCard';
@@ -41,6 +42,35 @@ const PROMPT_SUGGESTIONS = [
     icon: BarChart3,
     query: 'Bandingkan performa penjualan unit per tahun',
     desc: 'Perbandingan performa operasional tahun ke tahun',
+  },
+];
+
+// Pil Kueri Cepat Operasional (Quick Operational Deck di atas input chat)
+const QUICK_OPERATIONAL_DECK = [
+  {
+    label: 'Tren Omzet 2025',
+    query: 'Bandingkan tren penjualan unit per bulan tahun 2025',
+    icon: TrendingUp,
+  },
+  {
+    label: '5 Model Terlaris',
+    query: 'Tampilkan 5 model mobil terlaris dengan total penjualan tertinggi',
+    icon: Car,
+  },
+  {
+    label: 'Pendapatan Bengkel 2025',
+    query: 'Berapa total pendapatan servis bengkel tahun 2025?',
+    icon: Wrench,
+  },
+  {
+    label: 'Suku Cadang Stok Menipis',
+    query: 'Tampilkan suku cadang dengan stok menipis di gudang',
+    icon: Package,
+  },
+  {
+    label: 'Komparasi Divisi 3S',
+    query: 'Bandingkan performa kontribusi omzet antara penjualan unit, servis, dan suku cadang',
+    icon: BarChart3,
   },
 ];
 
@@ -626,7 +656,28 @@ export default function UserWorkspace({ user, onLogout }) {
 
           {/* Kolom input console */}
           <footer className="bg-canvas/95 backdrop-blur-xs border-t border-hairline shrink-0">
-            <div className="max-w-3xl mx-auto px-4 py-3">
+            <div className="max-w-3xl mx-auto px-4 py-3 space-y-2">
+              {/* Quick Operational Dock: Pil Kueri Cepat Siap Klik */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                <span className="text-[11px] font-mono text-muted uppercase tracking-wider shrink-0 flex items-center gap-1 mr-1">
+                  <Compass size={12} className="text-primary" />
+                  <span className="hidden sm:inline">Kueri Cepat:</span>
+                </span>
+                {QUICK_OPERATIONAL_DECK.map((item, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => handleSend(item.query)}
+                    disabled={isProcessing || !branchCode}
+                    title={item.query}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-surface-card border border-hairline text-body hover:text-ink hover:border-primary/40 hover:bg-surface-soft transition-all whitespace-nowrap shrink-0 cursor-pointer shadow-2xs group disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <item.icon size={12} className="text-primary group-hover:scale-110 transition-transform shrink-0" />
+                    <span>{item.label}</span>
+                  </button>
+                ))}
+              </div>
+
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
