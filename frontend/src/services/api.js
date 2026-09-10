@@ -121,6 +121,10 @@ export const api = {
     const response = await apiClient.put(`/admin/tenants/${branchCode}`, { branch_code: branchCode, db_connection_id: dbConnectionId });
     return response.data;
   },
+  deleteTenant: async (branchCode) => {
+    const response = await apiClient.delete(`/admin/tenants/${branchCode}`);
+    return response.data;
+  },
   setBranchStatus: async (code, isActive) => {
     const response = await apiClient.put(`/admin/branches/${code}/status`, { is_active: isActive });
     return response.data;

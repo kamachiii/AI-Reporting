@@ -71,7 +71,7 @@ export default function useCompanyBranchData() {
         const st = statusByConn[String(t.db_connection_id)];
         statuses[code] = st ? st.status : 'disconnected';
       });
-      setConnectionStatus(prev => ({ ...prev, ...statuses }));
+      setConnectionStatus(statuses);
     } catch {
       notify.error('Gagal memuat data perusahaan & cabang');
     } finally {
