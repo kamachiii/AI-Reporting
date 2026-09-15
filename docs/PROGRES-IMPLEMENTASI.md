@@ -80,6 +80,8 @@ F6    Hardening (Statistik DB, Redis rate limit, cache, metrik)
 | **Transformasi Conversational AI Murni & Skema Agnostik** | selesai | LIVE | Eliminasi fake stepper pipeline di UI; Penahanan tombol ekspor Excel; Unified LLM conversational & SQL routing (0 crash ValueError); Database-agnostic schema context; 583 test backend lulus, lint 0 error, build 0 error |
 | **Dialogue State Tracking (DST) & Direct Action Policy** | selesai | `a7e4371` | DST evaluasi_state_percakapan, direct action policy (no-stall), mechanical output guard anti-halusinasi tabel fiktif, penanganan kueri eksplanatori grafik jujur; 591 test backend lolos |
 | **Executive Dossier Layout & Quick Operational Deck** | selesai | LIVE | Stacked Hybrid View (Grafik di atas + Tabel data di bawah, eliminasi friksi "loh grafiknya mana?"), 3-card Executive KPI Metric Banner (Total, Tren/Rata-rata, Rekor), Quick Operational Deck 1-klik di atas chat input, support 1-row smart insights; 591 test backend lolos, lint 0 error, build 0 error |
+| **Analisis Domain 7 Role & Pemetaan Riil Database 2.387 Tabel** | selesai | LIVE | Dokumentasi ANALISIS-DOMAIN-ROLE-DEALER.md memetakan kebutuhan 7 role (Direksi, Finance, Accounting, Admin Head, Sales & Service Manager) ke tabel nyata demo_otobitzcloud (14k sales, 138k WO, 927k part/labor, 104k survey, AR/AP aging, dan dokumen STNK/BPKB); 648 test lulus |
+
 
 ## 3. Detail F2.0 (yang baru selesai) — penting untuk lanjutan
 
@@ -2076,7 +2078,42 @@ memory pending->approved); F2.5 presenter LLM #2 + number check; Tier 2 + eval h
     - Uji 3 (4 Tahun Gaya 1): Dihasilkan 4 baris data komparasi 2020 s/d 2023 lengkap.
     - Uji 4 (4 Tahun Gaya 2): Dihasilkan 4 tab terpisah secara dinamis tanpa batas artifisial.
 
+### 3bd. Analisis Domain 7 Role Dealer & Pemetaan Database Riil demo_otobitzcloud (2026-09-14)
+
+- **Latar Belakang & Sinkronisasi Arahan Bisnis**:
+  - Berdasarkan rujukan diskusi domain bisnis dealer (`docs/ANALISIS-DOMAIN-ROLE-DEALER.md`), dilakukan audit mendalam terhadap kebutuhan 7 role operasional: *Direksi, Finance Manager, Accounting Manager, Admin Head, Sales Manager, Sales Supervisor,* dan *Service Manager*.
+  - Dilakukan pencocokan langsung (*field-to-table mapping*) ke database riil `demo_otobitzcloud` (remote `103.179.57.59:5432`) dan `backup_demo_otobitzcloud` (lokal `localhost:5432`) yang masing-masing memuat **2.387 tabel**.
+- **Hasil Pemetaan & Temuan Kunci Database Riil**:
+  1. **Sales & Pipeline Unit**:
+     - `untt_penjualan`: 14.045 baris data transaksi penjualan unit sah (`batal = false`, `retur = false`, omzet `hjakhir`, HPP `hjpokok`, diskon).
+     - `untt_pesanankendaraan`: 13.867 baris SPK (Surat Pesanan Kendaraan).
+     - `spk_belummatching_dashboard`: 13.867 baris SPK outstanding (belum matching fisik unit).
+     - `untt_aplikasikredit`: 9.062 baris & `untt_historyaplikasikredit`: 5.545 baris pengajuan leasing (approval vs rejection rate).
+     - `untm_karyawan`: 63 baris data salesman aktif.
+  2. **After-Sales, Bengkel & Sparepart**:
+     - `srvt_wo`: 138.738 baris Work Order (PKB servis bengkel).
+     - `srvt_wodetail`: 927.136 baris rincian pekerjaan (ongkos jasa teknisi, pemakaian suku cadang, dan bahan).
+     - `srvt_stockparts`: Tabel stok inventori sparepart di gudang (stock awal, mutasi masuk, keluar, dan COGS).
+     - `srv_vw_laporanservicephonesurvey`: 104.318 baris survey kepuasan pelanggan bengkel (CSI & NPS retention).
+     - `srvm_mechanic`: 67 baris data teknisi/mekanik bengkel.
+  3. **Finance & Accounting (Kas, AR/AP Aging, Jurnal)**:
+     - `cari_daftarumurpiutangsemuajenis`: 56 baris modul umur piutang (*AR Aging: 0–30, 31–60, 61–90, >90 hari*).
+     - `cari_daftarumurhutangsemuajenis`: 140 baris modul umur utang (*AP Aging*).
+     - `cari_tagihanleasing`: 14.046 baris tagihan piutang leasing dealer.
+     - `acctt_entrydatajournal`: 8.599 baris & `acctt_entrydatajournaldetail`: 29.754 baris transaksi jurnal GL.
+     - `acctt_trialbalancedepartemen`: 62.088 baris neraca saldo trial balance per departemen.
+     - `TaxInvoice` & `TaxInvoice_ori`: 78.936 & 195.220 baris faktur pajak PPN keluaran.
+  4. **Admin Head & Kelancaran Dokumen**:
+     - `srv_vw_cetak_orderpengajuanstnkbpkb`: 13.691 baris pengajuan faktur polisi dan STNK/BPKB ke biro jasa.
+     - `srv_vw_bpkbselesaileasing`: 8.996 baris BPKB selesai untuk serah terima leasing.
+     - `srv_vw_cetak_suratjalangudangout`: 15.739 baris surat jalan DO unit keluar.
+     - `srv_vw_cetak_permohonanrevisispk`: 103.435 baris riwayat revisi dan pembatalan SPK.
+- **Kesiapan Eksekusi**:
+  - Matriks izin tabel dan kolom siap dituangkan ke migrasi `017_rbac.sql` (Fase C) tanpa perlu skema *dummy/mocking*, dengan jaminan kesesuaian 100% terhadap arsitektur verifier 6 gerbang.
+  - Dokumen rujukan tersimpan permanen di `docs/ANALISIS-DOMAIN-ROLE-DEALER.md`.
+
 ## 4. Pelajaran teknis & jebakan (baca sebelum menyentuh backend)
+
 
 1. **Python yang benar**: `backend\.venv\Scripts\python.exe` (venv proyek). Jangan pakai
    python global — tidak ada pytest di sana.

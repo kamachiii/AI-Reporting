@@ -270,6 +270,53 @@ export const api = {
     });
     return response.data;
   },
+  // Streaming SSE: status progres + jawaban akhir. Event galat dilempar
+  // sebagai error berbentuk axios ({response:{status, data:{detail}}})
+  // agar pesanErrorChat di UserWorkspace bisa dipakai ulang.
+  // Gagal stream non-galat (network/terputus) -> throw biasa (fallback).
+  askAssistantStream: async ({ branchCode, question, conversationId = null, onEvent }) => {
+    const token = localStorage.getItem('access_token');
+    const payload = { branch_code: branchCode, question, mode: 'auto' };
+    if (conversationId) {
+      payload.conversation_id = conversationId;
+    }
+    const resp = await fetch(`${API_BASE_URL}/chat/query-stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok || !resp.body) {
+      throw new Error(`stream HTTP ${resp.status}`);
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let final = null;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+      for (const p of parts) {
+        const line = p.split('\n').find((l) => l.startsWith('data: '));
+        if (!line) continue;
+        const ev = JSON.parse(line.slice(6));
+        if (ev.jenis === 'selesai') {
+          final = ev.jawaban;
+        } else if (ev.jenis === 'galat') {
+          throw { response: { status: ev.status || 500, data: { detail: ev.detail } } };
+        } else if (onEvent) {
+          onEvent(ev);
+        }
+      }
+    }
+    if (!final) throw new Error('stream berakhir tanpa jawaban akhir');
+    return final;
+  },
   getConversationMessages: async (conversationId) => {
     const response = await apiClient.get(`/chat/conversations/${conversationId}`);
     return response.data;
@@ -365,5 +412,71 @@ export const api = {
   syncGlobalKB: async () => {
     const response = await apiClient.post('/admin/global-kb/sync');
     return response.data;
+  },
+
+  // ==========================================
+  // 7. DASHBOARD USER (F5) — ringkasan Unit & Bengkel
+  // ==========================================
+  // Response: {branch_code, dari, sampai, cabang, kemampuan, metrik}
+  // Tiap metrik: {ok, available, rows, alasan?, sql?}
+  getDashboardCabang: async (branchCode) => {
+    const response = await apiClient.get('/dashboard/cabang', {
+      params: { branch_code: branchCode },
+    });
+    return response.data; // { cabang: [{kode, nama}] }
+  },
+  getDashboardUnit: async ({ branchCode, dari, sampai, cabang = [] }) => {
+    const params = { branch_code: branchCode, dari, sampai };
+    if (cabang.length > 0) params.cabang = cabang.join(',');
+    const response = await apiClient.get('/dashboard/unit', {
+      params, timeout: 60000,
+    });
+    return response.data;
+  },
+  getDashboardBengkel: async ({ branchCode, dari, sampai, cabang = [] }) => {
+    const params = { branch_code: branchCode, dari, sampai };
+    if (cabang.length > 0) params.cabang = cabang.join(',');
+    const response = await apiClient.get('/dashboard/bengkel', {
+      params, timeout: 60000,
+    });
+    return response.data;
+  },
+
+  // ==========================================
+  // 8. ADMIN: SQL MEMORY (QA2-01) - kurasi jawaban tersimpan
+  // ==========================================
+  getMemories: async ({ branch_code, status, limit = 25, offset = 0 } = {}) => {
+    const params = { limit, offset };
+    if (branch_code) params.branch_code = branch_code;
+    if (status) params.status = status;
+    const response = await apiClient.get('/admin/memories', { params });
+    return response.data;
+  },
+  deleteMemory: async (id) => {
+    const response = await apiClient.delete('/admin/memories/' + id);
+    return response.data;
+  },
+  restoreMemory: async (id) => {
+    const response = await apiClient.post('/admin/memories/' + id + '/pulihkan');
+    return response.data;
+  },
+
+  // ------------------------------------------
+  // 9. ADMIN: ANTREAN PROMOSI KB (governance penyatuan)
+  // ------------------------------------------
+  getPromosi: async ({ branch_code, status, limit = 25, offset = 0 } = {}) => {
+    const params = { limit, offset };
+    if (branch_code) params.branch_code = branch_code;
+    if (status) params.status = status;
+    const response = await apiClient.get('/admin/promosi', { params });
+    return response.data; // { total, limit, offset, items }
+  },
+  setujuPromosi: async (id) => {
+    const response = await apiClient.post('/admin/promosi/' + id + '/setuju');
+    return response.data; // { message }
+  },
+  tolakPromosi: async (id, alasan) => {
+    const response = await apiClient.post('/admin/promosi/' + id + '/tolak', { alasan: alasan || null });
+    return response.data; // { message }
   },
 };

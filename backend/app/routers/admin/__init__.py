@@ -20,6 +20,8 @@ from app.routers.admin.ai_configs import router as ai_configs_router
 from app.routers.admin.audit_logs import router as audit_logs_router
 from app.routers.admin.vanna_training import router as vanna_training_router
 from app.routers.admin.ai_metrics import router as ai_metrics_router
+from app.routers.admin.memories import router as memories_router
+from app.routers.admin.promosi import router as promosi_router
 
 router = APIRouter()
 router.include_router(companies_router)
@@ -34,3 +36,5 @@ router.include_router(ai_configs_router)
 router.include_router(audit_logs_router)
 router.include_router(vanna_training_router)
 router.include_router(ai_metrics_router)
+router.include_router(promosi_router)
+router.include_router(memories_router)

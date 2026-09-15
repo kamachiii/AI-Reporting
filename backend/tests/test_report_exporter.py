@@ -2,7 +2,7 @@
 import io
 import openpyxl
 import pytest
-from app.services.report_exporter import generate_excel_report, _parse_numeric, _is_currency_column
+from app.services.report_exporter import generate_excel_report, _parse_numeric, _is_currency_column, _sel_teks_aman
 
 
 def test_parse_numeric_indonesian_and_raw():
@@ -106,6 +106,28 @@ def test_generate_excel_empty_rows():
     assert ws['B5'].value == "Nama"
 
 
+def test_sel_teks_aman_netralisasi_formula():
+    """Formula injection Excel: sel =+-@ di-escape; normal lolos; dipotong."""
+    assert _sel_teks_aman("=CMD|'/C calc'!A0").startswith("'=")
+    assert _sel_teks_aman("+SUM(A1:A2)").startswith("'+")
+    assert _sel_teks_aman("-2+3").startswith("'-")
+    assert _sel_teks_aman("@HYPERLINK(x)").startswith("'@")
+    assert _sel_teks_aman("BANDUNG") == "BANDUNG"
+    assert _sel_teks_aman("Rp 1000") == "Rp 1000"
+    assert len(_sel_teks_aman("x" * 600)) == 500
+
+
+def test_generate_excel_netralisasi_formula_di_sel():
+    rows = [{"nama": "=HYPERLINK(\"http://evil\")", "kota": "BANDUNG"}]
+    excel_bytes = generate_excel_report(
+        question="=Q jahat", branch_code="TST_01", tab_name="Tab",
+        rows=rows, columns=["nama", "kota"])
+    wb = openpyxl.load_workbook(io.BytesIO(excel_bytes))
+    ws = wb.active
+    vals = [c.value for row in ws.iter_rows(min_row=6, max_row=6) for c in row][:2]
+    assert all(isinstance(v, str) and not v[:1] in ("=", "+", "-", "@") for v in vals)
+
+
 def test_endpoint_export_excel():
     from fastapi.testclient import TestClient
     from app.main import app
@@ -148,5 +170,12 @@ def test_endpoint_export_excel():
     resp_lists = client.post("/chat/export-excel", json=payload_lists)
     assert resp_lists.status_code == 200
     assert len(resp_lists.content) > 1000
+
+    # Batas payload: >1000 baris / >50 kolom -> 400
+    big = dict(payload_lists, rows=[{"a": 1}] * 1001, columns=["a"])
+    assert client.post("/chat/export-excel", json=big).status_code == 400
+    wide = dict(payload_lists, rows=[{"a": 1}],
+                columns=[f"c{i}" for i in range(51)])
+    assert client.post("/chat/export-excel", json=wide).status_code == 400
 
     app.dependency_overrides.clear()

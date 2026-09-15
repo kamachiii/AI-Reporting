@@ -5,10 +5,36 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from app.services.vanna_engine import (
     ekstrak_sql,
     susun_prompt_vanna,
+    _deteksi_kueri_komparasi_periode,
     _format_ringkasan_otomatis,
     _format_rupiah_human,
     jalankan_mode_vanna,
 )
+
+
+def test_komparasi_tidak_mengarang_tahun_untuk_tren_intra_tahun():
+    """Regresi insiden live: 'Bandingkan tren ... per bulan tahun 2025'
+    dijawab komparasi 2024-vs-2025 yang tidak diminta (tahun 2024 dikarang).
+    """
+    assert _deteksi_kueri_komparasi_periode(
+        "Bandingkan tren penjualan unit per bulan tahun 2025") is None
+    assert _deteksi_kueri_komparasi_periode(
+        "Tren penjualan per bulan 2025") is None
+    assert _deteksi_kueri_komparasi_periode(
+        "Bandingkan revenue per cabang tahun 2025") is None
+
+
+def test_komparasi_dua_tahun_eksplisit_tetap_jalan():
+    hasil = _deteksi_kueri_komparasi_periode(
+        "Bandingkan penjualan tahun 2024 vs 2025")
+    assert hasil is not None
+    assert hasil["periods"] == ["2024", "2025"]
+
+
+def test_komparasi_satu_tahun_tanpa_granularitas_default_tahun_lalu():
+    hasil = _deteksi_kueri_komparasi_periode("Bandingkan penjualan tahun 2025")
+    assert hasil is not None
+    assert hasil["periods"] == ["2024", "2025"]
 
 def test_ekstrak_sql():
     raw_markdown = "```sql\nSELECT * FROM untt_pembelian;\n```"
@@ -84,7 +110,7 @@ async def test_jalankan_mode_vanna_mock():
 
     user = {"user_id": 1, "username": "testuser"}
     
-    with patch("app.services.vanna_engine.resolve_tenant", return_value={"tenant_id": 1, "branch_code": "TST_01"}), \
+    with patch("app.services.vanna_engine.resolve_tenant", return_value={"tenant_id": 1, "branch_code": "TST_01", "schema_config_json": {"tables": {"untt_penjualan": {"columns": [{"name": "tahun"}, {"name": "total"}]}}}}), \
          patch("app.services.vanna_engine.resolve_ai_config", return_value={"model": "test-model"}), \
          patch("app.services.vanna_engine.ambil_konteks_vanna", return_value=("ctx", [])):
         
@@ -125,7 +151,7 @@ async def test_jalankan_mode_vanna_komparasi_deterministik():
 
     user = {"user_id": 1, "username": "testuser"}
 
-    with patch("app.services.vanna_engine.resolve_tenant", return_value={"tenant_id": 1, "branch_code": "TST_01"}), \
+    with patch("app.services.vanna_engine.resolve_tenant", return_value={"tenant_id": 1, "branch_code": "TST_01", "schema_config_json": {"tables": {"untt_penjualan": {"columns": [{"name": "tahun"}, {"name": "total"}]}}}}), \
          patch("app.services.vanna_engine.resolve_ai_config", return_value={"model": "test-model"}):
 
         # Kueri komparasi 3 tahun eliptikal: 0 panggilan LLM, deterministik ke untt_penjualan
@@ -172,7 +198,14 @@ async def test_jalankan_mode_vanna_memory_replay():
 
     user = {"user_id": 1, "username": "testuser"}
     
-    with patch("app.services.vanna_engine.resolve_tenant", return_value={"tenant_id": 1, "branch_code": "TST_01"}):
+    with patch("app.services.vanna_engine.resolve_tenant", return_value={"tenant_id": 1, "branch_code": "TST_01", "schema_config_json": {"tables": {"untt_penjualan": {"columns": [{"name": "tahun"}, {"name": "total"}]}}}}), \
+         patch("app.services.vanna_engine.verify_and_execute", return_value={
+             "verdict": {"ok": True, "gate": None, "reason": "lolos",
+                         "detail": {"final_sql": "SELECT tahun, total FROM untt_penjualan WHERE tahun IN (2025, 2026)",
+                                    "tabel_direferensikan": ["untt_penjualan"]}},
+             "result": {"columns": ["tahun", "total"], "rows": [[2025, 2000]],
+                        "row_count": 1, "duration_ms": 5, "truncated": False}}), \
+         patch("app.services.vanna_engine.muat_kb_gabungan", return_value={"tabel_dilarang": []}):
         res = await jalankan_mode_vanna(
             fake_core_pool, fake_tpm, user, "berikan data penjualan 2025 vs 2026", "TST_01"
         )
@@ -181,6 +214,116 @@ async def test_jalankan_mode_vanna_memory_replay():
         assert res["confidence"] == "A"
         assert res["memory_id"] == 99
         assert "untt_penjualan" in res["sql"]
+
+
+@pytest.mark.anyio
+async def test_replay_pending_tidak_dipakai():
+    """K1a: entri pending TIDAK boleh di-replay (hanya approved)."""
+    fake_core_pool = AsyncMock()
+    queries = []
+
+    async def _fetchrow(query, *args):
+        queries.append(query)
+        return None  # simulasi DB: tidak ada baris approved
+
+    fake_core_pool.fetchrow = _fetchrow
+    fake_core_pool.fetch = AsyncMock(return_value=[])
+    fake_core_pool.execute = AsyncMock()
+
+    fake_tpm = AsyncMock()
+    fake_conn = AsyncMock()
+    fake_conn.execute = AsyncMock()
+    fake_conn.fetch = AsyncMock(return_value=[{"a": 1}])
+    fake_pool_tenant = MagicMock()
+    fake_pool_tenant.acquire.return_value = _AsyncContextManager(fake_conn)
+    fake_tpm.get_pool = AsyncMock(return_value=fake_pool_tenant)
+
+    user = {"user_id": 1, "username": "testuser"}
+    with patch("app.services.vanna_engine.resolve_tenant", return_value={"tenant_id": 1, "branch_code": "TST_01", "schema_config_json": {"tables": {"untt_penjualan": {"columns": [{"name": "tahun"}, {"name": "total"}]}}}}), \
+         patch("app.services.vanna_engine.resolve_ai_config", return_value={"model": "test-model"}), \
+         patch("app.services.vanna_engine.ambil_konteks_vanna", return_value=("ctx", [])):
+        async def fake_llm(sys, usr, cfg):
+            return "```sql\nSELECT 1;\n```"
+        res = await jalankan_mode_vanna(
+            fake_core_pool, fake_tpm, user, "tampilkan 5 model mobil terlaris pending xyz", "TST_01",
+            llm_call_fn=fake_llm)
+        # Bukan replay memory (tidak ada approved) -> jatuh ke LLM
+        assert res["source"] != "memory"
+        # Filter replay wajib approved-only
+        assert any("status = 'approved'" in q for q in queries), \
+            "filter replay harus approved-only (K1a)"
+        assert not any("pending" in q for q in queries if "sql_memory" in q), \
+            "pending tidak boleh masuk filter replay"
+
+
+@pytest.mark.anyio
+async def test_replay_verdict_gagal_jadi_stale_dan_miss():
+    """K1b: verdict deterministik gagal -> tandai stale + MISS (lanjut LLM)."""
+    fake_core_pool = AsyncMock()
+
+    async def _fetchrow(query, *args):
+        if "sql_memory" in query:
+            # SQL berbahaya TAPI menyebut tabel topik agar lolos topic-gate
+            # dan mencapai gerbang verifier (yang menolaknya).
+            return {"id": 77, "sql": "SELECT pg_sleep(2) FROM untt_penjualan",
+                    "ringkasan": None, "status": "approved"}
+        return None
+
+    fake_core_pool.fetchrow = _fetchrow
+    fake_core_pool.fetch = AsyncMock(return_value=[])
+    fake_core_pool.execute = AsyncMock()
+
+    fake_tpm = AsyncMock()
+    fake_conn = AsyncMock()
+    fake_conn.execute = AsyncMock()
+    fake_conn.fetch = AsyncMock(return_value=[{"a": 1}])
+    fake_pool_tenant = MagicMock()
+    fake_pool_tenant.acquire.return_value = _AsyncContextManager(fake_conn)
+    fake_tpm.get_pool = AsyncMock(return_value=fake_pool_tenant)
+
+    user = {"user_id": 1, "username": "testuser"}
+    with patch("app.services.vanna_engine.resolve_tenant", return_value={"tenant_id": 1, "branch_code": "TST_01", "schema_config_json": {"tables": {"untt_penjualan": {"columns": [{"name": "tahun"}, {"name": "total"}]}}}}), \
+         patch("app.services.vanna_engine.resolve_ai_config", return_value={"model": "test-model"}), \
+         patch("app.services.vanna_engine.ambil_konteks_vanna", return_value=("ctx", [])), \
+         patch("app.services.vanna_engine.verify_and_execute", return_value={
+             "verdict": {"ok": False, "gate": "profil", "reason": "fungsi dilarang"}, "result": None}), \
+         patch("app.services.vanna_engine.muat_kb_gabungan", return_value={"tabel_dilarang": []}), \
+         patch("app.services.vanna_engine._is_explanatory_question", return_value=False), \
+         patch("app.services.vanna_engine._is_conversational_question", return_value=False), \
+         patch("app.services.vanna_engine._is_data_cutoff_question", return_value=None), \
+         patch("app.services.vanna_engine.is_schema_map_question", return_value=False), \
+         patch("app.services.vanna_engine.deteksi_topik_eksplisit", return_value=None), \
+         patch("app.services.vanna_engine.deteksi_topik_riwayat_percakapan", new=AsyncMock(return_value=None)):
+        async def fake_llm(sys, usr, cfg):
+            return "```sql\nSELECT 1;\n```"
+        res = await jalankan_mode_vanna(
+            fake_core_pool, fake_tpm, user, "tampilkan 5 model mobil terlaris berbahaya xyz", "TST_01",
+            llm_call_fn=fake_llm)
+        assert res["source"] != "memory", "SQL berbahaya tidak boleh di-replay"
+        # stale ditandai
+        calls = [str(c) for c in fake_core_pool.execute.await_args_list]
+        assert any("stale" in c for c in calls), "entri berbahaya harus ditandai stale"
+
+
+@pytest.mark.anyio
+async def test_k2_guard_kepemilikan_conversation():
+    """K2: ID asing -> None; milik sendiri -> id; falsy -> None tanpa query."""
+    from app.services.vanna_engine import _conversation_milik_user
+
+    class PoolOwned:
+        async def fetchval(self, q, *a):
+            return 230
+    class PoolAsing:
+        async def fetchval(self, q, *a):
+            return None
+    class PoolBoom:
+        async def fetchval(self, q, *a):
+            raise AssertionError("tidak boleh query untuk falsy")
+
+    assert await _conversation_milik_user(PoolOwned(), 230, 4, "TST_01") == 230
+    assert await _conversation_milik_user(PoolAsing(), 230, 4, "TST_01") is None
+    assert await _conversation_milik_user(PoolBoom(), None, 4, "TST_01") is None
+    assert await _conversation_milik_user(PoolBoom(), 0, 4, "TST_01") is None
 
 
 @pytest.mark.anyio
@@ -214,7 +357,7 @@ async def test_jalankan_mode_vanna_fanout_3s():
     async def mock_llm(sys_msg, prompt, cfg):
         return f"```json\n{llm_json}\n```"
 
-    with patch("app.services.vanna_engine.resolve_tenant", return_value={"tenant_id": 1, "branch_code": "TST_01"}), \
+    with patch("app.services.vanna_engine.resolve_tenant", return_value={"tenant_id": 1, "branch_code": "TST_01", "schema_config_json": {"tables": {"untt_penjualan": {"columns": [{"name": "tahun"}, {"name": "total"}]}}}}), \
          patch("app.services.vanna_engine.resolve_ai_config", return_value={}), \
          patch("app.services.vanna_engine.ambil_konteks_vanna", return_value=("Context...", [])):
         res = await jalankan_mode_vanna(
@@ -739,3 +882,171 @@ async def test_zero_cross_session_bleed_real_db():
 
 
 
+
+
+@pytest.mark.anyio
+async def test_fanout_menolak_dml_tanpa_eksekusi():
+    """QA1-fanout: sub-SQL DELETE/UPDATE/DROP ditolak SEBELUM conn.fetch."""
+    from app.services.vanna_engine import eksekusi_subdomain_fanout
+    fake_conn = AsyncMock()
+    fake_conn.fetch = AsyncMock()
+    fake_conn.execute = AsyncMock()
+    fake_pool = MagicMock()
+    fake_pool.acquire.return_value = _AsyncContextManager(fake_conn)
+    dom = {"id": "sub_x", "title": "X", "icon": "Car"}
+    for jahat in [
+        "DELETE FROM srvt_wo WHERE nomor = 'X'",
+        "UPDATE untt_penjualan SET hjakhir = 0",
+        "DROP TABLE untt_penjualan",
+        "SELECT 1; DELETE FROM srvt_wo",
+    ]:
+        hasil = await eksekusi_subdomain_fanout(fake_pool, dom, jahat)
+        assert hasil["error"], jahat
+        assert hasil["rows"] == []
+    fake_conn.fetch.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_fanout_select_bersih_dieksekusi():
+    from app.services.vanna_engine import eksekusi_subdomain_fanout
+    fake_conn = AsyncMock()
+    fake_conn.fetch = AsyncMock(return_value=[{"a": 1}])
+    fake_conn.execute = AsyncMock()
+    fake_pool = MagicMock()
+    fake_pool.acquire.return_value = _AsyncContextManager(fake_conn)
+    dom = {"id": "sub_x", "title": "X", "icon": "Car"}
+    hasil = await eksekusi_subdomain_fanout(
+        fake_pool, dom, "SELECT a FROM t WHERE b = 1")
+    assert hasil["error"] is None
+    assert hasil["rows"] == [[1]]
+    fake_conn.fetch.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_fanout_sql_kosong_gagal_anggun():
+    from app.services.vanna_engine import eksekusi_subdomain_fanout
+    fake_pool = MagicMock()
+    dom = {"id": "sub_x", "title": "X", "icon": "Car"}
+    hasil = await eksekusi_subdomain_fanout(fake_pool, dom, "")
+    assert hasil["error"] == "Kueri tidak dihasilkan"
+
+
+
+
+@pytest.mark.anyio
+async def test_intent_llm_fallback_typo_tanpa_regex():
+    """Kasus target fallback: typo hingga regex buta total."""
+    from app.services.vanna_engine import pisahkan_intent_llm
+
+    async def fake_llm(sys_msg, prompt, cfg):
+        return '{"permintaan": [{"topik": "mobil", "fokus": "jual oto"}, {"topik": "servis", "fokus": "srvis bengkel"}]}'
+
+    hasil = await pisahkan_intent_llm(
+        "jual oto dan srvis oto", fake_llm, {})
+    assert hasil is not None
+    assert {d["id"] for d in hasil["domains"]} == {"sub_mobil", "sub_servis"}
+@pytest.mark.anyio
+async def test_intent_llm_menolak_kunci_liar_dan_gagal_aman():
+    from app.services.vanna_engine import pisahkan_intent_llm
+
+    async def fake_liar(sys_msg, prompt, cfg):
+        return '{"permintaan": [{"topik": "alien", "fokus": "x"}]}'
+
+    assert await pisahkan_intent_llm(
+        "info alien dan ufo dong", fake_liar, {}) is None
+
+    async def fake_rusak(sys_msg, prompt, cfg):
+        raise RuntimeError("provider mati")
+
+    assert await pisahkan_intent_llm(
+        "penjualan dan servis dong", fake_rusak, {}) is None
+
+
+@pytest.mark.anyio
+async def test_intent_llm_tidak_aktif_tanpa_konjungsi_ambigu():
+    from app.services.vanna_engine import pisahkan_intent_llm
+
+    async def fake_jangan_dipanggil(sys_msg, prompt, cfg):
+        raise AssertionError("tidak boleh ada panggilan LLM")
+
+    # Tanpa konjungsi / tanpa entitas -> None TANPA memanggil LLM
+    assert await pisahkan_intent_llm(
+        "berapa total penjualan tahun 2025?", fake_jangan_dipanggil, {}) is None
+
+
+@pytest.mark.anyio
+async def test_konteks_presentasi_gema_dan_rumus():
+    from app.services.vanna_engine import konteks_presentasi
+
+    class FakeCore:
+        async def fetch(self, q):
+            return [{"content": "revenue penjualan unit maps to SUM(x) dari untt_penjualan."},
+                    {"content": "umur piutang maps to bucket srv_vw_daftarumurpiutang."}]
+
+    out = await konteks_presentasi(
+        FakeCore(), "Berapa revenue tahun 2025 cabang 210?",
+        "SELECT sum(hjakhir) FROM untt_penjualan WHERE kode_cabang = ANY('{210}')")
+    assert out["gema_filter"] == "2025 · cabang 210"
+    assert len(out["catatan_rumus"]) == 1
+    assert out["catatan_rumus"][0].startswith("SUM(x)")
+    assert "maps to" not in out["catatan_rumus"][0]
+
+
+@pytest.mark.anyio
+async def test_konteks_presentasi_default_aman():
+    from app.services.vanna_engine import konteks_presentasi
+
+    class FakeCore:
+        async def fetch(self, q):
+            raise RuntimeError("DB core mati")
+
+    out = await konteks_presentasi(FakeCore(), "halo", "SELECT 1")
+    assert out == {"gema_filter": "semua periode · cabang semua",
+                   "catatan_rumus": []}
+
+
+def test_presenter_tidak_double_count_kolom_total():
+    """Regresi insiden live: baris komponen 69,8 + 14,7 + 42,2 + total 126,7 M
+    dinarasikan Rp 253,3 M (komponen + total dijumlah)."""
+    from app.services.vanna_engine import _format_ringkasan_otomatis
+    cols = ["tahun", "omzet_unit", "omzet_servis", "omzet_sparepart",
+            "total_omzet"]
+    rows = [[2025, 69825000000, 14650498858, 42175291550, 126650790408]]
+    teks = _format_ringkasan_otomatis(rows, cols, "total revenue dealer 2025")
+    assert "253" not in teks
+    assert "126" in teks or "126,65" in teks or "Miliar" in teks
+
+
+def test_presenter_tanpa_kolom_total_tetap_menjumlah():
+    from app.services.vanna_engine import _format_ringkasan_otomatis
+    cols = ["tahun", "omzet_unit", "omzet_servis"]
+    rows = [[2025, 69825000000, 14650498858], [2024, 189924000000, 15280393122]]
+    teks = _format_ringkasan_otomatis(rows, cols, "x")
+    assert "84" in teks  # 69,825 + 14,65 = 84,475 M
+
+
+def test_deteksi_revenue_dealer():
+    from app.services.vanna_engine import (
+        _deteksi_revenue_dealer, susun_kueri_revenue_dealer)
+    assert _deteksi_revenue_dealer("total revenue dealer 2025") == "2025"
+    assert _deteksi_revenue_dealer("Berapa revenue dealer tahun 2024?") == "2024"
+    # qualifier lini/dimensi -> jalur normal
+    assert _deteksi_revenue_dealer("total revenue unit 2025") is None
+    assert _deteksi_revenue_dealer("revenue servis bengkel 2025") is None
+    assert _deteksi_revenue_dealer("tren revenue dealer 2025") is None
+    assert _deteksi_revenue_dealer("revenue dealer per cabang 2025") is None
+    # bukan komparasi / tanpa tahun -> None
+    assert _deteksi_revenue_dealer(
+        "bandingkan revenue dealer 2024 vs 2025") is None
+    assert _deteksi_revenue_dealer("total revenue dealer") is None
+    assert _deteksi_revenue_dealer("halo") is None
+
+
+def test_builder_revenue_dealer_union_tiga_lini():
+    from app.services.vanna_engine import susun_kueri_revenue_dealer
+    sql = susun_kueri_revenue_dealer("2025")
+    assert sql.count("UNION ALL") == 2
+    assert "'2025-01-01'" in sql and "'2026-01-01'" in sql
+    assert "srvt_wodetail" in sql and "srvt_faktur" in sql
+    # tabel tak lengkap -> None (fail-closed)
+    assert susun_kueri_revenue_dealer("2025", allowed_tables={"a"}) is None

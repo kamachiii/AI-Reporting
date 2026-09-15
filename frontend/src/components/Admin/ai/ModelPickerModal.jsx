@@ -5,6 +5,7 @@ import { Search, X } from 'lucide-react';
 export default function ModelPickerModal({ isOpen, onClose, onSelect, models }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const [manualModel, setManualModel] = useState('');
 
   // Ambil daftar provider unik untuk filter kategori
   const uniqueProviders = useMemo(() => {
@@ -61,6 +62,29 @@ export default function ModelPickerModal({ isOpen, onClose, onSelect, models }) 
 
           {/* BODY */}
           <div className="flex-1 overflow-y-auto p-4">
+            {/* Input manual — jalan keluar saat fetch model gagal (mis. provider 500).
+                Backend tidak memvalidasi nama model ke provider, jadi string apa pun tersimpan. */}
+            <div className="mb-4 p-3 border border-dashed border-hairline rounded-lg bg-surface-soft">
+              <p className="text-xs font-medium text-ink mb-1">Fetch gagal? Ketik nama model manual:</p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="cth: glm-5.3-flash"
+                  value={manualModel}
+                  onChange={(e) => setManualModel(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && manualModel.trim()) handleSelect(manualModel.trim()); }}
+                  className="flex-1 min-w-0 px-3 py-1.5 border border-hairline rounded-md bg-white text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+                <button
+                  type="button"
+                  disabled={!manualModel.trim()}
+                  onClick={() => handleSelect(manualModel.trim())}
+                  className="px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-white hover:bg-primary-active transition-colors disabled:opacity-50 whitespace-nowrap"
+                >
+                  Gunakan
+                </button>
+              </div>
+            </div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4 items-stretch">
               {filteredModels.length === 0 ? (
                 <div className="col-span-full py-8 text-center text-muted">

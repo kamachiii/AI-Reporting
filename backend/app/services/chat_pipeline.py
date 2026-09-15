@@ -452,6 +452,10 @@ async def ubah_status_memory(core_pool, user, branch_code: str, memory_id: int,
                 "UPDATE sql_memory SET status = $1, "
                 "updated_at = CURRENT_TIMESTAMP WHERE id = $2",
                 status_baru, memory_id)
+            if aksi == "confirm" and status_baru == "approved":
+                await _nominasikan_promosi(
+                    core_pool, tenant_id, memory_id, baris,
+                    (user or {}).get("user_id"))
         await tulis_audit(
             core_pool, user_id=(user or {}).get("user_id"),
             branch_code=branch_code, prompt_text=prompt_audit,
@@ -464,6 +468,34 @@ async def ubah_status_memory(core_pool, user, branch_code: str, memory_id: int,
         await _audit_gagal(core_pool, user, branch_code, prompt_audit, None,
                            sql_audit, None, _STATUS_ERROR, str(e))
         raise
+
+
+async def _nominasikan_promosi(core_pool, tenant_id: int, memory_id: int,
+                             baris: dict, user_id) -> None:
+    """Ajukan pola terkonfirmasi pertama ke antrean promosi KB (governance).
+
+    Aturan nominasi cerdas: hanya bila BELUM ada promosi untuk pasangan
+    (tenant, pertanyaan ternormalisasi) berstatus diusulkan/disetujui —
+    klik Benar ke-2,3,4… tidak membanjiri antrean. Kegagalan di sini
+    TIDAK PERNAH menggagalkan confirm (best-effort).
+    """
+    try:
+        tanya = (baris or {}).get("pertanyaan_ternormalisasi") or ""
+        sql = (baris or {}).get("sql") or ""
+        if not tanya.strip() or not sql.strip():
+            return
+        ada = await core_pool.fetchval(
+            "SELECT 1 FROM promosi_kb WHERE tenant_id = $1 AND pertanyaan = $2 "
+            "AND status IN ('diusulkan', 'disetujui') LIMIT 1",
+            tenant_id, tanya)
+        if ada:
+            return
+        await core_pool.execute(
+            "INSERT INTO promosi_kb (tenant_id, memory_id, pertanyaan, sql, "
+            "dibuat_oleh) VALUES ($1, $2, $3, $4, $5)",
+            tenant_id, memory_id, tanya, sql, user_id)
+    except Exception as e:
+        logger.warning("nominasi promosi gagal (diabaikan): %s", e)
 
 
 async def tulis_audit(core_pool, *, user_id, branch_code, prompt_text,

@@ -167,6 +167,23 @@ def _parse_date_or_time(val: Any) -> tuple[bool, Any, Optional[str]]:
     return False, None, None
 
 
+def _sel_teks_aman(nilai: str, batas: int = 500) -> str:
+    """Netralisasi formula injection Excel (aturan OWASP CSV-injection).
+
+    Sel yang diawali `= + - @` dieksekusi Excel sebagai formula saat file
+    dibuka (mis. `=CMD|...`, `=HYPERLINK(...)`) — awalan berbahaya di-escape
+    dengan kutip tunggal + string dipotong agar sel raksasa tak memberatkan.
+    Diterapkan ke SEMUA sel string (data, header, judul).
+    """
+    if not isinstance(nilai, str):
+        nilai = str(nilai)
+    if len(nilai) > batas:
+        nilai = nilai[:batas]
+    if nilai[:1] in ("=", "+", "-", "@"):
+        return "'" + nilai
+    return nilai
+
+
 def generate_excel_report(
     question: str,
     branch_code: str,
@@ -194,12 +211,12 @@ def generate_excel_report(
     ws['A1'] = "DMS AI PLATFORM — LAPORAN EKSEKUTIF"
     ws['A1'].font = Font(name="Segoe UI", size=14, bold=True, color="1E3A8A")
 
-    ws['A2'] = f"Kueri: {question}"
+    ws['A2'] = _sel_teks_aman(f"Kueri: {question}")
     ws['A2'].font = Font(name="Segoe UI", size=10, italic=True, color="475569")
 
     kategori_text = f" · Kategori: {tab_name}" if tab_name else ""
     tgl_cetak = datetime.now().strftime("%d %B %Y, %H:%M WIB")
-    ws['A3'] = f"Cabang: {branch_code}{kategori_text} · Dicetak: {tgl_cetak}"
+    ws['A3'] = _sel_teks_aman(f"Cabang: {branch_code}{kategori_text} · Dicetak: {tgl_cetak}")
     ws['A3'].font = Font(name="Segoe UI", size=9, color="64748B")
 
     # Batasi bila kolom kosong
@@ -245,7 +262,7 @@ def generate_excel_report(
 
     # 3. Tulis Header Tabel
     for col_idx, col_name in enumerate(columns, 1):
-        cell = ws.cell(row=start_row, column=col_idx, value=col_name.replace('_', ' ').title())
+        cell = ws.cell(row=start_row, column=col_idx, value=_sel_teks_aman(col_name.replace('_', ' ').title()))
         cell.fill = header_fill
         cell.font = header_font
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -296,7 +313,7 @@ def generate_excel_report(
                 cell.number_format = dt_fmt
                 cell.alignment = Alignment(horizontal="center", vertical="center")
             else:
-                cell.value = str(raw_val) if raw_val is not None else "-"
+                cell.value = _sel_teks_aman(str(raw_val)) if raw_val is not None else "-"
                 cell.alignment = Alignment(
                     horizontal="center" if c_idx == category_col_idx and len(str(raw_val)) <= 6 else "left",
                     vertical="center"

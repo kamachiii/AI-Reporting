@@ -5,7 +5,7 @@ import logging
 
 from app.core.config import settings
 from app.core.database import get_core_pool, close_core_pool, get_redis
-from app.routers import auth, admin, chat
+from app.routers import auth, admin, chat, dashboard
 from app.services.tenant_pool import get_tenant_pool_manager
 
 logging.basicConfig(level=logging.INFO)
@@ -57,6 +57,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(chat.router)
+app.include_router(dashboard.router)
 
 @app.get("/")
 async def root():

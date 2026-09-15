@@ -20,8 +20,10 @@ from app.services.chat_pipeline import (
     simpan_pesan,
     normalisasi_pertanyaan,
     tandai_memory_dipakai,
+    tandai_memory_stale,
 )
-from app.services.query_executor import _konversi_nilai
+from app.services.knowledge_base import muat_kb_gabungan
+from app.services.query_executor import _konversi_nilai, verify_and_execute
 from app.services.query_planner import AIConfigError, panggil_llm_default, resolve_ai_config
 from app.services.vanna_pgvector import cari_konteks_pgvector
 from app.services.automotive_thesaurus import deteksi_konteks_domain, susun_instruksi_domain
@@ -29,6 +31,9 @@ from app.services.clarification_engine import cek_ambiguitas_pertanyaan
 from app.services.fanout_engine import (
     cek_apakah_perlu_fanout,
     cek_apakah_minta_multi_query,
+    cocokkan_entitas_per_bagian,
+    bangun_domain_dari_entitas,
+    ENTITY_TAXONOMY,
     susun_multi_sql_prompt,
     ekstrak_multi_sql,
     susun_ringkasan_eksekutif_multi,
@@ -43,6 +48,50 @@ import sqlglot
 from sqlglot import exp
 
 logger = logging.getLogger(__name__)
+
+
+class _ReplayMemoryMiss(Exception):
+    """Replay memory tidak dapat dipakai (stale/MISS) — lanjut ke LLM/fanout."""
+
+
+async def _replay_memory_terverifikasi(core_pool, pool_tenant, tenant,
+                                       entri_id: int, sql_mem: str):
+    """Replay entri memory approved lewat gerbang penuh (K1 — tutup eksekusi mentah).
+
+    Returns dict result (`columns/rows/row_count/duration_ms/truncated`) atau
+    None bila MISS:
+    - verdict deterministik gagal (bentuk/whitelist/profil/budget/skema) ->
+      tandai `stale` + MISS (pola Tier1 `chat_pipeline`);
+    - transient (timeout/executor/asyncpg, mis. `$n` tanpa params) ->
+      MISS TANPA menyentuh status (anti false-stale).
+    """
+    sc = tenant.get("schema_config_json") or {}
+    if isinstance(sc, str):
+        try:
+            sc = json.loads(sc)
+        except Exception:
+            sc = {}
+    if not isinstance(sc, dict) or "tables" not in sc:
+        return None
+    schema_tables = set((sc.get("tables") or {}).keys())
+    try:
+        kb = await muat_kb_gabungan(core_pool, tenant.get("knowledge_base"),
+                                    schema_tables)
+        kb_forbidden = kb.get("tabel_dilarang") or []
+    except Exception:
+        kb_forbidden = []
+    try:
+        hasil = await verify_and_execute(pool_tenant, sql_mem, sc, params=None,
+                                         kb_forbidden=kb_forbidden, row_cap=500)
+    except Exception:
+        return None
+    if not hasil["verdict"]["ok"]:
+        try:
+            await tandai_memory_stale(core_pool, entri_id)
+        except Exception:
+            pass
+        return None
+    return hasil["result"]
 
 
 def _bersihkan_emoji_teks(teks: str) -> str:
@@ -470,6 +519,30 @@ def _cari_kolom_tahun_transaksi(columns: list) -> str | None:
     return None
 
 
+
+def _kolom_total_saudaranya(nilai_kolom: dict) -> str | None:
+    """Deteksi kolom yang nilainya = jumlah kolom uang saudaranya.
+
+    Mencegah double-count presenter (insiden live: narasi Rp 253,3 M dari
+    baris komponen 69,8 + 14,7 + 42,2 + total 126,7 M).
+    Return nama kolom total, atau None.
+    """
+    angka = {}
+    for k, v in (nilai_kolom or {}).items():
+        try:
+            angka[k] = float(v)
+        except (ValueError, TypeError):
+            continue
+    for k, v in angka.items():
+        sisa = [x for kk, x in angka.items() if kk != k]
+        if not sisa:
+            continue
+        jumlah = sum(sisa)
+        if abs(v - jumlah) <= max(1.0, 0.001 * abs(v)):
+            return k
+    return None
+
+
 def _format_ringkasan_otomatis(rows: list, columns: list, question: str = "") -> str:
     """Ringkasan naratif deterministik otomatis tanpa panggil LLM lagi (hemat 100% token)."""
     n = len(rows)
@@ -506,14 +579,19 @@ def _format_ringkasan_otomatis(rows: list, columns: list, question: str = "") ->
             if thn is None:
                 continue
 
-            total_uang_row = 0.0
+            sub_nilai = {}
             for mc in money_cols:
                 mv = row_dict.get(mc)
                 if mv is not None:
                     try:
-                        total_uang_row += float(mv)
+                        sub_nilai[mc] = float(mv)
                     except (ValueError, TypeError):
                         pass
+            kolom_total = _kolom_total_saudaranya(sub_nilai)
+            if kolom_total is not None:
+                total_uang_row = sub_nilai[kolom_total]
+            else:
+                total_uang_row = sum(sub_nilai.values())
 
             primary_qty = None
             primary_qty_label = "transaksi"
@@ -657,6 +735,86 @@ def validasi_readonly_ast_vanna(sql: str) -> None:
     dangerous = _has_dangerous_function(tree)
     if dangerous:
         raise SqlGuardError(f"Fungsi PostgreSQL tidak diizinkan: {dangerous}")
+
+
+def _baris_gagal(domain_def: dict, sql_query: str, pesan: str) -> dict:
+    return {
+        "id": domain_def["id"],
+        "title": domain_def["title"],
+        "label": domain_def.get("label", domain_def["title"]),
+        "icon": domain_def["icon"],
+        "sql": sql_query,
+        "columns": [],
+        "rows": [],
+        "row_count": 0,
+        "total_full_count": None,
+        "total_full_money": None,
+        "raw_records": [],
+        "error": pesan,
+    }
+
+
+async def eksekusi_subdomain_fanout(pool_tenant, domain_def: dict, sql_query: str) -> dict:
+    """Eksekusi satu sub-SQL fanout multi-tab (QA1-fanout).
+
+    Gerbang validasi read-only WAJIB lolos dulu (fail-closed per tab):
+    tanpa ini, SQL buatan LLM pada jalur fanout dieksekusi mentah via
+    conn.fetch - tidak seperti jalur single-query.
+    """
+    if not sql_query:
+        return _baris_gagal(domain_def, sql_query, "Kueri tidak dihasilkan")
+    try:
+        validasi_readonly_ast_vanna(sql_query)
+    except SqlGuardError as e:
+        logger.warning("fanout %s ditolak validasi: %s", domain_def["id"], e)
+        return _baris_gagal(domain_def, sql_query, str(e))
+    async with pool_tenant.acquire() as conn:
+        await conn.execute("SET statement_timeout = '15000'")
+        try:
+            records = await conn.fetch(sql_query)
+            hidden_cols = {"total_transaksi_tahun", "total_omzet_tahun"}
+            total_full_count = None
+            total_full_money = None
+
+            if records:
+                first_rec = records[0]
+                if "total_transaksi_tahun" in first_rec and first_rec["total_transaksi_tahun"] is not None:
+                    try:
+                        total_full_count = int(first_rec["total_transaksi_tahun"])
+                    except (ValueError, TypeError):
+                        pass
+                if "total_omzet_tahun" in first_rec and first_rec["total_omzet_tahun"] is not None:
+                    try:
+                        total_full_money = float(first_rec["total_omzet_tahun"])
+                    except (ValueError, TypeError):
+                        pass
+                raw_keys = list(first_rec.keys())
+                visible_cols = [c for c in raw_keys if c not in hidden_cols]
+            else:
+                visible_cols = []
+
+            converted = [[_konversi_nilai_vanna(r[c]) for c in visible_cols] for r in records[:500]]
+            raw_recs = [{c: r[c] for c in visible_cols} for r in records]
+
+            return {
+                "id": domain_def["id"],
+                "title": domain_def["title"],
+                "label": domain_def.get("label", domain_def["title"]),
+                "icon": domain_def.get("icon", domain_def["title"]),
+                "sql": sql_query,
+                "columns": visible_cols,
+                "rows": converted,
+                "row_count": len(records),
+                "total_full_count": total_full_count,
+                "total_full_money": total_full_money,
+                "raw_records": raw_recs,
+                "error": None
+            }
+        except Exception as e:
+            logger.warning("Eksekusi sub-domain %s gagal: %s", domain_def["id"], e)
+            return _baris_gagal(domain_def, sql_query, str(e))
+
+
 
 
 async def deteksi_topik_riwayat_percakapan(core_pool, conversation_id: int | None) -> str | None:
@@ -917,9 +1075,10 @@ async def evaluasi_state_percakapan(core_pool, conversation_id: int | None, ques
                 proposal["accepted_action"] = chosen_item
                 assistant_data["pending_proposal"] = proposal
                 await core_pool.execute(
-                    "UPDATE messages SET content = $1 WHERE id = $2",
+                    "UPDATE messages SET content = $1 WHERE id = $2 "
+                    "AND conversation_id = $3",
                     json.dumps(assistant_data, default=str),
-                    row["id"]
+                    row["id"], conversation_id
                 )
             except Exception as e_upd:
                 logger.debug("Gagal update status pending_proposal di DB: %s", e_upd)
@@ -1043,6 +1202,16 @@ def _periksa_integritas_output_percakapan(text: str) -> tuple[bool, str]:
     return is_valid, cleaned_text
 
 
+# Penanda rincian intra-tahun: bila muncul bersama SATU tahun saja,
+# pertanyaan adalah tren/rincian dalam tahun itu — bukan komparasi antar-tahun.
+_GRANULARITAS_SUBTAHUN = re.compile(
+    r"\b(?:per\s+bulan|bulanan|per\s+minggu|mingguan|per\s+hari|harian|"
+    r"per\s+quarter|kuartalan|per\s+semester|semesteran|per\s+cabang|"
+    r"per\s+tipe|per\s+model|per\s+sales|per\s+wilayah)\b",
+    re.IGNORECASE,
+)
+
+
 def _deteksi_kueri_komparasi_periode(question: str, inherited_topic: str | None = None) -> dict | None:
     """Deteksi kueri perbandingan antar periode (misal: 2024 vs 2025 atau 2020 vs 2021 vs 2022)."""
     q_lower = (question or "").lower()
@@ -1079,6 +1248,13 @@ def _deteksi_kueri_komparasi_periode(question: str, inherited_topic: str | None 
             "suggestions": saran_list
         }
     elif is_vs and len(unique_years) == 1:
+        # Jangan mengarang tahun pembanding bila user meminta rincian
+        # INTRA-tahun (mis. "tren per bulan tahun 2025", "per cabang",
+        # "per tipe"): itu tren/rincian dalam satu periode, BUKAN komparasi
+        # antar-tahun. Insiden live: "Bandingkan tren ... per bulan 2025"
+        # dijawab komparasi 2024-vs-2025 yang tidak diminta.
+        if _GRANULARITAS_SUBTAHUN.search(q_lower):
+            return None
         p1 = unique_years[0]
         p_prev = str(int(p1) - 1)
         return {
@@ -2237,18 +2413,240 @@ async def tangani_kueri_eksplanatori(
     return response
 
 
+
+async def pisahkan_intent_llm(question, llm_call_fn, ai_config):
+    """Fallback intent-LLM: regex hanya cocok 1 entitas padahal ada konjungsi.
+
+    Hanya dipanggil bila jalur regex mengembalikan None. Satu panggilan LLM,
+    JSON ketat, kunci entitas divalidasi. Gagal apa pun -> None (jalur
+    normal tunggal, tanpa latensi tambahan bila tidak kepicu).
+    """
+    from app.services.fanout_engine import _ekstrak_dua_periode
+    try:
+        from app.services.fanout_engine import _ekstrak_dua_periode, POLA_KONJUNGSI
+        teks = (question or "").strip()
+        if _ekstrak_dua_periode(question) is not None:
+            return None  # komparasi/rincian periode: bukan ranah ini
+        if len(teks) < 20:
+            return None
+        if not re.search(POLA_KONJUNGSI, teks.lower()):
+            return None
+        if cocokkan_entitas_per_bagian(question):
+            return None  # regex sudah melihat petunjuk; bukan ranah fallback
+        kunci = ", ".join(sorted(ENTITY_TAXONOMY.keys()))
+        prompt = (
+            "Pertanyaan user dealer mobil mungkin berisi beberapa permintaan "
+            "laporan. Kunci entitas valid: " + kunci + ".\n"
+            "Pecah jadi daftar permintaan, tiap item {\"topik\": <salah satu kunci>, "
+            "\"fokus\": <frasa permintaan>}. Abaikan basa-basi. "
+            "Balas HANYA JSON: {\"permintaan\": [...]}.\n"
+            'Pertanyaan: "' + (question or "")[:500] + '"'
+        )
+        system_msg = (
+            "You split user questions into report requests. "
+            "Respond ONLY with JSON, no other text."
+        )
+        import json as _json
+        raw = await llm_call_fn(system_msg, prompt, ai_config)
+        m = re.search(r"(\{[\s\S]*\})", raw or "")
+        if not m:
+            return None
+        data = _json.loads(m.group(1))
+        permintaan = []
+        for item in (data.get("permintaan") or [])[:6]:
+            if not isinstance(item, dict):
+                continue
+            topik = str(item.get("topik") or "").strip().lower()
+            if topik in ENTITY_TAXONOMY:
+                permintaan.append((str(item.get("fokus") or ""), topik))
+        domains = bangun_domain_dari_entitas(permintaan)
+        if len(domains) < 2:
+            return None
+        return {
+            "category": "multi_request",
+            "mode": "dynamic_multi_llm",
+            "domains": domains,
+        }
+    except Exception as e:
+        logger.warning("intent-LLM fallback gagal: %s", e)
+        return None
+
+
+
+async def _lapor(lapor, jenis: str, **data) -> None:
+    """Kirim event progres ke callback SSE (diabaikan bila None).
+
+    Adaptif: pesan status mengikuti jalur aktual (obrolan vs data vs
+    multi-tab) sehingga UI tak pernah menampilkan status query basi
+    saat AI hanya diajak mengobrol.
+    """
+    if lapor is None:
+        return
+    try:
+        await lapor({"jenis": jenis, **data})
+    except Exception:
+        pass
+
+
+
+_TABEL_RUMUS = (
+    "untt_penjualan", "untt_pesanankendaraan", "untt_datakendaraan",
+    "srvt_wo", "srvt_faktur", "srvt_stockparts", "srvt_stockbahan",
+    "srv_vw_daftarumurpiutang", "srv_vw_daftarumurhutang",
+)
+
+
+async def konteks_presentasi(core_pool, question: str, sql: str) -> dict:
+    """Bangun {gema_filter, catatan_rumus} untuk kartu jawaban.
+
+    - gema_filter: periode & cabang yang terbaca dari pertanyaan
+      ("Periode: 2025 · Cabang: semua").
+    - catatan_rumus: ≤2 definisi KB (sumber dashboard-excel) yang tabelnya
+      dipakai SQL final — footnote anti-karang.
+    Murni observasi (SELECT 1x ringan + regex); gagal -> default aman.
+    """
+    q = (question or "")
+    tahun = sorted(set(re.findall(r"\b(20\d{2})\b", q)))
+    kode = sorted(set(re.findall(r"\b(\d{3})\b", q)))
+    gema = "%s · cabang %s" % (
+        ", ".join(tahun) if tahun else "semua periode",
+        ", ".join(kode) if kode else "semua")
+    rumus = []
+    try:
+        sql_bawah = (sql or "").lower()
+        tabel_dipakai = [t for t in _TABEL_RUMUS if t in sql_bawah]
+        if tabel_dipakai and core_pool is not None:
+            rows = await core_pool.fetch(
+                "SELECT content FROM global_knowledge_base "
+                "WHERE kind = 'text' AND external_id LIKE 'manual\\_%' "
+                "ESCAPE '\\' AND content ILIKE '%maps to%' LIMIT 40")
+            nilai = []
+            for r in rows:
+                isi = r["content"] or ""
+                disebut = {t for t in _TABEL_RUMUS if t in isi.lower()}
+                # Grounded: footnote hanya bila SEMUA tabel yang disebut
+                # definisi itu dipakai SQL (bukan sekadar irisan).
+                if disebut and disebut <= set(tabel_dipakai):
+                    nilai.append((len(disebut), isi.strip()))
+            nilai.sort(key=lambda x: -x[0])
+            bersih = []
+            for _, isi in nilai[:2]:
+                # Kupas jargon internal "istilah maps to" agar ramah user.
+                if " maps to " in isi:
+                    isi = isi.split(" maps to ", 1)[1].strip()
+                bersih.append(isi[:300])
+            rumus = bersih
+    except Exception as e:
+        logger.warning("konteks_presentasi gagal: %s", e)
+    return {"gema_filter": gema, "catatan_rumus": rumus}
+
+
+_LINII_DIKELUARKAN = (
+    "unit", "mobil", "motor", "kendaraan", "servis", "service", "bengkel",
+    "jasa", "part", "sparepart", "suku", "aksesoris", "leasing", "tunai",
+    "kredit", "cabang", "tipe", "model", "bulan", "bulanan", "tren", "trend",
+    "grafik",
+)
+
+
+def _deteksi_revenue_dealer(question: str) -> str | None:
+    """'total revenue dealer TAHUN' tanpa qualifier lini -> 'YYYY'.
+
+    Aturan KB terkunci: revenue tanpa qualifier = breakdown 3 lini, bukan
+    tebakan satu lini. Kembalikan None bila ada qualifier dimensi/lini
+    (jalur normal/komparasi yang mengurus) atau tahun tidak tepat satu.
+    """
+    q = (question or "").lower()
+    if not re.search(r"\b(?:total\s+)?revenue\b", q):
+        return None
+    if any(w in q for w in _LINII_DIKELUARKAN):
+        return None
+    tahun = re.findall(r"\b(20\d{2})\b", q)
+    if len(tahun) != 1:
+        return None
+    return tahun[0]
+
+
+def susun_kueri_revenue_dealer(tahun: str,
+                               allowed_tables=None) -> str | None:
+    """UNION 3 lini untuk satu tahun (unit + servis + parts, non-batal).
+
+    Angka terverifikasi 2025: 69,825M + 14,650M + 42,175M (hjaccessories=0
+    sehingga penjumlahan sah; lihat KB 'revenue dealer gabungan').
+    """
+    butuh = {"untt_penjualan", "srvt_faktur", "srvt_wo", "srvt_wodetail"}
+    if allowed_tables is not None:
+        rendah = {t.lower() for t in allowed_tables}
+        if not butuh.issubset(rendah):
+            return None
+    d1, d2 = f"{tahun}-01-01", f"{int(tahun) + 1}-01-01"
+    return (
+        "SELECT 'unit' AS lini, count(*) AS volume, "
+        "coalesce(sum(hjakhir), 0) AS revenue FROM untt_penjualan "
+        f"WHERE tanggal >= '{d1}' AND tanggal < '{d2}' "
+        "AND NOT coalesce(batal, false) UNION ALL "
+        "SELECT 'servis' AS lini, count(*) AS volume, "
+        "coalesce(sum(grandtotal), 0) AS revenue FROM srvt_faktur "
+        f"WHERE tanggal >= '{d1}' AND tanggal < '{d2}' "
+        "AND NOT coalesce(batal, false) UNION ALL "
+        "SELECT 'parts' AS lini, count(*) AS volume, "
+        "coalesce(sum(d.part), 0) AS revenue FROM srvt_wodetail d "
+        "JOIN srvt_wo w ON d.nomor_wo = w.nomor "
+        f"WHERE w.tanggal >= '{d1}' AND w.tanggal < '{d2}' "
+        "AND NOT coalesce(w.batal, false)")
+
+
+async def _conversation_milik_user(core_pool, conversation_id, user_id,
+                                   branch_code):
+    """Validasi kepemilikan conversation (K2 anti-IDOR, single choke-point).
+
+    Returns conversation_id bila milik (user_id, branch_code), else None
+    (diperlakukan sebagai sesi baru — netral, bukan error). Falsy (None/0)
+    langsung None tanpa query. Upaya baca ID asing dicatat warning.
+    Semua helper baca riwayat menerima conversation_id yang sudah tervalidasi
+    dari titik ini, sehingga 7 titik baca + write proposal tertutup sekaligus.
+    """
+    if not conversation_id:
+        return None
+    try:
+        valid = await core_pool.fetchval(
+            "SELECT id FROM conversations "
+            "WHERE id = $1 AND user_id = $2 AND branch_code = $3",
+            conversation_id, user_id, branch_code)
+    except Exception:
+        return None
+    if valid is None:
+        logger.warning(
+            "conversation_id asing ditolak: user=%s branch=%s conv=%s",
+            user_id, branch_code, conversation_id)
+        return None
+    return valid
+
+
 async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                               question: str, branch_code: str,
                               llm_call_fn=None,
                               conversation_id: int | None = None,
-                              inherited_topic: str | None = None) -> dict:
-    """Eksekusi kueri menggunakan Mode Vanna murni."""
+                              inherited_topic: str | None = None,
+                              lapor=None) -> dict:
+    """Eksekusi kueri menggunakan Mode Vanna murni.
+
+    lapor: async callable opsional menerima dict event progres untuk
+    endpoint streaming (None = perilaku lama, tanpa overhead).
+    """
     t0 = time.monotonic()
     user_id = user["user_id"]
+    await _lapor(lapor, "status", tahap="mulai",
+                 pesan="Memahami pertanyaan…")
 
     try:
         tenant = await resolve_tenant(core_pool, branch_code)
         tenant_id = tenant.get("tenant_id") or tenant.get("id")
+
+        # K2: validasi kepemilikan sesi SEKALI di sini; seluruh helper
+        # downstream menerima conversation_id yang sudah tervalidasi.
+        conversation_id = await _conversation_milik_user(
+            core_pool, conversation_id, user_id, branch_code)
 
         ai_config = None
         try:
@@ -2506,8 +2904,8 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
         entri_memori = await core_pool.fetchrow(
             "SELECT id, sql, ringkasan, status FROM sql_memory "
             "WHERE tenant_id = $1 AND pertanyaan_ternormalisasi = $2 "
-            "  AND status IN ('approved', 'pending') "
-            "ORDER BY (CASE WHEN status = 'approved' THEN 0 ELSE 1 END), times_used DESC, id DESC "
+            "  AND status = 'approved' "
+            "ORDER BY times_used DESC, id DESC "
             "LIMIT 1",
             tenant_id, q_norm
         )
@@ -2530,14 +2928,18 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
             if not topic_mismatch:
                 try:
                     pool_tenant = await tenant_pool_manager.get_pool(tenant)
-                    async with pool_tenant.acquire() as conn:
-                        await conn.execute("SET statement_timeout = '30000'")
-                        db_rows = await conn.fetch(sql_mem)
-
-                    durasi_ms = int((time.monotonic() - t0) * 1000)
-                    columns = [k for k in db_rows[0].keys()] if db_rows else []
-                    rows = [[_konversi_nilai_vanna(v) for v in r.values()] for r in db_rows[:500]]
-                    raw_ringkasan = _format_ringkasan_otomatis(db_rows[:500], columns, question)
+                    hasil_replay = await _replay_memory_terverifikasi(
+                        core_pool, pool_tenant, tenant,
+                        entri_memori["id"], sql_mem)
+                    if hasil_replay is None:
+                        raise _ReplayMemoryMiss()
+                    columns = list(hasil_replay.get("columns") or [])
+                    rows = [[_konversi_nilai_vanna(v) for v in r]
+                            for r in (hasil_replay.get("rows") or [])]
+                    row_count = hasil_replay.get("row_count", len(rows))
+                    truncated = bool(hasil_replay.get("truncated", False))
+                    durasi_ms = hasil_replay.get("duration_ms", 0)
+                    raw_ringkasan = _format_ringkasan_otomatis(rows, columns, question)
                     ringkasan = _bersihkan_emoji_teks(raw_ringkasan)
 
                     try:
@@ -2549,15 +2951,18 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                     saran_list = comp_info.get("suggestions", []) if comp_info else []
                     is_comp = bool(comp_info)
 
+                    konteks = await konteks_presentasi(
+                        core_pool, question, sql_mem)
                     response = {
                         "source": "memory",
                         "confidence": "A",
+                        "konteks_presentasi": konteks,
                         "sql": sql_mem,
                         "params": [],
                         "columns": columns,
                         "rows": rows,
-                        "row_count": len(rows),
-                        "truncated": len(db_rows) > 500,
+                        "row_count": row_count,
+                        "truncated": truncated,
                         "duration_ms": durasi_ms,
                         "memory_id": entri_memori["id"],
                         "question": question,
@@ -2599,7 +3004,21 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
 
         # 0.4. Cek Kueri Rincian Terpisah (Gaya 2) atau Kueri Multi-Laporan Dinamis
         fanout_info = cek_apakah_minta_rincian_terpisah(question, inherited_topic=inherited_topic, allowed_tables=allowed_tables) or cek_apakah_minta_multi_query(question)
+        if not fanout_info:
+            # Fallback intent-LLM: regex buta bahasa santai ("kasih tau X sama Y").
+            # Hanya bila ada konjungsi + tepat 1 entitas regex; gagal -> None.
+            try:
+                _ai_cfg_fb = await resolve_ai_config(core_pool, user.get("username", ""), branch_code)
+                fanout_info = await pisahkan_intent_llm(
+                    question, llm_call_fn or panggil_llm_default, _ai_cfg_fb)
+            except Exception as e_fb:
+                logger.warning("intent-LLM dilewati: %s", e_fb)
+                fanout_info = None
         if fanout_info:
+            await _lapor(
+                lapor, "status", tahap="rute", mode="multi",
+                jumlah=len(fanout_info.get("domains", [])),
+                pesan="Menyiapkan %d laporan…" % len(fanout_info.get("domains", [])))
             ai_config = await resolve_ai_config(core_pool, user.get("username", ""), branch_code)
             async with VANNA_SEMAPHORE:
                 if all("sql" in d and d["sql"] for d in fanout_info["domains"]):
@@ -2616,83 +3035,26 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
 
                 pool_tenant = await tenant_pool_manager.get_pool(tenant)
 
-                async def _eksekusi_subdomain(domain_def: dict, sql_query: str):
-                    if not sql_query:
-                        return {
-                            "id": domain_def["id"],
-                            "title": domain_def["title"],
-                            "icon": domain_def["icon"],
-                            "sql": "-- Kueri tidak dihasilkan",
-                            "columns": [],
-                            "rows": [],
-                            "row_count": 0,
-                            "raw_records": [],
-                            "error": "Kueri tidak dihasilkan"
-                        }
-                    async with pool_tenant.acquire() as conn:
-                        await conn.execute("SET statement_timeout = '15000'")
-                        try:
-                            records = await conn.fetch(sql_query)
-                            hidden_cols = {"total_transaksi_tahun", "total_omzet_tahun"}
-                            total_full_count = None
-                            total_full_money = None
+                async def _eksekusi_subdomain(domain_def, sql_query):
+                    return await eksekusi_subdomain_fanout(
+                        pool_tenant, domain_def, sql_query)
 
-                            if records:
-                                first_rec = records[0]
-                                if "total_transaksi_tahun" in first_rec and first_rec["total_transaksi_tahun"] is not None:
-                                    try:
-                                        total_full_count = int(first_rec["total_transaksi_tahun"])
-                                    except (ValueError, TypeError):
-                                        pass
-                                if "total_omzet_tahun" in first_rec and first_rec["total_omzet_tahun"] is not None:
-                                    try:
-                                        total_full_money = float(first_rec["total_omzet_tahun"])
-                                    except (ValueError, TypeError):
-                                        pass
-                                raw_keys = list(first_rec.keys())
-                                visible_cols = [c for c in raw_keys if c not in hidden_cols]
-                            else:
-                                visible_cols = []
-
-                            converted = [[_konversi_nilai_vanna(r[c]) for c in visible_cols] for r in records[:500]]
-                            raw_recs = [{c: r[c] for c in visible_cols} for r in records]
-
-                            return {
-                                "id": domain_def["id"],
-                                "title": domain_def["title"],
-                                "label": domain_def["title"],
-                                "icon": domain_def["icon"],
-                                "sql": sql_query,
-                                "columns": visible_cols,
-                                "rows": converted,
-                                "row_count": len(records),
-                                "total_full_count": total_full_count,
-                                "total_full_money": total_full_money,
-                                "raw_records": raw_recs,
-                                "error": None
-                            }
-                        except Exception as e:
-                            logger.warning("Eksekusi sub-domain %s gagal: %s", domain_def["id"], e)
-                            return {
-                                "id": domain_def["id"],
-                                "title": domain_def["title"],
-                                "label": domain_def["title"],
-                                "icon": domain_def["icon"],
-                                "sql": sql_query,
-                                "columns": [],
-                                "rows": [],
-                                "row_count": 0,
-                                "total_full_count": None,
-                                "total_full_money": None,
-                                "raw_records": [],
-                                "error": str(e)
-                            }
-
-                tasks = [
+                urutan = [d["id"] for d in fanout_info["domains"]]
+                await _lapor(lapor, "status", tahap="query",
+                             pesan="Menjalankan query…")
+                tab_hasil = {}
+                for tugas in asyncio.as_completed([
                     _eksekusi_subdomain(d, sql_dict.get(d["id"], ""))
                     for d in fanout_info["domains"]
-                ]
-                tab_results = await asyncio.gather(*tasks)
+                ]):
+                    satu = await tugas
+                    tab_hasil[satu["id"]] = satu
+                    await _lapor(
+                        lapor, "tab", id=satu["id"],
+                        judul=satu.get("title", ""),
+                        baris=satu.get("row_count", 0),
+                        galat=satu.get("error"))
+                tab_results = [tab_hasil[i] for i in urutan if i in tab_hasil]
 
                 # Filter hanya tab yang memiliki data nyata (>0 baris)
                 tabs_with_data = [t for t in tab_results if (t.get("row_count") or len(t.get("rows") or [])) > 0]
@@ -2757,10 +3119,13 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                         if len(saran_list) >= 3:
                             break
 
+                konteks = await konteks_presentasi(
+                    core_pool, question, default_tab["sql"])
                 response = {
                     "source": "vanna",
                     "confidence": "A",
                     "question": question,
+                    "konteks_presentasi": konteks,
                     "is_multi_tab": has_multiple_tabs,
                     "tabs": active_tabs,
                     "sql": default_tab["sql"],
@@ -2862,11 +3227,21 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
         async with VANNA_SEMAPHORE:
             panggil_fn = llm_call_fn or panggil_llm_default
 
+
             # 0.6. Cek Komparasi Temporal Deterministik (0 Halusinasi, 0 Token LLM)
             comp_info = _deteksi_kueri_komparasi_periode(question, inherited_topic=inherited_topic)
             deterministic_comp_sql = susun_kueri_komparasi_deterministik(comp_info, question, allowed_tables=allowed_tables) if comp_info else None
 
-            if deterministic_comp_sql:
+            tahun_rev = _deteksi_revenue_dealer(question)
+            sql_revenue = (susun_kueri_revenue_dealer(
+                tahun_rev, allowed_tables=allowed_tables)
+                if tahun_rev else None)
+            if sql_revenue:
+                sql = sql_revenue
+                is_sql = True
+                has_from_table = True
+                logger.info("Menggunakan SQL Revenue Dealer Deterministik (0 Token)")
+            elif deterministic_comp_sql:
                 sql = deterministic_comp_sql
                 is_sql = True
                 has_from_table = True
@@ -2961,6 +3336,8 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
                 )
                 return response
 
+            await _lapor(lapor, "status", tahap="query",
+                         pesan="Menjalankan query…")
             # 5. Eksekusi ke Database Tenant (Timeout 15 detik + 1x Auto Self-Repair)
             db_rows = None
             pool_tenant = await tenant_pool_manager.get_pool(tenant)
@@ -3009,6 +3386,8 @@ Return ONLY the corrected SQL query in ```sql ... ``` code block."""
             tenant_narration = tenant.get("auto_narration", False)
             is_auto_narration = user_narration if user_narration is not None else tenant_narration
             
+            await _lapor(lapor, "status", tahap="ringkasan",
+                         pesan="Menyusun ringkasan…")
             if is_auto_narration and rows:
                 # Mode Eksekutif: LLM membuat narasi analitik
                 try:
@@ -3033,9 +3412,11 @@ Berikan ringkasan naratif eksekutif singkat (2-3 kalimat) dalam bahasa Indonesia
             saran_list = comp_info.get("suggestions", []) if comp_info else []
             is_comp = bool(comp_info)
 
+            konteks = await konteks_presentasi(core_pool, question, sql)
             response = {
                 "source": "vanna",
                 "confidence": "A",
+                "konteks_presentasi": konteks,
                 "sql": sql,
                 "params": [],
                 "columns": columns,
@@ -3076,10 +3457,16 @@ Berikan ringkasan naratif eksekutif singkat (2-3 kalimat) dalam bahasa Indonesia
         )
         if not is_elliptical and not response.get("is_multi_tab") and not is_conversational_or_meta:
             try:
+                # QA2-01: jawaban baru SELALU 'pending' (bukan 'approved').
+                # Alasan: auto-approve membuat jawaban salah diabadikan
+                # (tombol "Jawaban salah" menolak menurunkan approved +
+                # tidak ada tool hapus). Replay tetap jalan untuk pending,
+                # jadi penghematan token tidak berubah; bedanya jawaban
+                # salah kini bisa di-reject, yang benar di-confirm.
                 mem_id = await core_pool.fetchval(
                     """
                     INSERT INTO sql_memory (tenant_id, pertanyaan_ternormalisasi, sql, status, ringkasan, sumber, times_used, last_used, created_at, updated_at)
-                    VALUES ($1, $2, $3, 'approved', $4, 'vanna', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    VALUES ($1, $2, $3, 'pending', $4, 'vanna', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     RETURNING id
                     """,
                     tenant_id, q_norm, sql, ringkasan
