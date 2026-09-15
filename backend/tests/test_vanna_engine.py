@@ -112,7 +112,14 @@ async def test_jalankan_mode_vanna_mock():
     
     with patch("app.services.vanna_engine.resolve_tenant", return_value={"tenant_id": 1, "branch_code": "TST_01", "schema_config_json": {"tables": {"untt_penjualan": {"columns": [{"name": "tahun"}, {"name": "total"}]}}}}), \
          patch("app.services.vanna_engine.resolve_ai_config", return_value={"model": "test-model"}), \
-         patch("app.services.vanna_engine.ambil_konteks_vanna", return_value=("ctx", [])):
+         patch("app.services.vanna_engine.ambil_konteks_vanna", return_value=("ctx", [])), \
+         patch("app.services.vanna_engine.muat_kb_gabungan", return_value={"tabel_dilarang": []}), \
+         patch("app.services.vanna_engine.verify_and_execute", return_value={
+             "verdict": {"ok": True, "gate": None, "reason": "lolos",
+                         "detail": {"final_sql": "SELECT tahun, total FROM vw_pembelian",
+                                    "tabel_direferensikan": ["vw_pembelian"]}},
+             "result": {"columns": ["tahun", "total"], "rows": [[2025, 1000]],
+                        "row_count": 1, "duration_ms": 5, "truncated": False}}):
         
         async def fake_llm(sys, usr, cfg):
             return "```sql\nSELECT tahun, total FROM vw_pembelian;\n```"
@@ -328,6 +335,15 @@ async def test_k2_guard_kepemilikan_conversation():
 
 @pytest.mark.anyio
 async def test_jalankan_mode_vanna_fanout_3s():
+    async def _verify_fanout_ok(pool, sql, sc, **kw):
+        cols = ["total_unit", "omzet"] if "untt_penjualan" in sql else ["total_pkb", "pendapatan"]
+        vals = [350, 69825000000] if "untt_penjualan" in sql else [13, 14650000]
+        return {
+            "verdict": {"ok": True, "gate": None, "reason": "lolos",
+                        "detail": {"final_sql": sql, "tabel_direferensikan": []}},
+            "result": {"columns": cols, "rows": [vals],
+                       "row_count": 1, "duration_ms": 5, "truncated": False}}
+
     fake_core_pool = AsyncMock()
     fake_core_pool.fetchrow = AsyncMock(return_value=None)
     fake_core_pool.fetchval = AsyncMock(return_value=123)
@@ -359,7 +375,9 @@ async def test_jalankan_mode_vanna_fanout_3s():
 
     with patch("app.services.vanna_engine.resolve_tenant", return_value={"tenant_id": 1, "branch_code": "TST_01", "schema_config_json": {"tables": {"untt_penjualan": {"columns": [{"name": "tahun"}, {"name": "total"}]}}}}), \
          patch("app.services.vanna_engine.resolve_ai_config", return_value={}), \
-         patch("app.services.vanna_engine.ambil_konteks_vanna", return_value=("Context...", [])):
+         patch("app.services.vanna_engine.ambil_konteks_vanna", return_value=("Context...", [])), \
+         patch("app.services.vanna_engine.muat_kb_gabungan", return_value={"tabel_dilarang": []}), \
+         patch("app.services.vanna_engine.verify_and_execute", new=AsyncMock(side_effect=_verify_fanout_ok)):
         res = await jalankan_mode_vanna(
             fake_core_pool, fake_tpm, user, "tampilkan penjualan mobil dan servis bengkel", "TST_01",
             llm_call_fn=mock_llm
@@ -371,6 +389,109 @@ async def test_jalankan_mode_vanna_fanout_3s():
         assert res["tabs"][1]["id"] == "sub_servis"
         assert "Unit Kendaraan" in res["ringkasan"] or "Penjualan" in res["ringkasan"]
         assert "Jasa Servis Bengkel" in res["ringkasan"] or "Servis" in res["ringkasan"]
+
+
+@pytest.mark.anyio
+async def test_single_llm_pg_sleep_diblokir_tanpa_eksekusi():
+    """Fase B: SQL LLM berbahaya -> verifier menolak -> 1x repair (tetap
+    jahat) -> SqlGuardError; conn.fetch TIDAK PERNAH dipanggil."""
+    import pytest as _pt
+    from app.services.sql_guard import SqlGuardError
+
+    fake_core_pool = AsyncMock()
+    fake_core_pool.fetchrow = AsyncMock(return_value=None)
+    fake_core_pool.fetch = AsyncMock(return_value=[])
+    fake_core_pool.execute = AsyncMock()
+
+    fake_tpm = AsyncMock()
+    fake_conn = AsyncMock()
+    fake_conn.execute = AsyncMock()
+    fake_conn.fetch = AsyncMock(return_value=[{"a": 1}])
+    fake_pool_tenant = MagicMock()
+    fake_pool_tenant.acquire.return_value = _AsyncContextManager(fake_conn)
+    fake_tpm.get_pool = AsyncMock(return_value=fake_pool_tenant)
+
+    user = {"user_id": 1, "username": "testuser"}
+    with patch("app.services.vanna_engine.resolve_tenant", return_value={"tenant_id": 1, "branch_code": "TST_01", "schema_config_json": {"tables": {"untt_penjualan": {"columns": [{"name": "tahun"}]}}}}), \
+         patch("app.services.vanna_engine.resolve_ai_config", return_value={"model": "test-model"}), \
+         patch("app.services.vanna_engine.ambil_konteks_vanna", return_value=("ctx", [])), \
+         patch("app.services.vanna_engine.verify_and_execute", return_value={
+             "verdict": {"ok": False, "gate": "profil", "reason": "fungsi dilarang"}, "result": None}), \
+         patch("app.services.vanna_engine.muat_kb_gabungan", return_value={"tabel_dilarang": []}), \
+         patch("app.services.vanna_engine._is_explanatory_question", return_value=False), \
+         patch("app.services.vanna_engine._is_conversational_question", return_value=False), \
+         patch("app.services.vanna_engine._is_data_cutoff_question", return_value=None), \
+         patch("app.services.vanna_engine.is_schema_map_question", return_value=False), \
+         patch("app.services.vanna_engine.deteksi_topik_eksplisit", return_value=None), \
+         patch("app.services.vanna_engine.deteksi_topik_riwayat_percakapan", new=AsyncMock(return_value=None)):
+        async def fake_llm(sys, usr, cfg):
+            return "```sql\nSELECT pg_sleep(2) FROM untt_penjualan;\n```"
+        with _pt.raises(SqlGuardError):
+            await jalankan_mode_vanna(
+                fake_core_pool, fake_tpm, user, "tampilkan 5 model mobil terlaris fase b xyz", "TST_01",
+                llm_call_fn=fake_llm)
+        fake_conn.fetch.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_fanout_llm_pg_sleep_diblokir_tanpa_eksekusi():
+    """Fase B: sub-SQL LLM + verifikasi_penuh -> verdict gagal = tab error,
+    conn.fetch tidak tersentuh."""
+    from app.services.vanna_engine import eksekusi_subdomain_fanout
+
+    fake_conn = AsyncMock()
+    fake_conn.fetch = AsyncMock()
+    fake_conn.execute = AsyncMock()
+    fake_pool = MagicMock()
+    fake_pool.acquire.return_value = _AsyncContextManager(fake_conn)
+    dom = {"id": "sub_x", "title": "X", "icon": "Car"}
+    sc = {"tables": {"untt_penjualan": {"columns": [{"name": "tahun"}]}}}
+    with patch("app.services.vanna_engine.verify_and_execute", return_value={
+            "verdict": {"ok": False, "gate": "profil", "reason": "fungsi dilarang"},
+            "result": None}):
+        hasil = await eksekusi_subdomain_fanout(
+            fake_pool, dom, "SELECT pg_sleep(2) FROM untt_penjualan",
+            sc=sc, kb_forbidden=[], verifikasi_penuh=True)
+    assert hasil["error"]
+    assert hasil["rows"] == []
+    fake_conn.fetch.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_single_tanpa_skema_fallback_ast_paritas():
+    """Fase B: tenant tanpa introspeksi skema -> verifier tak bisa menilai ->
+    fallback AST-only (paritas perilaku lama, bukan fail-closed)."""
+    fake_core_pool = AsyncMock()
+    fake_core_pool.fetchrow = AsyncMock(return_value=None)
+    fake_core_pool.fetch = AsyncMock(return_value=[])
+    fake_core_pool.fetchval = AsyncMock(return_value=1)
+    fake_core_pool.execute = AsyncMock()
+
+    fake_tpm = AsyncMock()
+    fake_conn = AsyncMock()
+    fake_conn.execute = AsyncMock()
+    fake_conn.fetch = AsyncMock(return_value=[{"tahun": 2025}])
+    fake_pool_tenant = MagicMock()
+    fake_pool_tenant.acquire.return_value = _AsyncContextManager(fake_conn)
+    fake_tpm.get_pool = AsyncMock(return_value=fake_pool_tenant)
+
+    user = {"user_id": 1, "username": "testuser"}
+    with patch("app.services.vanna_engine.resolve_tenant", return_value={"tenant_id": 1, "branch_code": "TST_01"}), \
+         patch("app.services.vanna_engine.resolve_ai_config", return_value={"model": "test-model"}), \
+         patch("app.services.vanna_engine.ambil_konteks_vanna", return_value=("ctx", [])), \
+         patch("app.services.vanna_engine._is_explanatory_question", return_value=False), \
+         patch("app.services.vanna_engine._is_conversational_question", return_value=False), \
+         patch("app.services.vanna_engine._is_data_cutoff_question", return_value=None), \
+         patch("app.services.vanna_engine.is_schema_map_question", return_value=False), \
+         patch("app.services.vanna_engine.deteksi_topik_eksplisit", return_value=None), \
+         patch("app.services.vanna_engine.deteksi_topik_riwayat_percakapan", new=AsyncMock(return_value=None)):
+        async def fake_llm(sys, usr, cfg):
+            return "```sql\nSELECT tahun FROM untt_penjualan;\n```"
+        res = await jalankan_mode_vanna(
+            fake_core_pool, fake_tpm, user, "tampilkan 5 model mobil terlaris tanpa skema xyz", "TST_01",
+            llm_call_fn=fake_llm)
+        assert res["source"] == "vanna"
+        fake_conn.fetch.assert_called()
 
 
 def test_annual_comparison_anti_inversion():

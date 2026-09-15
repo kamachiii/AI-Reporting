@@ -283,3 +283,20 @@ Suite baseline sebelum PoC: **648 passed**. Semua baris PoC berlabel dan **sudah
 - K2 live: `_conversation_milik_user` → guard asing (user 4 vs conv milik 5) = **`None`** + warning `conversation_id asing ditolak`, guard pemilik = conv ID ✓.
 - Excel: `_sel_teks_aman('=cmd|xx')` → `"'=cmd|xx"` (prefix kutip Tunggal, netral di spreadsheet); `+`, `@` sama; teks normal (`Avanza`) tak tersentuh. Caps rows≤1000/cols≤50 + sanitasi filename teruji via `test_report_exporter.py`.
 - Cleanup: residu `mem 0 / conv 0 / msg 0 / poc-fix 0` (mid #137–138, conv #253–256 dihapus).
+
+### Follow-up 2026-09-15 — Fase B SELESAI via durable fix (profil v2 + enforcement)
+- Diagnosis Fase 1 (live, read-only): introspeksi segar (srvt_wo 132=132, wodetail 15=15, untt_penjualan 98=98); `total_biaya`/`qty` memang TIDAK ADA live → penolakan sampel tepat (verifier benar); DB public punya **0 FK fisik** (ERP legacy) → aturan JOIN-FK menolak semua = kebijakan usang, bukan bug data.
+- Profil v2 (`sql_guard.py`, V1 dibekukan): node `Window`+`RowNumber` diizinkan (read-only analitik, dibatasi LIMIT/budget/EXPLAIN); JOIN menjadi **FK-bila-ada** (skema ber-FK tetap enforced — katalog serangan no-FK-pair tetap ditolak; skema 0-FK fallback ON/USING+anti-CROSS+budget). Katalog serangan dimutakhirkan (Window→positif; JOIN tanpa ON/CROSS tetap negatif).
+- Enforcement provenance-based: SQL LLM (single + fanout + repair) → `verify_and_execute` penuh; builder internal (revenue/komparasi/rincian/splitter) → AST-only (kode tepercaya). Tenant tanpa skema → fallback AST (paritas, bukan fail-closed). Tolak LLM → 1x self-repair dengan alasan verdict → gagal lagi = raise (fleksibel, bukan vonis mati).
+- Bukti: suite **662 passed** (+6: 3 enforcement, 2 FK-bila-ada, net katalog); probe live flagship lolos (revenue cost 45486/3 rows, rincian, komparasi, fanout_mobil) + negatif ditolak (pg_sleep profil v2, DELETE bentuk); PoC live stub-LLM: legit dieksekusi (rows=1), pg_sleep diblokir pasca-repair, revenue E2E 3 baris; residu 0.
+- Sasaran awal: ganti `conn.fetch` AST-only di jalur single-query (`vanna_engine.py:3348/3374`) + fanout (`eksekusi_subdomain_fanout :774`) dengan `verify_and_execute` penuh.
+- Hasil probe verdict live (TST_01, EXPLAIN-only, tanpa eksekusi data):
+  - `revenue_union` (deterministik flagship): `ok=False gate=profil` — JOIN `srvt_wodetail`↔`srvt_wo` tanpa FK.
+  - `rincian_window` (deterministik): `ok=False gate=profil` — Window function di luar profil v1.
+  - `srvt_wo_biasa` (SQL wajar tipikal LLM): `ok=False gate=whitelist` — kolom `total_biaya` ditolak.
+  - `sparepart_join` (tipikal LLM): `ok=False gate=whitelist` — `d.qty` (alias) ditolak.
+  - Negatif benar ditolak: `pg_sleep` (profil), `DELETE` (bentuk).
+  - Lolos: `komparasi_3th` (cost 935/53 rows), `fanout_mobil` (cost 910/1 row).
+- Keputusan: **blanket enforcement DITUNDA**. Alasan: (1) 2 builder deterministik flagship + SQL wajar harian ikut ditolak → regresi availability pasti; (2) nilai-tambah keamanan kecil — koneksi sudah terisolasi per-tenant + AST sudah menutup mutasi/fungsi berbahaya; sisa risiko verifier (whitelist/budget) mayoritas correctness/cost, bukan eksfiltrasi.
+- Prasyarat sebelum enforcement: tuning verifier (profil v2: pola JOIN builder + Window; whitelist: resolusi alias/kolom) + uji false-positive atas traffic nyata.
+- Status AST fail-closed single/fanout: tetap sebagai pertahanan berlaku (bukan lubang terbuka).

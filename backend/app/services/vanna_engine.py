@@ -94,6 +94,26 @@ async def _replay_memory_terverifikasi(core_pool, pool_tenant, tenant,
     return hasil["result"]
 
 
+async def _eksekusi_vanna_terverifikasi(pool_tenant, sql: str, sc: dict,
+                                        kb_forbidden, row_cap: int = 500) -> dict:
+    """Eksekusi SQL BUATAN LLM lewat gerbang penuh (Fase B durable fix).
+
+    SQL builder internal (revenue/komparasi/rincian deterministik, splitter
+    fanout) TIDAK lewat sini — dibentuk kode tepercaya dan dieksekusi jalur
+    AST-only seperti semula (provenance-based trust boundary).
+    Verdict deterministik gagal -> SqlGuardError (fail-closed; pemanggil
+    single-query boleh 1x self-repair, fanout gagal per-tab). Transient
+    (timeout/executor/asyncpg) -> propagasi ke pemanggil apa adanya.
+    """
+    hasil = await verify_and_execute(pool_tenant, sql, sc, params=None,
+                                     kb_forbidden=kb_forbidden, row_cap=row_cap)
+    if not hasil["verdict"]["ok"]:
+        raise SqlGuardError(
+            f"verifier menolak (gate {hasil['verdict'].get('gate')}): "
+            f"{hasil['verdict'].get('reason')}")
+    return hasil["result"]
+
+
 def _bersihkan_emoji_teks(teks: str) -> str:
     """Membersihkan emoji unicode dan simbol piktograf dari teks (Zero Emoji policy)."""
     if not teks:
@@ -754,15 +774,28 @@ def _baris_gagal(domain_def: dict, sql_query: str, pesan: str) -> dict:
     }
 
 
-async def eksekusi_subdomain_fanout(pool_tenant, domain_def: dict, sql_query: str) -> dict:
+async def eksekusi_subdomain_fanout(pool_tenant, domain_def: dict, sql_query: str,
+                                     sc: dict | None = None, kb_forbidden=None,
+                                     verifikasi_penuh: bool = False) -> dict:
     """Eksekusi satu sub-SQL fanout multi-tab (QA1-fanout).
 
     Gerbang validasi read-only WAJIB lolos dulu (fail-closed per tab):
     tanpa ini, SQL buatan LLM pada jalur fanout dieksekusi mentah via
     conn.fetch - tidak seperti jalur single-query.
+    Provenance-based trust (Fase B): SQL splitter deterministik
+    (verifikasi_penuh=False) cukup AST; SQL BUATAN LLM (verifikasi_penuh=True)
+    wajib lewat gerbang penuh via sc + kb_forbidden.
     """
     if not sql_query:
         return _baris_gagal(domain_def, sql_query, "Kueri tidak dihasilkan")
+    if verifikasi_penuh and isinstance(sc, dict) and "tables" in sc:
+        try:
+            hasil_v = await _eksekusi_vanna_terverifikasi(
+                pool_tenant, sql_query, sc, kb_forbidden or [])
+        except SqlGuardError as e:
+            logger.warning("fanout %s ditolak verifier: %s", domain_def["id"], e)
+            return _baris_gagal(domain_def, sql_query, str(e))
+        return _baris_fanout_dari_hasil(hasil_v, domain_def, sql_query)
     try:
         validasi_readonly_ast_vanna(sql_query)
     except SqlGuardError as e:
@@ -813,6 +846,49 @@ async def eksekusi_subdomain_fanout(pool_tenant, domain_def: dict, sql_query: st
         except Exception as e:
             logger.warning("Eksekusi sub-domain %s gagal: %s", domain_def["id"], e)
             return _baris_gagal(domain_def, sql_query, str(e))
+
+
+def _baris_fanout_dari_hasil(hasil_v: dict, domain_def: dict, sql_query: str) -> dict:
+    """Adaptasi result verify_and_execute ke bentuk tab fanout (Fase B).
+
+    Kolom tersembunyi + total penuh dihitung sama seperti jalur Records;
+    nilai sudah dikonversi JSON-aman oleh executor, dinormalisasi ulang via
+    _konversi_nilai_vanna agar paritas Decimal dengan jalur lama.
+    """
+    hidden_cols = {"total_transaksi_tahun", "total_omzet_tahun"}
+    kolom = [c for c in (hasil_v.get("columns") or []) if c not in hidden_cols]
+    idx = {c: i for i, c in enumerate(hasil_v.get("columns") or [])}
+    baris = hasil_v.get("rows") or []
+    total_full_count = None
+    total_full_money = None
+    if baris:
+        r0 = baris[0]
+        if "total_transaksi_tahun" in idx and r0[idx["total_transaksi_tahun"]] is not None:
+            try:
+                total_full_count = int(r0[idx["total_transaksi_tahun"]])
+            except (ValueError, TypeError):
+                pass
+        if "total_omzet_tahun" in idx and r0[idx["total_omzet_tahun"]] is not None:
+            try:
+                total_full_money = float(r0[idx["total_omzet_tahun"]])
+            except (ValueError, TypeError):
+                pass
+    converted = [[_konversi_nilai_vanna(r[idx[c]]) for c in kolom] for r in baris]
+    raw_recs = [{c: r[idx[c]] for c in kolom} for r in baris]
+    return {
+        "id": domain_def["id"],
+        "title": domain_def["title"],
+        "label": domain_def.get("label", domain_def["title"]),
+        "icon": domain_def.get("icon", domain_def["title"]),
+        "sql": sql_query,
+        "columns": kolom,
+        "rows": converted,
+        "row_count": hasil_v.get("row_count", len(baris)),
+        "total_full_count": total_full_count,
+        "total_full_money": total_full_money,
+        "raw_records": raw_recs,
+        "error": None
+    }
 
 
 
@@ -3035,9 +3111,30 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
 
                 pool_tenant = await tenant_pool_manager.get_pool(tenant)
 
+                # Fase B provenance: SQL splitter deterministik (semua domain
+                # membawa sql) = kode tepercaya -> AST-only; SQL dari JSON LLM
+                # = tak tepercaya -> gerbang penuh.
+                sql_deterministik = all(
+                    "sql" in d and d["sql"] for d in fanout_info["domains"])
+                sc_fanout = tenant.get("schema_config_json") or {}
+                if isinstance(sc_fanout, str):
+                    try:
+                        sc_fanout = json.loads(sc_fanout)
+                    except Exception:
+                        sc_fanout = {}
+                try:
+                    kb_fanout = await muat_kb_gabungan(
+                        core_pool, tenant.get("knowledge_base"),
+                        set((sc_fanout.get("tables") or {}).keys()))
+                    kb_forbidden_fanout = kb_fanout.get("tabel_dilarang") or []
+                except Exception:
+                    kb_forbidden_fanout = []
+
                 async def _eksekusi_subdomain(domain_def, sql_query):
                     return await eksekusi_subdomain_fanout(
-                        pool_tenant, domain_def, sql_query)
+                        pool_tenant, domain_def, sql_query,
+                        sc=sc_fanout, kb_forbidden=kb_forbidden_fanout,
+                        verifikasi_penuh=not sql_deterministik)
 
                 urutan = [d["id"] for d in fanout_info["domains"]]
                 await _lapor(lapor, "status", tahap="query",
@@ -3338,48 +3435,97 @@ async def jalankan_mode_vanna(core_pool, tenant_pool_manager, user: dict,
 
             await _lapor(lapor, "status", tahap="query",
                          pesan="Menjalankan query…")
-            # 5. Eksekusi ke Database Tenant (Timeout 15 detik + 1x Auto Self-Repair)
-            db_rows = None
+            # 5. Eksekusi ke Database Tenant (Fase B: gerbang penuh utk SQL LLM
+            #    + 1x Auto Self-Repair; builder internal = kode tepercaya,
+            #    jalur AST-only seperti semula)
+            is_sql_internal = bool(sql_revenue or deterministic_comp_sql)
             pool_tenant = await tenant_pool_manager.get_pool(tenant)
-            async with pool_tenant.acquire() as conn:
-                await conn.execute("SET statement_timeout = '15000'")
+            sc_vanna = tenant.get("schema_config_json") or {}
+            if isinstance(sc_vanna, str):
                 try:
-                    validasi_readonly_ast_vanna(sql)
-                    db_rows = await conn.fetch(sql)
-                except SqlGuardError as sge:
-                    logger.warning("AST SQL Guard memblokir kueri Vanna: %s", sge)
-                    raise
-                except Exception as sql_err:
-                    err_msg = str(sql_err).lower()
-                    if "timeout" in err_msg or "canceling statement" in err_msg:
-                        raise TimeoutError("Kueri membutuhkan waktu kalkulasi terlalu lama (>15 detik). Silakan persempit filter atau rentang waktu kueri Anda.")
-                    
-                    logger.warning("Vanna SQL gagal di percobaan 1: %s. Menjalankan auto-repair...", sql_err)
-                    repair_prompt = f"""You previously generated this SQL:
+                    sc_vanna = json.loads(sc_vanna)
+                except Exception:
+                    sc_vanna = {}
+            # Tenant tanpa introspeksi skema = verifier tak bisa menilai ->
+            # fallback AST-only (paritas perilaku lama, bukan fail-closed).
+            verifier_siap = isinstance(sc_vanna, dict) and "tables" in sc_vanna
+            kb_forbidden_vanna = []
+            if verifier_siap:
+                try:
+                    kb_v = await muat_kb_gabungan(
+                        core_pool, tenant.get("knowledge_base"),
+                        set(sc_vanna.get("tables", {}).keys()))
+                    kb_forbidden_vanna = kb_v.get("tabel_dilarang") or []
+                except Exception:
+                    pass
+            pakai_verifier = verifier_siap and not is_sql_internal
+
+            async def _eksekusi_tunggal(sql_eks):
+                """Eksekusi satu SQL -> (columns, rows, truncated).
+
+                Raises SqlGuardError bila verifikasi/AST menolak (fail-closed),
+                TimeoutError bila statement_timeout, Exception lain = runtime.
+                """
+                if pakai_verifier:
+                    h = await _eksekusi_vanna_terverifikasi(
+                        pool_tenant, sql_eks, sc_vanna, kb_forbidden_vanna)
+                    cols = list(h.get("columns") or [])
+                    rws = [[_konversi_nilai_vanna(v) for v in r]
+                           for r in (h.get("rows") or [])]
+                    return cols, rws, bool(h.get("truncated", False))
+                async with pool_tenant.acquire() as conn:
+                    await conn.execute("SET statement_timeout = '15000'")
+                    validasi_readonly_ast_vanna(sql_eks)
+                    recs = await conn.fetch(sql_eks)
+                    cols = [k for k in recs[0].keys()] if recs else []
+                    rws = [[_konversi_nilai_vanna(v) for v in r.values()]
+                           for r in recs[:500]]
+                    return cols, rws, len(recs) > 500
+
+            async def _perbaiki_otomatis(sql_rusak, galat):
+                """1x self-repair LLM; mengembalikan SQL baru atau raise galat."""
+                logger.warning("Vanna SQL gagal (%s), auto-repair...", galat)
+                repair_prompt = f"""You previously generated this SQL:
 ```sql
-{sql}
+{sql_rusak}
 ```
 When executed on PostgreSQL, it produced the following error:
-{sql_err}
+{galat}
 
 Please fix the query. Note:
 - Use physical tables like untt_penjualan (with column 'tanggal', 'hjakhir', 'batal') or untt_pembelian if views lack the required date columns.
 - Ensure all referenced columns exist in the table.
 Return ONLY the corrected SQL query in ```sql ... ``` code block."""
-                    raw_repair = await panggil_fn(system_msg, repair_prompt, ai_config)
-                    repaired_sql = ekstrak_sql(raw_repair)
-                    if repaired_sql.lower().startswith("select") or repaired_sql.lower().startswith("with"):
-                        validasi_readonly_ast_vanna(repaired_sql)
-                        sql = repaired_sql
-                        db_rows = await conn.fetch(sql)
-                    else:
-                        raise sql_err
+                raw_repair = await panggil_fn(system_msg, repair_prompt, ai_config)
+                repaired_sql = ekstrak_sql(raw_repair)
+                if (repaired_sql.lower().startswith("select")
+                        or repaired_sql.lower().startswith("with")):
+                    return repaired_sql
+                raise galat
+
+            try:
+                columns, rows, truncated = await _eksekusi_tunggal(sql)
+            except SqlGuardError as sge:
+                if is_sql_internal:
+                    # SQL builder internal tak boleh gagal validasi: bug kode.
+                    logger.warning("AST SQL Guard memblokir kueri internal: %s", sge)
+                    raise
+                # SQL LLM ditolak verifier -> 1x repair (fleksibilitas: tolak
+                # bukan vonis mati), gagal lagi -> raise.
+                sql = await _perbaiki_otomatis(sql, sge)
+                columns, rows, truncated = await _eksekusi_tunggal(sql)
+            except Exception as sql_err:
+                err_msg = str(sql_err).lower()
+                if "timeout" in err_msg or "canceling statement" in err_msg:
+                    raise TimeoutError("Kueri membutuhkan waktu kalkulasi terlalu lama (>15 detik). Silakan persempit filter atau rentang waktu kueri Anda.")
+
+                sql = await _perbaiki_otomatis(sql, sql_err)
+                try:
+                    columns, rows, truncated = await _eksekusi_tunggal(sql)
+                except Exception:
+                    raise sql_err
 
             durasi_ms = int((time.monotonic() - t0) * 1000)
-
-            # 6. Format Hasil & Cek Mode Eksekutif vs Operasional
-            columns = [k for k in db_rows[0].keys()] if db_rows else []
-            rows = [[_konversi_nilai_vanna(v) for v in r.values()] for r in db_rows[:500]]
             
             # Cek setting narasi (User override atau Tenant default)
             user_narration = user.get("auto_narration")
@@ -3400,11 +3546,11 @@ Berikan ringkasan naratif eksekutif singkat (2-3 kalimat) dalam bahasa Indonesia
                     allow_explain = False
                 except Exception as e_narr:
                     logger.warning("Gagal membuat narasi eksekutif: %s", e_narr)
-                    ringkasan = _format_ringkasan_otomatis(db_rows[:500], columns, question)
+                    ringkasan = _format_ringkasan_otomatis(rows, columns, question)
                     allow_explain = True
             else:
                 # Mode Operasional: Ringkasan lokal cepat (0 token) + Tombol Jelaskan Lebih Dalam aktif
-                ringkasan = _format_ringkasan_otomatis(db_rows[:500], columns, question)
+                ringkasan = _format_ringkasan_otomatis(rows, columns, question)
                 allow_explain = True
 
             ringkasan = _bersihkan_emoji_teks(ringkasan)
@@ -3422,7 +3568,7 @@ Berikan ringkasan naratif eksekutif singkat (2-3 kalimat) dalam bahasa Indonesia
                 "columns": columns,
                 "rows": rows,
                 "row_count": len(rows),
-                "truncated": len(db_rows) > 500,
+                "truncated": truncated,
                 "duration_ms": durasi_ms,
                 "memory_id": None,
                 "question": question,

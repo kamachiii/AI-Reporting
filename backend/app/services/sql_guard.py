@@ -164,7 +164,7 @@ def validate_readonly_query(sql: str, allowed_tables: set[str]) -> str:
 # atas tetap utuh demi kompatibilitas pemanggil existing.
 # ============================================================================
 
-PROFILE_VERSION = 1
+PROFILE_VERSION = 2
 
 # --- Gerbang 3: profil fitur SQL versioned (docs v2 §9) ---------------------
 # Analogi: whitelist "kosakata" SQL reporting. DEFAULT-DENY: node AST yang
@@ -173,8 +173,25 @@ PROFILE_VERSION = 1
 #
 # SQL_FEATURE_PROFILE_V1: struktur dict publik (untuk introspeksi/audit);
 # implementasi memakai frozenset turunannya di bawah agar cepat.
+#
+# CHANGELOG v1 -> v2 (2026-09-15, Fase B durable fix; bukti probe live TST_01):
+# 1. Node "Window" diizinkan. Alasan: fungsi window (COUNT/SUM/ROW_NUMBER
+#    OVER()) murni analitik read-only atas result set — tidak menambah
+#    kemampuan eksfiltrasi di luar yang sudah diizinkan SELECT; dibatasi
+#    LIMIT 500 + budget + EXPLAIN. Uji: katalog serangan Window dipindah ke
+#    positif; CROSS JOIN / tanpa ON tetap ditolak.
+# 2. Aturan "JOIN wajib lewat peta FK" menjadi FK-BILA-ADA: bila skema
+#    mendeklarasikan NOL foreign key (ERP legacy tanpa constraint FK fisik —
+#    kasus nyata TST_01: 0 FK di skema public), cek konektivitas dilewati
+#    karena tidak punya sinyal (menolak semua = merusak availability tanpa
+#    nilai keamanan). Perlindungan tersisa: ON/USING wajib + CROSS dilarang
+#    + budget join + EXPLAIN cost. Bila skema PUNYA FK, aturan lama berlaku
+#    penuh (katalog serangan no-FK-pair tetap ditolak).
+# V1 dibekukan apa adanya untuk audit (test mengunci version == 1).
 SQL_FEATURE_PROFILE_V1 = {
-    "version": PROFILE_VERSION,
+    # V1 DIBEKUKAN: "version" literal 1 (test mengunci). Jangan pakai
+    # PROFILE_VERSION di sini agar revisi berikut tidak mengubah sejarah.
+    "version": 1,
     # konstruksi struktur query yang boleh muncul di AST
     "node_types": [
         # kerangka statement
@@ -226,10 +243,39 @@ SQL_FEATURE_PROFILE_V1 = {
     ],
 }
 
-_STRUKTUR_WHITELIST = frozenset(SQL_FEATURE_PROFILE_V1["node_types"])
-_FUNGSI_WHITELIST = frozenset(SQL_FEATURE_PROFILE_V1["functions"])
-_FUNGSI_ANONIM_WHITELIST = frozenset(SQL_FEATURE_PROFILE_V1["anonymous_functions"])
-_DENYLIST_FUNGSI = frozenset(SQL_FEATURE_PROFILE_V1["denylist_functions"])
+# --- Profil v2: revisi terkontrol dari v1 (lihat CHANGELOG di atas) ---------
+# V1 dibekukan; implementasi + test berjalan di atas V2.
+SQL_FEATURE_PROFILE_V2 = {
+    "version": 2,
+    "node_types": SQL_FEATURE_PROFILE_V1["node_types"] + [
+        # Analitik read-only atas result set. "Window" = COUNT/SUM/... OVER();
+        # "RowNumber" = ROW_NUMBER() (kelas exp tersendiri di sqlglot, bukan
+        # Anonymous). Fungsi window bernama lain (RANK/LAG/...) tetap deny
+        # sampai ada kebutuhan terbukti — buka satu per satu, jangan borongan.
+        # Dibatasi LIMIT 500 + budget + EXPLAIN; tanpa kemampuan eksfiltrasi
+        # baru di luar SELECT yang sudah diizinkan.
+        "Window", "RowNumber",
+    ],
+    "functions": list(SQL_FEATURE_PROFILE_V1["functions"]),
+    "anonymous_functions": list(SQL_FEATURE_PROFILE_V1["anonymous_functions"]),
+    "denylist_functions": list(SQL_FEATURE_PROFILE_V1["denylist_functions"]),
+    # v2: "JOIN di luar peta FK" + "window function" keluar dari daftar larang;
+    # JOIN tanpa FK ditangani aturan FK-BILA-ADA di _cek_join_fk.
+    "denylist_constructions": [
+        "DDL/DML apa pun", "WITH RECURSIVE", "UNION (dedup, non-ALL)",
+        "CROSS JOIN", "JOIN tanpa ON",
+        "HAVING", "OFFSET", "EXISTS", "set-returning func",
+    ],
+    # Kebijakan JOIN v2: "fk-bila-ada" (lihat _cek_join_fk).
+    "join_policy": "fk-bila-ada",
+}
+
+_ACTIVE_PROFILE = SQL_FEATURE_PROFILE_V2
+
+_STRUKTUR_WHITELIST = frozenset(_ACTIVE_PROFILE["node_types"])
+_FUNGSI_WHITELIST = frozenset(_ACTIVE_PROFILE["functions"])
+_FUNGSI_ANONIM_WHITELIST = frozenset(_ACTIVE_PROFILE["anonymous_functions"])
+_DENYLIST_FUNGSI = frozenset(_ACTIVE_PROFILE["denylist_functions"])
 
 # Node yang dilarang DI POSISI MANA PUN (gerbang #1, defense-in-depth untuk
 # DML yang disembunyikan di dalam CTE, mis. WITH x AS (DELETE ...) SELECT ...).
@@ -752,6 +798,12 @@ def _cek_join_fk(j, ctx: _KonteksSkema) -> str | None:
     if a is None or b is None:
         return None
     if a == b:  # self-join diizinkan
+        return None
+    if not ctx.fk_tabel:
+        # Profil v2 FK-BILA-ADA: skema tanpa constraint FK fisik (ERP legacy)
+        # membuat cek konektivitas tak bersinyal — menolak semua JOIN hanya
+        # merusak availability tanpa nilai keamanan. Perlindungan tersisa:
+        # ON/USING wajib + CROSS dilarang (dicek terpisah) + budget + EXPLAIN.
         return None
     if not ctx.fk_terhubung(a, b):
         return (f"JOIN antara '{a}' dan '{b}' tidak terhubung foreign key "

@@ -13,6 +13,7 @@ try:
         verify_sql,
         DEFAULT_BUDGET,
         SQL_FEATURE_PROFILE_V1,
+        SQL_FEATURE_PROFILE_V2,
     )
     HAS_SQL_GUARD = True
 except ImportError:
@@ -161,6 +162,9 @@ POSITIF_VERIFIER = [
     'SELECT "merek" FROM kendaraan',
     # budget di batas atas: 7 tabel = 6 join (masih <= 6)
     _rantai_join(7),
+    # profil v2: window function analitik read-only diizinkan
+    "SELECT merek, ROW_NUMBER() OVER (ORDER BY tahun) AS rn FROM kendaraan",
+    "SELECT merek, COUNT(*) OVER() AS n FROM kendaraan",
 ]
 
 
@@ -209,8 +213,7 @@ SERANGAN_VERIFIER = [
     ("SELECT merek FROM kendaraan UNION SELECT model FROM kendaraan", G[2]),  # UNION dedup
     ("SELECT * FROM penjualan, detail_penjualan", G[2]),    # join tanpa ON
     ("SELECT * FROM penjualan CROSS JOIN detail_penjualan", G[2]),
-    ("SELECT * FROM penjualan p JOIN service_records s ON s.km = p.id", G[2]),  # di luar peta FK
-    ("SELECT merek, ROW_NUMBER() OVER (ORDER BY tahun) AS rn FROM kendaraan", G[2]),  # window
+    ("SELECT * FROM penjualan p JOIN service_records s ON s.km = p.id", G[2]),  # di luar peta FK (skema ber-FK)
     ("SELECT merek FROM kendaraan WHERE EXISTS (SELECT 1 FROM detail_penjualan)", G[2]),
     ("SELECT merek, COUNT(*) FROM kendaraan GROUP BY merek HAVING COUNT(*) > 5", G[2]),
     ("SELECT merek FROM kendaraan OFFSET 5", G[2]),
@@ -265,10 +268,41 @@ class TestVerifierV2:
 
     def test_profil_versioned_dan_budget_default(self):
         assert SQL_FEATURE_PROFILE_V1["version"] == 1
+        assert SQL_FEATURE_PROFILE_V2["version"] == 2
+        assert "Window" not in SQL_FEATURE_PROFILE_V1["node_types"]
+        assert "Window" in SQL_FEATURE_PROFILE_V2["node_types"]
         assert DEFAULT_BUDGET["kedalaman_ast"] == 12
         assert DEFAULT_BUDGET["jumlah_join"] == 6
         assert DEFAULT_BUDGET["jumlah_cte"] == 4
         assert DEFAULT_BUDGET["jumlah_union"] == 3
+
+    def test_join_fk_bila_ada_skema_tanpa_fk_lolos(self, schema_config_dealer):
+        """Profil v2: skema ERP legacy tanpa constraint FK fisik — JOIN
+        ber-ON lolos (menolak semua = merusak availability tanpa nilai
+        keamanan; ON/USING + anti-CROSS + budget tetap berlaku)."""
+        import copy
+        tanpa_fk = copy.deepcopy(schema_config_dealer)
+        for info in tanpa_fk["tables"].values():
+            info["foreign_keys"] = []
+        sql = ("SELECT p.nama_sales, SUM(d.jumlah) AS total FROM penjualan p "
+               "JOIN detail_penjualan d ON d.penjualan_id = p.id "
+               "GROUP BY p.nama_sales")
+        verdict = verify_sql(sql, tanpa_fk)
+        assert verdict["ok"] is True, verdict
+
+    def test_join_tanpa_on_tetap_ditolak_tanpa_fk(self, schema_config_dealer):
+        """Tanpa FK pun JOIN tanpa ON / CROSS tetap ditolak (profil)."""
+        import copy
+        tanpa_fk = copy.deepcopy(schema_config_dealer)
+        for info in tanpa_fk["tables"].values():
+            info["foreign_keys"] = []
+        for sql in [
+            "SELECT * FROM penjualan, detail_penjualan",
+            "SELECT * FROM penjualan CROSS JOIN detail_penjualan",
+        ]:
+            verdict = verify_sql(sql, tanpa_fk)
+            assert verdict["ok"] is False, sql
+            assert verdict["gate"] == "profil", (sql, verdict)
 
     # ---- bukti default-deny: cetak Verdict per gerbang (lihat dgn -s) ----
     @pytest.mark.parametrize("sql", [
